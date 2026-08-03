@@ -126,4 +126,199 @@ function num(v) {
 }
 
 function parseWorkbook(buffer) {
-  const wb =
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+
+  if (!rows.length) throw new Error('File is empty');
+
+  const header = rows[0].map(h => clean(h).replace(/^\*/, '').toLowerCase());
+  const col = n => header.indexOf(n.toLowerCase());
+
+  const cInv = col('invoiceno');
+  const cCust = col('customer');
+  const cDate = col('invoicedate');
+  const cDue = col('duedate');
+  const cTerms = col('terms');
+  const cMemo = col('memo');
+  const cItem = header.findIndex(h => h.startsWith('item(product'));
+  const cDesc = col('itemdescription');
+  const cQty = col('itemquantity');
+  const cRate = col('itemrate');
+  const cAmt = col('itemamount');
+  const cSvc = col('service date');
+
+  if (cInv < 0 || cItem < 0 || cAmt < 0) {
+    throw new Error('Required columns not found: *InvoiceNo, Item(Product/Service), *ItemAmount');
+  }
+
+  const map = new Map();
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const docNo = clean(r[cInv]);
+    if (!docNo) continue;
+
+    if (!map.has(docNo)) {
+      map.set(docNo, {
+        docNumber: docNo,
+        customer: cCust >= 0 ? clean(r[cCust]) : '',
+        txnDate: cDate >= 0 ? toISODate(r[cDate]) : null,
+        dueDate: cDue >= 0 ? toISODate(r[cDue]) : null,
+        terms: cTerms >= 0 ? clean(r[cTerms]) : '',
+        memo: cMemo >= 0 ? clean(r[cMemo]) : '',
+        lines: []
+      });
+    }
+
+    map.get(docNo).lines.push({
+      item: clean(r[cItem]),
+      desc: cDesc >= 0 ? clean(r[cDesc]) : '',
+      qty: cQty >= 0 ? (num(r[cQty]) || 1) : 1,
+      rate: cRate >= 0 ? num(r[cRate]) : 0,
+      amt: num(r[cAmt]),
+      svc: cSvc >= 0 ? toISODate(r[cSvc]) : null
+    });
+  }
+
+  return Array.from(map.values());
+}
+
+app.post('/api/preview', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const invoices = parseWorkbook(req.file.buffer);
+    const totalLines = invoices.reduce((s, i) => s + i.lines.length, 0);
+    const customers = [...new Set(invoices.map(i => i.customer).filter(Boolean))];
+    res.json({ count: invoices.length, totalLines, customers, invoices });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ==================== Upload (SSE) ====================
+function buildPayload(inv, customerId, itemMap, termMap, negDiscount) {
+  const lines = [];
+
+  for (const L of inv.lines) {
+    const itemId = itemMap[L.item.toLowerCase()];
+    if (!itemId) throw new Error(`Item not found in QuickBooks: "${L.item}"`);
+
+    let amount = L.amt;
+    let rate = L.rate || L.amt;
+    if (negDiscount && /discount/i.test(L.item)) {
+      amount = -Math.abs(amount);
+      rate = -Math.abs(rate);
+    }
+
+    const detail = { ItemRef: { value: itemId }, Qty: L.qty, UnitPrice: rate };
+    if (L.svc) detail.ServiceDate = L.svc;
+
+    const line = { DetailType: 'SalesItemLineDetail', Amount: amount, SalesItemLineDetail: detail };
+    if (L.desc) line.Description = L.desc;
+    lines.push(line);
+  }
+
+  const p = { DocNumber: inv.docNumber, CustomerRef: { value: customerId }, Line: lines };
+  if (inv.txnDate) p.TxnDate = inv.txnDate;
+  if (inv.dueDate) p.DueDate = inv.dueDate;
+  if (inv.memo) p.CustomerMemo = { value: inv.memo };
+
+  const termId = termMap[(inv.terms || '').toLowerCase()];
+  if (termId) p.SalesTermRef = { value: termId };
+
+  return p;
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+app.post('/api/upload', async (req, res) => {
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+
+  const { invoices, delay = 1500, negDiscount = false } = req.body;
+  if (!Array.isArray(invoices) || !invoices.length) {
+    return res.status(400).json({ error: 'No invoices provided' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+  try {
+    send({ type: 'log', msg: 'Connecting to QuickBooks...' });
+    const token = await getAccessToken(realmId);
+
+    send({ type: 'log', msg: 'Loading products...' });
+    const itemMap = await loadItems(realmId, token);
+    send({ type: 'log', msg: `Products loaded: ${Object.keys(itemMap).length}` });
+
+    const termMap = await loadTerms(realmId, token);
+    const custCache = {};
+
+    let done = 0, failed = 0;
+    const failedList = [];
+
+    for (let i = 0; i < invoices.length; i++) {
+      const inv = invoices[i];
+      let success = false, lastErr = '';
+
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          const custId = await getOrCreateCustomer(realmId, token, inv.customer, custCache);
+          const payload = buildPayload(inv, custId, itemMap, termMap, negDiscount);
+          const result = await postInvoice(realmId, token, payload);
+
+          if (result.ok) {
+            send({ type: 'ok', doc: inv.docNumber, id: result.id });
+            await logUpload(realmId, inv.docNumber, 'success', `QB Id ${result.id}`, result.tid);
+            success = true;
+            break;
+          }
+
+          lastErr = `${result.msg} [tid=${result.tid}]`;
+          if (!result.retryable) break;
+
+          send({ type: 'retry', doc: inv.docNumber, attempt, msg: result.msg.slice(0, 100) });
+          await sleep(attempt * 3000);
+
+        } catch (e) {
+          lastErr = e.message;
+          if (/not found in QuickBooks/.test(e.message)) break;
+          send({ type: 'retry', doc: inv.docNumber, attempt, msg: e.message.slice(0, 100) });
+          await sleep(attempt * 3000);
+        }
+      }
+
+      if (success) done++;
+      else {
+        failed++;
+        failedList.push(inv.docNumber);
+        send({ type: 'fail', doc: inv.docNumber, msg: lastErr.slice(0, 250) });
+        await logUpload(realmId, inv.docNumber, 'failed', lastErr, null);
+      }
+
+      send({ type: 'progress', done, failed, total: invoices.length, current: i + 1 });
+      if (i < invoices.length - 1) await sleep(Number(delay));
+    }
+
+    send({ type: 'complete', done, failed, failedList });
+    res.end();
+
+  } catch (err) {
+    send({ type: 'error', msg: err.message });
+    res.end();
+  }
+});
+
+// ==================== Start ====================
+const PORT = process.env.PORT || 3000;
+
+initDb()
+  .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
+  .catch(err => {
+    console.error('DB init failed:', err);
+    process.exit(1);
+  });
