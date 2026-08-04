@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Shopify orders to QuickBooks Online">
+  <rect x="1" y="1" width="94" height="94" rx="24" fill="#FFFFFF" stroke="#D9DEDC" stroke-width="2"/>
+  <circle cx="38" cy="48" r="20" fill="#95BF47"/>
+  <circle cx="58" cy="48" r="20" fill="#2CA01C"/>
+  <path d="M48 35v26" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+</svg>
