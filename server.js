@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import {
   initDb, saveCompany, getCompany, logUpload,
   getNegativeItems, setNegativeItems,
-  getMappings, saveMapping, deleteMapping
+  getMappings, saveMapping
 } from './db.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
@@ -105,7 +105,7 @@ app.post('/auth/disconnect', (req, res) => {
   res.json({ ok: true });
 });
 
-// ==================== Shared helpers ====================
+// ==================== Helpers ====================
 function clean(s) {
   return String(s ?? '').replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '').trim();
 }
@@ -125,7 +125,6 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
-// invoice number normalisation (from the matcher)
 function normInv(v) {
   let s = String(v ?? '').replace(/\u00a0/g, ' ').replace(/[\u200b-\u200d\ufeff]/g, '').trim();
   if (!s) return '';
@@ -138,7 +137,7 @@ function digitsOf(v) {
   return String(v ?? '').replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
 }
 
-// ==================== Excel parsing (QB import format) ====================
+// ==================== Excel preview ====================
 function parseWorkbook(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -222,7 +221,8 @@ app.post('/api/negative-items', async (req, res) => {
   await setNegativeItems(realmId, req.body.items || []);
   res.json({ ok: true });
 });
-// ==================== QB products (for the Convert page) ====================
+
+// ==================== QB products ====================
 app.get('/api/qb-products', async (req, res) => {
   const realmId = req.cookies.realm_id;
   if (!realmId) return res.status(401).json({ error: 'Not connected' });
@@ -266,15 +266,15 @@ app.post('/api/mappings', async (req, res) => {
   try {
     for (const m of list) {
       if (!m.key) continue;
-      if (m.remove) await deleteMapping(realmId, m.key);
-      else await saveMapping(realmId, m.key, m.sku, m.name, m.qbItem, m.skip);
+      await saveMapping(realmId, m.key, m.sku, m.name, m.qbItem, m.skip);
     }
     res.json({ ok: true, saved: list.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
-// ==================== Gap check: QB invoice numbers ====================
+
+// ==================== Gap check ====================
 app.get('/api/qb-invoices', async (req, res) => {
   const realmId = req.cookies.realm_id;
   if (!realmId) return res.status(401).json({ error: 'Not connected' });
@@ -305,7 +305,6 @@ app.get('/api/qb-invoices', async (req, res) => {
   }
 });
 
-// compare QB numbers against a list from Shopify files
 app.post('/api/gap-check', (req, res) => {
   const { qbNumbers = [], shopifyNumbers = [] } = req.body;
 
@@ -338,7 +337,7 @@ app.post('/api/gap-check', (req, res) => {
   });
 });
 
-// ==================== Upload (SSE) ====================
+// ==================== Upload ====================
 function buildPayload(inv, customerId, itemMap, termMap, negSet) {
   const lines = [];
 
