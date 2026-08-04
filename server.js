@@ -6,7 +6,8 @@ import crypto from 'crypto';
 
 import {
   initDb, saveCompany, getCompany, logUpload,
-  getNegativeItems, setNegativeItems
+  getNegativeItems, setNegativeItems,
+  getMappings, saveMapping, deleteMapping
 } from './db.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
@@ -221,7 +222,58 @@ app.post('/api/negative-items', async (req, res) => {
   await setNegativeItems(realmId, req.body.items || []);
   res.json({ ok: true });
 });
+// ==================== QB products (for the Convert page) ====================
+app.get('/api/qb-products', async (req, res) => {
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.status(401).json({ error: 'Not connected' });
 
+  try {
+    const token = await getAccessToken(realmId);
+    const products = [];
+    let start = 1;
+
+    while (true) {
+      const q = await qbQuery(realmId, token,
+        `SELECT Id, Name, Sku, Type, Active FROM Item ` +
+        `STARTPOSITION ${start} MAXRESULTS 1000`);
+      const arr = q.Item || [];
+      arr.forEach(it => {
+        products.push({ id: it.Id, name: it.Name, sku: it.Sku || '', active: it.Active !== false });
+      });
+      if (arr.length < 1000) break;
+      start += 1000;
+      if (start > 20000) break;
+    }
+
+    res.json({ count: products.length, products });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== Item mappings ====================
+app.get('/api/mappings', async (req, res) => {
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  res.json({ mappings: await getMappings(realmId) });
+});
+
+app.post('/api/mappings', async (req, res) => {
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+
+  const list = req.body.mappings || [];
+  try {
+    for (const m of list) {
+      if (!m.key) continue;
+      if (m.remove) await deleteMapping(realmId, m.key);
+      else await saveMapping(realmId, m.key, m.sku, m.name, m.qbItem, m.skip);
+    }
+    res.json({ ok: true, saved: list.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // ==================== Gap check: QB invoice numbers ====================
 app.get('/api/qb-invoices', async (req, res) => {
   const realmId = req.cookies.realm_id;
