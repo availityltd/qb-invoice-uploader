@@ -4,17 +4,20 @@ import cookieParser from 'cookie-parser';
 import XLSX from 'xlsx';
 import crypto from 'crypto';
 
-import { initDb, saveCompany, getCompany, logUpload } from './db.js';
+import {
+  initDb, saveCompany, getCompany, logUpload,
+  getNegativeItems, setNegativeItems
+} from './db.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
-  getOrCreateCustomer, postInvoice
+  getOrCreateCustomer, postInvoice, qbQuery
 } from './qb.js';
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
@@ -45,7 +48,6 @@ app.get('/auth/callback', async (req, res) => {
       return res.status(400).send('Invalid state. Please try connecting again.');
     }
     res.clearCookie('oauth_state');
-
     if (!code || !realmId) return res.status(400).send('Missing code or realmId');
 
     const basic = Buffer.from(
@@ -73,7 +75,6 @@ app.get('/auth/callback', async (req, res) => {
 
     await saveCompany(realmId, null, tokens.refresh_token);
 
-    // Company ka naam le kar save karein
     try {
       const info = await getCompanyInfo(realmId, tokens.access_token);
       await saveCompany(realmId, info.CompanyName, tokens.refresh_token);
@@ -93,10 +94,8 @@ app.get('/auth/callback', async (req, res) => {
 app.get('/auth/status', async (req, res) => {
   const realmId = req.cookies.realm_id;
   if (!realmId) return res.json({ connected: false });
-
   const company = await getCompany(realmId);
   if (!company) return res.json({ connected: false });
-
   res.json({ connected: true, companyName: company.company_name, realmId });
 });
 
@@ -105,7 +104,7 @@ app.post('/auth/disconnect', (req, res) => {
   res.json({ ok: true });
 });
 
-// ==================== Excel parsing ====================
+// ==================== Shared helpers ====================
 function clean(s) {
   return String(s ?? '').replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '').trim();
 }
@@ -125,11 +124,24 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// invoice number normalisation (from the matcher)
+function normInv(v) {
+  let s = String(v ?? '').replace(/\u00a0/g, ' ').replace(/[\u200b-\u200d\ufeff]/g, '').trim();
+  if (!s) return '';
+  s = s.replace(/(\d),(\d)/g, '$1$2').replace(/^(\d+)\.0+$/, '$1');
+  s = s.replace(/^[#\s]+/, '').replace(/\s+/g, ' ').toLowerCase();
+  return s.replace(/^0+(?=[0-9])/, '').replace(/([^0-9])0+([0-9])/g, '$1$2');
+}
+
+function digitsOf(v) {
+  return String(v ?? '').replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
+}
+
+// ==================== Excel parsing (QB import format) ====================
 function parseWorkbook(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
-
   if (!rows.length) throw new Error('File is empty');
 
   const header = rows[0].map(h => clean(h).replace(/^\*/, '').toLowerCase());
@@ -189,14 +201,93 @@ app.post('/api/preview', upload.single('file'), (req, res) => {
     const invoices = parseWorkbook(req.file.buffer);
     const totalLines = invoices.reduce((s, i) => s + i.lines.length, 0);
     const customers = [...new Set(invoices.map(i => i.customer).filter(Boolean))];
-    res.json({ count: invoices.length, totalLines, customers, invoices });
+    const items = [...new Set(invoices.flatMap(i => i.lines.map(l => l.item)).filter(Boolean))].sort();
+    res.json({ count: invoices.length, totalLines, customers, items, invoices });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
 
+// ==================== Negative items ====================
+app.get('/api/negative-items', async (req, res) => {
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  res.json({ items: await getNegativeItems(realmId) });
+});
+
+app.post('/api/negative-items', async (req, res) => {
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  await setNegativeItems(realmId, req.body.items || []);
+  res.json({ ok: true });
+});
+
+// ==================== Gap check: QB invoice numbers ====================
+app.get('/api/qb-invoices', async (req, res) => {
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const numbers = [];
+    let start = 1;
+
+    while (true) {
+      const q = await qbQuery(realmId, token,
+        `SELECT DocNumber, TxnDate FROM Invoice ` +
+        `WHERE TxnDate >= '${from}' AND TxnDate <= '${to}' ` +
+        `STARTPOSITION ${start} MAXRESULTS 1000`);
+      const arr = q.Invoice || [];
+      arr.forEach(inv => { if (inv.DocNumber) numbers.push(inv.DocNumber); });
+      if (arr.length < 1000) break;
+      start += 1000;
+      if (start > 20000) break;
+    }
+
+    res.json({ count: numbers.length, numbers });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// compare QB numbers against a list from Shopify files
+app.post('/api/gap-check', (req, res) => {
+  const { qbNumbers = [], shopifyNumbers = [] } = req.body;
+
+  const qbSet = new Set();
+  const qbDigits = new Set();
+  qbNumbers.forEach(n => {
+    const k = normInv(n);
+    if (k) qbSet.add(k);
+    const d = digitsOf(n);
+    if (d) qbDigits.add(d);
+  });
+
+  const missing = [];
+  const present = [];
+  const seen = new Set();
+
+  shopifyNumbers.forEach(raw => {
+    const k = normInv(raw);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    if (qbSet.has(k) || qbDigits.has(digitsOf(raw))) present.push(String(raw).trim());
+    else missing.push(String(raw).trim());
+  });
+
+  res.json({
+    inQb: qbNumbers.length,
+    inShopify: seen.size,
+    present: present.length,
+    missing
+  });
+});
+
 // ==================== Upload (SSE) ====================
-function buildPayload(inv, customerId, itemMap, termMap, negDiscount) {
+function buildPayload(inv, customerId, itemMap, termMap, negSet) {
   const lines = [];
 
   for (const L of inv.lines) {
@@ -205,7 +296,7 @@ function buildPayload(inv, customerId, itemMap, termMap, negDiscount) {
 
     let amount = L.amt;
     let rate = L.rate || L.amt;
-    if (negDiscount && /discount/i.test(L.item)) {
+    if (negSet.has(L.item.toLowerCase())) {
       amount = -Math.abs(amount);
       rate = -Math.abs(rate);
     }
@@ -235,7 +326,7 @@ app.post('/api/upload', async (req, res) => {
   const realmId = req.cookies.realm_id;
   if (!realmId) return res.status(401).json({ error: 'Not connected' });
 
-  const { invoices, delay = 1500, negDiscount = false } = req.body;
+  const { invoices, delay = 1500, negativeItems = [] } = req.body;
   if (!Array.isArray(invoices) || !invoices.length) {
     return res.status(400).json({ error: 'No invoices provided' });
   }
@@ -246,6 +337,7 @@ app.post('/api/upload', async (req, res) => {
   res.flushHeaders();
 
   const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const negSet = new Set(negativeItems.map(s => String(s).toLowerCase()));
 
   try {
     send({ type: 'log', msg: 'Connecting to QuickBooks...' });
@@ -268,7 +360,7 @@ app.post('/api/upload', async (req, res) => {
       for (let attempt = 1; attempt <= 5; attempt++) {
         try {
           const custId = await getOrCreateCustomer(realmId, token, inv.customer, custCache);
-          const payload = buildPayload(inv, custId, itemMap, termMap, negDiscount);
+          const payload = buildPayload(inv, custId, itemMap, termMap, negSet);
           const result = await postInvoice(realmId, token, payload);
 
           if (result.ok) {
