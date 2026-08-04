@@ -32,7 +32,7 @@
   <div id="gate" class="gate hide">
     <img src="/logo.svg" alt="">
     <h2>Connect your QuickBooks company</h2>
-    <p>Your product list is read directly from QuickBooks.</p>
+    <p>Products are read from QuickBooks so you can map anything that does not match.</p>
     <button class="solid" id="btnConnect">Connect to QuickBooks</button>
   </div>
 
@@ -40,13 +40,25 @@
 
   <div class="sheet">
     <div class="sec">
-      <h2><span class="no">01</span> Shopify orders <span class="aside" id="prodAside"></span></h2>
-      <div class="zone" id="zoneShop" tabindex="0" role="button">
-        <span><b>Shopify orders export</b><span>Orders → Export → CSV</span></span>
-        <span class="pick">Browse</span>
+      <h2><span class="no">01</span> Source files <span class="aside" id="prodAside"></span></h2>
+      <div class="two">
+        <div>
+          <div class="zone" id="zoneShop" tabindex="0" role="button">
+            <span><b>Shopify orders</b><span>Orders → Export → CSV</span></span>
+            <span class="pick">Browse</span>
+          </div>
+          <input type="file" id="fileShop" accept=".csv,text/csv">
+          <div class="stat" id="statShop"></div>
+        </div>
+        <div>
+          <div class="zone" id="zoneCat" tabindex="0" role="button">
+            <span><b>QuickBooks product list</b><span>SKU + Product/Service Name</span></span>
+            <span class="pick">Browse</span>
+          </div>
+          <input type="file" id="fileCat" accept=".csv,text/csv">
+          <div class="stat" id="statCat"></div>
+        </div>
       </div>
-      <input type="file" id="fileShop" accept=".csv,text/csv">
-      <div class="stat" id="statShop"></div>
     </div>
 
     <div class="sec">
@@ -72,7 +84,7 @@
           <input type="checkbox" id="skipVoided" checked><span>Skip voided orders</span></label>
         <label class="chk" style="margin-left:22px">
           <input type="checkbox" id="skipUnfulfilled" checked><span>Skip unfulfilled orders</span></label>
-        <p class="hint">Skipped orders are listed separately with the reason, so you can review them.</p>
+        <p class="hint">Skipped orders are listed separately with the reason.</p>
       </div>
     </div>
 
@@ -118,7 +130,7 @@
 
     <div class="sec">
       <button class="run" id="btnScan" disabled>Check products</button>
-      <p class="runhint" id="runHint">Add your Shopify orders export to begin</p>
+      <p class="runhint" id="runHint">Add both files to begin</p>
     </div>
   </div>
 
@@ -126,7 +138,7 @@
     <div class="sec">
       <h2><span class="no">04</span> Products that need a decision
         <span class="aside" id="mapAside"></span></h2>
-      <p class="hint" style="margin:0 0 14px">These Shopify products did not match anything in QuickBooks. Pick the QuickBooks product each should become, or skip it. Choices are saved and reused next time.</p>
+      <p class="hint" style="margin:0 0 14px">These Shopify products did not match. Pick the QuickBooks product each should become, or skip it. Choices are saved and reused next time.</p>
       <div class="acts">
         <button class="mini" id="mapSave">Save choices</button>
         <span class="mono" id="mapSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
@@ -203,8 +215,7 @@
   </div>
 
   <footer>
-    <p><b>Matching order:</b> your saved mapping first, then the Shopify SKU found inside a QuickBooks product name, then the product name itself. Anything left appears in step 04.</p>
-    <p><b>Send to Upload</b> passes the invoices straight to the Upload page. <b>Download</b> gives you CSV files for a manual import instead.</p>
+    <p><b>Matching order:</b> your saved mapping, then the SKU in your QuickBooks product list, then the SKU found inside a product name, then the product name itself. Anything left appears in step 04.</p>
   </footer>
 
   </div>
@@ -214,35 +225,11 @@
 (function(){
   "use strict";
   var shop=null, qbProducts=null, qbByName={}, qbByLoose={}, qbSkuIndex=[],
+      catBySku={}, catLoaded=false,
       qbNumbers=null, mappings={}, pending=[], result=null;
   function $(id){ return document.getElementById(id); }
 
-  fetch('/auth/status').then(function(r){return r.json();}).then(function(s){
-    if(s.connected){
-      $('dot').classList.add('on');
-      $('connText').textContent = s.companyName || s.realmId;
-      $('main').classList.remove('hide');
-      loadProducts(); loadMappings();
-    } else {
-      $('connText').textContent = 'Not connected';
-      $('gate').classList.remove('hide');
-    }
-  });
-  $('btnConnect').addEventListener('click', function(){ location.href='/auth/connect'; });
-
-  var t=new Date();
-  $('dTo').value=isoD(t);
-  $('dFrom').value=isoD(new Date(t.getFullYear(), t.getMonth(), 1));
-  function isoD(d){
-    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-  }
-
-  Array.prototype.forEach.call(document.getElementsByName('scope'), function(r){
-    r.addEventListener('change', function(){
-      $('gapBox').classList.toggle('hide', this.value!=='gap'); ready();
-    });
-  });
-
+  /* ---------- helpers ---------- */
   function key(s){
     if(!s) return "";
     s=String(s);
@@ -255,6 +242,9 @@
   function grp(n){ var p=money(n).split("."); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g,",")+"."+p[1]; }
   function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
   function pad(n){ return n<10?"0"+n:""+n; }
+  function isoD(d){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
   function normInv(v){
     var s=String(v==null?"":v).replace(/\u00a0/g,' ').replace(/[\u200b-\u200d\ufeff]/g,'').trim();
     if(!s) return '';
@@ -283,36 +273,17 @@
   function addDays(d,n){ var x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
   function paint(fn){ requestAnimationFrame(function(){ setTimeout(fn,0); }); }
   function setStat(el,cls,html){ el.className="stat "+cls; el.innerHTML=html; }
+  function decodeBytes(buf){
+    try{ return {text:new TextDecoder("utf-8",{fatal:true}).decode(buf),enc:"UTF-8"}; }
+    catch(e){
+      try{ return {text:new TextDecoder("windows-1252").decode(buf),enc:"Windows-1252"}; }
+      catch(e2){ return {text:new TextDecoder("utf-8").decode(buf),enc:"UTF-8"}; }
+    }
+  }
+  function mb(b){ return (b>0)?((b/1048576).toFixed(1)+" MB"):""; }
 
   var MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   var MONTH=["January","February","March","April","May","June","July","August","September","October","November","December"];
-
-  /* ---------- QB products ---------- */
-  function loadProducts(){
-    $('prodAside').textContent='loading products…';
-    fetch('/api/qb-products').then(function(r){return r.json();}).then(function(d){
-      if(d.error){ $('prodAside').textContent='product load failed'; return; }
-      qbProducts=d.products;
-      qbByName={}; qbByLoose={}; qbSkuIndex=[];
-      var clash={};
-      qbProducts.forEach(function(p){
-        var kn=key(p.name); if(qbByName[kn]===undefined) qbByName[kn]=p.name;
-        var lk=loose(p.name);
-        if(qbByLoose[lk]!==undefined && qbByLoose[lk]!==p.name) clash[lk]=1; else qbByLoose[lk]=p.name;
-        qbSkuIndex.push({name:p.name, hay:loose(p.name)});
-      });
-      for(var c in clash) delete qbByLoose[c];
-      qbSkuIndex.sort(function(a,b){ return a.hay.length-b.hay.length; });
-      $('prodAside').textContent=nf(d.count)+' products in QuickBooks';
-      ready();
-    }).catch(function(){ $('prodAside').textContent='product load failed'; });
-  }
-
-  function loadMappings(){
-    fetch('/api/mappings').then(function(r){return r.json();}).then(function(d){
-      mappings=d.mappings||{};
-    }).catch(function(){});
-  }
 
   /* ---------- CSV ---------- */
   function parseCSV(text){
@@ -364,7 +335,58 @@
     setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
   }
 
-  /* ---------- Shopify columns ---------- */
+  /* ---------- connection ---------- */
+  fetch('/auth/status').then(function(r){return r.json();}).then(function(s){
+    if(s.connected){
+      $('dot').classList.add('on');
+      $('connText').textContent = s.companyName || s.realmId;
+      $('main').classList.remove('hide');
+      loadProducts(); loadMappings();
+    } else {
+      $('connText').textContent = 'Not connected';
+      $('gate').classList.remove('hide');
+    }
+  });
+  $('btnConnect').addEventListener('click', function(){ location.href='/auth/connect'; });
+
+  var t=new Date();
+  $('dTo').value=isoD(t);
+  $('dFrom').value=isoD(new Date(t.getFullYear(), t.getMonth(), 1));
+
+  Array.prototype.forEach.call(document.getElementsByName('scope'), function(r){
+    r.addEventListener('change', function(){
+      $('gapBox').classList.toggle('hide', this.value!=='gap'); ready();
+    });
+  });
+
+  /* ---------- QB products from API (for the dropdown) ---------- */
+  function loadProducts(){
+    $('prodAside').textContent='loading QuickBooks products…';
+    fetch('/api/qb-products').then(function(r){return r.json();}).then(function(d){
+      if(d.error){ $('prodAside').textContent='product load failed'; return; }
+      qbProducts=d.products;
+      qbByName={}; qbByLoose={}; qbSkuIndex=[];
+      var clash={};
+      qbProducts.forEach(function(p){
+        var kn=key(p.name); if(qbByName[kn]===undefined) qbByName[kn]=p.name;
+        var lk=loose(p.name);
+        if(qbByLoose[lk]!==undefined && qbByLoose[lk]!==p.name) clash[lk]=1; else qbByLoose[lk]=p.name;
+        qbSkuIndex.push({name:p.name, hay:loose(p.name)});
+      });
+      for(var c in clash) delete qbByLoose[c];
+      qbSkuIndex.sort(function(a,b){ return a.hay.length-b.hay.length; });
+      $('prodAside').textContent=nf(d.count)+' products in QuickBooks';
+      ready();
+    }).catch(function(){ $('prodAside').textContent='product load failed'; });
+  }
+
+  function loadMappings(){
+    fetch('/api/mappings').then(function(r){return r.json();}).then(function(d){
+      mappings=d.mappings||{};
+    }).catch(function(){});
+  }
+
+  /* ---------- Shopify column detection ---------- */
   var NEED=[
     {k:"order",  g:["name","order name","order number","order id","order"]},
     {k:"date",   g:["created at","paid at","processed at","date"]},
@@ -397,22 +419,20 @@
     });
     return map;
   }
-  function decodeBytes(buf){
-    try{ return {text:new TextDecoder("utf-8",{fatal:true}).decode(buf),enc:"UTF-8"}; }
-    catch(e){
-      try{ return {text:new TextDecoder("windows-1252").decode(buf),enc:"Windows-1252"}; }
-      catch(e2){ return {text:new TextDecoder("utf-8").decode(buf),enc:"UTF-8"}; }
-    }
-  }
-  function mb(b){ return (b>0)?((b/1048576).toFixed(1)+" MB"):""; }
 
-  var z=$('zoneShop'), inpf=$('fileShop');
-  z.addEventListener("click",function(){ inpf.click(); });
-  z.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();inpf.click();} });
-  ["dragenter","dragover"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.add("hot");}); });
-  ["dragleave","drop"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.remove("hot");}); });
-  z.addEventListener("drop",function(e){ if(e.dataTransfer.files[0]) readShop(e.dataTransfer.files[0]); });
-  inpf.addEventListener("change",function(){ if(inpf.files[0]) readShop(inpf.files[0]); });
+  /* ---------- file zones ---------- */
+  function wireZone(zoneId,inputId,handler){
+    var z=$(zoneId), inp=$(inputId);
+    z.addEventListener("click",function(){ inp.click(); });
+    z.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click();} });
+    ["dragenter","dragover"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.add("hot");}); });
+    ["dragleave","drop"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.remove("hot");}); });
+    z.addEventListener("drop",function(e){ if(e.dataTransfer.files[0]) handler(e.dataTransfer.files[0]); });
+    inp.addEventListener("change",function(){ if(inp.files[0]) handler(inp.files[0]); });
+  }
+
+  wireZone("zoneShop","fileShop",readShop);
+  wireZone("zoneCat","fileCat",readCat);
 
   function readShop(file){
     var s=$('statShop');
@@ -445,6 +465,47 @@
     r.readAsArrayBuffer(file);
   }
 
+  function readCat(file){
+    var s=$('statCat');
+    if(/\.xlsx?$/i.test(file.name)){
+      setStat(s,"bad","Save the list as CSV from Excel first.");
+      catLoaded=false; ready(); return;
+    }
+    setStat(s,"busy","Reading "+file.name+"…");
+    var r=new FileReader();
+    r.onerror=function(){ setStat(s,"bad","Could not read the file."); catLoaded=false; ready(); };
+    r.onload=function(){
+      paint(function(){
+        var d=decodeBytes(r.result);
+        var rows=parseCSV(d.text);
+        if(rows.length<2){ setStat(s,"bad","No products found."); catLoaded=false; ready(); return; }
+        var head=rows[0].map(key), si=-1, ni=-1, i;
+        for(i=0;i<head.length;i++){
+          if(si<0 && head[i].indexOf("sku")>-1) si=i;
+          if(ni<0 && (head[i].indexOf("product")>-1||head[i].indexOf("service")>-1||head[i].indexOf("name")>-1)) ni=i;
+        }
+        if(si<0||ni<0||si===ni){
+          setStat(s,"bad","Could not find the SKU and Product/Service Name columns.");
+          catLoaded=false; ready(); return;
+        }
+        catBySku={};
+        var n=0;
+        for(i=1;i<rows.length;i++){
+          var sku=rows[i][si]==null?"":String(rows[i][si]).trim();
+          var nm=rows[i][ni]==null?"":String(rows[i][ni]).trim();
+          if(!sku||!nm) continue;
+          var ks=key(sku);
+          if(catBySku[ks]===undefined){ catBySku[ks]=nm; n++; }
+        }
+        catLoaded=n>0;
+        setStat(s,catLoaded?"ok":"bad","<b>"+file.name+"</b><i>"+nf(n)+" products with a SKU · "+d.enc+"</i>");
+        ready();
+      });
+    };
+    r.readAsArrayBuffer(file);
+  }
+
+  /* ---------- QB invoice numbers ---------- */
   $('btnFetch').addEventListener("click",function(){
     var from=$('dFrom').value, to=$('dTo').value;
     if(!from||!to){ setStat($('statQb'),"bad","Choose both dates first."); return; }
@@ -471,10 +532,11 @@
   }
   function ready(){
     var gap=scopeVal()==='gap';
-    var ok=!!(shop && qbProducts) && (!gap || !!qbNumbers);
+    var ok=!!(shop && catLoaded && qbProducts) && (!gap || !!qbNumbers);
     $('btnScan').disabled=!ok;
     var need=[];
     if(!shop) need.push("Shopify orders CSV");
+    if(!catLoaded) need.push("QuickBooks product list CSV");
     if(!qbProducts) need.push("QuickBooks products");
     if(gap && !qbNumbers) need.push("QuickBooks invoice list");
     $('runHint').textContent = ok ? "" : ("Still required: "+need.join(", "));
@@ -485,6 +547,8 @@
 
   function findBySku(sku){
     if(!sku) return null;
+    var hit=catBySku[key(sku)];
+    if(hit) return hit;
     var needle=loose(sku);
     if(needle.length<3) return null;
     for(var i=0;i<qbSkuIndex.length;i++){
@@ -600,8 +664,8 @@
     var INV_CAP=parseInt($('invCap').value,10); if(!(INV_CAP>0)) INV_CAP=0;
     var termS=termDays===0?"Due on receipt":"Net "+termDays;
 
-    var shipName=qbByName[key('Default Shipping Product')]||'Shipping';
-    var discName=qbByName[key('Discount Product')]||'Discount';
+    var shipName=catBySku[key('Shipping')]||qbByName[key('Default Shipping Product')]||'Shipping';
+    var discName=catBySku[key('DiscountItem')]||qbByName[key('Discount Product')]||'Discount';
 
     var gapMode=scopeVal()==='gap', qbSet=null, qbDig=null;
     if(gapMode && qbNumbers){
@@ -623,9 +687,9 @@
       if(k) last=k; else k=last;
       if(!k) continue;
       var g=index[k];
-      if(g===undefined){ g=index[k]={head:r,lines:[]}; groups.push(g); g.k=k; }
+      if(g===undefined){ g=index[k]={head:r,lines:[],statusRow:null}; groups.push(g); g.k=k; }
       if(cell(r,iItem)) g.lines.push(r);
-      if(!index[k].statusRow && (cell(r,iStat)||cell(r,iFul))) index[k].statusRow=r;
+      if(!g.statusRow && (cell(r,iStat)||cell(r,iFul))) g.statusRow=r;
     }
 
     var parts=[], cur=[], curInv=[], flatCount=0, allInvoices=[], excluded=[],
@@ -643,10 +707,10 @@
     }
 
     for(var gi=0;gi<groups.length;gi++){
-      var grp2=groups[gi], head=grp2.statusRow||grp2.head, lines=grp2.lines;
-      var fin=cell(head,iStat).toLowerCase();
-      var ful=cell(head,iFul).toLowerCase();
-      var tot=cell(head,iTot);
+      var grp2=groups[gi], sRow=grp2.statusRow||grp2.head, head=grp2.head, lines=grp2.lines;
+      var fin=cell(sRow,iStat).toLowerCase();
+      var ful=cell(sRow,iFul).toLowerCase();
+      var tot=cell(sRow,iTot)||cell(head,iTot);
 
       var reason=null;
       if(skipVoid && fin==='voided') reason='Voided';
@@ -664,7 +728,7 @@
         if(qbSet[nk] || (nd && qbDig[nd])){ alreadyInQb++; continue; }
       }
 
-      var rawDate=cell(grp2.head,iDate), dc=dateCache[rawDate];
+      var rawDate=cell(head,iDate), dc=dateCache[rawDate];
       if(dc===undefined){
         var d0=parseDate(rawDate)||new Date();
         dc=dateCache[rawDate]={d:d0,s:fmtDate(d0,dfmt),due:fmtDate(addDays(d0,termDays),dfmt),
@@ -703,11 +767,11 @@
 
       if(!block.length){ noLines++; continue; }
 
-      var sh=num(cell(grp2.head,iShip));
+      var sh=num(cell(head,iShip));
       if(sh!==0) push(shipName,1,sh,sh);
-      var ds=num(cell(grp2.head,iDisc));
+      var ds=num(cell(head,iDisc));
       if(ds>0) push(discName,1,ds,ds);
-      var tx=num(cell(grp2.head,iTax));
+      var tx=num(cell(head,iTax));
       if(tx!==0) push("Sales Tax",1,tx,tx);
 
       allInvoices.push({docNumber:invNo,customer:custName,txnDate:dc.isoDate,
@@ -767,10 +831,9 @@
     if(r.byMap) note(nb,"info",nf(r.byMap)+" line"+(r.byMap===1?"":"s")+" used your saved mapping.");
     if(r.byName) note(nb,"info",nf(r.byName)+" line"+(r.byName===1?"":"s")+" matched on product name.");
     if(r.noLines) note(nb,"info",nf(r.noLines)+" order"+(r.noLines===1?"":"s")+" had no usable line items.");
-    if(!r.lines){ note(nb,"warn","No invoices were produced."); return; }
-    if(!r.unresolved) note(nb,"ok","Every line has a QuickBooks product. Ready to upload.");
+    if(!r.lines){ note(nb,"warn","No invoices were produced."); }
+    else if(!r.unresolved) note(nb,"ok","Every line has a QuickBooks product. Ready to upload.");
 
-    /* excluded table */
     $('excludedSheet').classList.toggle('hide', !r.excluded.length);
     if(r.excluded.length){
       $('exAside').textContent=nf(r.excluded.length)+" orders";
@@ -778,17 +841,19 @@
       var ef=document.createDocumentFragment();
       for(var i=0;i<r.excluded.length && i<400;i++){
         var e=r.excluded[i], tr=document.createElement('tr');
-        [0,1,2,3,4].forEach(function(ci){
+        for(var ci=0;ci<5;ci++){
           var td=document.createElement('td');
           td.textContent=e[ci];
-          if(ci===0||ci===4) td.className='mono';
+          if(ci===0) td.className='mono';
           if(ci===4) td.className='num mono';
           tr.appendChild(td);
-        });
+        }
         ef.appendChild(tr);
       }
       eb.appendChild(ef);
     }
+
+    if(!r.lines) return;
 
     $('capNote').textContent=r.parts.length===1
       ? nf(r.lines)+" rows in one file"
@@ -823,6 +888,7 @@
     }catch(e){ alert('Could not pass the data across: '+e.message); }
   });
   $('dlall').addEventListener("click",function(){
+    if(!result) return;
     result.parts.forEach(function(p,i){
       setTimeout(function(){ download("quickbooks-invoices-part-"+(i+1)+".csv",buildCSV(HEADER,p.rows)); },i*350);
     });
