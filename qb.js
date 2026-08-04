@@ -1,93 +1,159 @@
-import pg from 'pg';
+import { getCompany, updateRefreshToken } from './db.js';
 
-const { Pool } = pg;
+const API = 'https://quickbooks.api.intuit.com';
+const TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+export async function getAccessToken(realmId) {
+  const company = await getCompany(realmId);
+  if (!company) throw new Error('Company not connected');
 
-export async function initDb() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS companies (
-      id             SERIAL PRIMARY KEY,
-      realm_id       TEXT UNIQUE NOT NULL,
-      company_name   TEXT,
-      refresh_token  TEXT NOT NULL,
-      created_at     TIMESTAMPTZ DEFAULT NOW(),
-      updated_at     TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
+  const basic = Buffer.from(
+    `${process.env.QB_CLIENT_ID}:${process.env.QB_CLIENT_SECRET}`
+  ).toString('base64');
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS upload_logs (
-      id           SERIAL PRIMARY KEY,
-      realm_id     TEXT NOT NULL,
-      doc_number   TEXT,
-      status       TEXT,
-      message      TEXT,
-      intuit_tid   TEXT,
-      created_at   TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + basic,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json'
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: company.refresh_token
+    })
+  });
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS negative_items (
-      realm_id    TEXT NOT NULL,
-      item_name   TEXT NOT NULL,
-      created_at  TIMESTAMPTZ DEFAULT NOW(),
-      PRIMARY KEY (realm_id, item_name)
-    );
-  `);
+  const data = await res.json();
+  if (!data.access_token) {
+    throw new Error('Token refresh failed: ' + JSON.stringify(data).slice(0, 200));
+  }
 
-  console.log('Database ready');
+  if (data.refresh_token && data.refresh_token !== company.refresh_token) {
+    await updateRefreshToken(realmId, data.refresh_token);
+  }
+
+  return data.access_token;
 }
 
-export async function saveCompany(realmId, companyName, refreshToken) {
-  await pool.query(
-    `INSERT INTO companies (realm_id, company_name, refresh_token)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (realm_id)
-     DO UPDATE SET refresh_token = $3, company_name = $2, updated_at = NOW()`,
-    [realmId, companyName, refreshToken]
+function tidOf(res) {
+  return res.headers.get('intuit_tid') || '';
+}
+
+async function qbFetch(url, token, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  });
+}
+
+export async function qbQuery(realmId, token, sql) {
+  const url = `${API}/v3/company/${realmId}/query?query=${encodeURIComponent(sql)}&minorversion=70`;
+  const res = await qbFetch(url, token);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Query failed (${res.status}) tid=${tidOf(res)}: ${text.slice(0, 300)}`);
+  }
+  const json = await res.json();
+  return json.QueryResponse || {};
+}
+
+export async function getCompanyInfo(realmId, token) {
+  const url = `${API}/v3/company/${realmId}/companyinfo/${realmId}?minorversion=70`;
+  const res = await qbFetch(url, token);
+  if (!res.ok) throw new Error('CompanyInfo failed: ' + res.status);
+  const json = await res.json();
+  return json.CompanyInfo;
+}
+
+export async function loadItems(realmId, token) {
+  const map = {};
+  let start = 1;
+  while (true) {
+    const q = await qbQuery(realmId, token,
+      `SELECT Id, Name FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
+    const arr = q.Item || [];
+    arr.forEach(i => { map[i.Name.toLowerCase()] = i.Id; });
+    if (arr.length < 1000) break;
+    start += 1000;
+  }
+  return map;
+}
+
+export async function loadTerms(realmId, token) {
+  const map = {};
+  const q = await qbQuery(realmId, token, 'SELECT Id, Name FROM Term MAXRESULTS 200');
+  (q.Term || []).forEach(t => { map[t.Name.toLowerCase()] = t.Id; });
+  return map;
+}
+
+export async function getOrCreateCustomer(realmId, token, name, cache) {
+  const key = name.toLowerCase();
+  if (cache[key]) return cache[key];
+
+  const esc = name.replace(/'/g, "\\'");
+  const q = await qbQuery(realmId, token,
+    `SELECT Id, DisplayName FROM Customer WHERE DisplayName = '${esc}'`);
+
+  if (q.Customer && q.Customer.length) {
+    cache[key] = q.Customer[0].Id;
+    return cache[key];
+  }
+
+  const res = await qbFetch(
+    `${API}/v3/company/${realmId}/customer?minorversion=70`,
+    token,
+    { method: 'POST', body: JSON.stringify({ DisplayName: name }) }
   );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Customer create failed tid=${tidOf(res)}: ${text.slice(0, 300)}`);
+  }
+
+  const json = await res.json();
+  cache[key] = json.Customer.Id;
+  return cache[key];
 }
 
-export async function getCompany(realmId) {
-  const r = await pool.query('SELECT * FROM companies WHERE realm_id = $1', [realmId]);
-  return r.rows[0] || null;
-}
-
-export async function updateRefreshToken(realmId, refreshToken) {
-  await pool.query(
-    'UPDATE companies SET refresh_token = $1, updated_at = NOW() WHERE realm_id = $2',
-    [refreshToken, realmId]
+export async function postInvoice(realmId, token, payload) {
+  const res = await qbFetch(
+    `${API}/v3/company/${realmId}/invoice?minorversion=70`,
+    token,
+    { method: 'POST', body: JSON.stringify(payload) }
   );
+
+  const tid = tidOf(res);
+
+  if (res.ok) {
+    const json = await res.json();
+    return { ok: true, id: json.Invoice.Id, tid };
+  }
+
+  const text = await res.text();
+  let msg = text.slice(0, 400);
+  try {
+    const fault = JSON.parse(text).Fault;
+    if (fault && fault.Error && fault.Error.length) {
+      msg = `${fault.Error[0].Message} | ${fault.Error[0].Detail || ''}`;
+    }
+  } catch (e) { /* keep raw */ }
+
+  return {
+    ok: false,
+    status: res.status,
+    msg,
+    tid,
+    retryable: isRetryable(msg, res.status)
+  };
 }
 
-export async function logUpload(realmId, docNumber, status, message, tid) {
-  await pool.query(
-    `INSERT INTO upload_logs (realm_id, doc_number, status, message, intuit_tid)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [realmId, docNumber, status, (message || '').slice(0, 1000), tid || null]
-  );
-}
-
-export async function getNegativeItems(realmId) {
-  const r = await pool.query(
-    'SELECT item_name FROM negative_items WHERE realm_id = $1',
-    [realmId]
-  );
-  return r.rows.map(x => x.item_name);
-}
-
-export async function setNegativeItems(realmId, items) {
-  await pool.query('DELETE FROM negative_items WHERE realm_id = $1', [realmId]);
-  if (!items || !items.length) return;
-  const values = items.map((_, i) => `($1, $${i + 2})`).join(',');
-  await pool.query(
-    `INSERT INTO negative_items (realm_id, item_name) VALUES ${values}
-     ON CONFLICT DO NOTHING`,
-    [realmId, ...items]
-  );
+export function isRetryable(msg, status) {
+  if (status === 429 || status >= 500) return true;
+  return /another user was creating|try again|deadlock|timeout|throttl/i.test(msg);
 }
