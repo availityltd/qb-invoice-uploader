@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upload · Shopify orders to QuickBooks</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div class="topbar"><div class="in">
+  <a class="mark" href="/">
+    <img src="/logo.svg" alt="">
+    <span style="display:block">
+      <b>Shopify orders to QuickBooks</b>
+      <span>Invoice pipeline</span>
+    </span>
+  </a>
+  <nav>
+    <a href="/">Convert</a>
+    <a href="/upload.html" class="on">Upload</a>
+  </nav>
+  <div class="conn"><span class="dot" id="dot"></span><span id="connText">Checking…</span></div>
+</div></div>
+
+<div class="shell">
+
+  <div id="gate" class="gate hide">
+    <img src="/logo.svg" alt="">
+    <h2>Connect your QuickBooks company</h2>
+    <p>Invoices are created directly in your company. Nothing is written until you press Start.</p>
+    <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+  </div>
+
+  <div id="main" class="hide">
+
+    <div class="sheet">
+      <div class="sec">
+        <h2><span class="no">01</span> Invoices to create <span class="aside" id="srcAside"></span></h2>
+
+        <div id="fromConvert" class="note ok hide" style="margin-bottom:14px"></div>
+
+        <div id="fileArea">
+          <div class="zone" id="zoneFile" tabindex="0" role="button">
+            <span><b>QuickBooks import file</b><span>.xlsx or .csv in QuickBooks invoice format</span></span>
+            <span class="pick">Browse</span>
+          </div>
+          <input type="file" id="file" accept=".xlsx,.xls,.csv">
+          <p class="hint">Or build one on the Convert page and press Send to Upload — no file needed.</p>
+        </div>
+
+        <div class="stat" id="statFile"></div>
+      </div>
+
+      <div class="sec hide" id="negSec">
+        <h2><span class="no">02</span> Negative amounts
+          <span class="aside" id="negAside"></span></h2>
+        <p class="hint" style="margin:0 0 12px">Tick any product whose amount should be sent to QuickBooks as a negative figure — discounts, refunds, credits. Your choices are remembered for this company.</p>
+        <div class="acts">
+          <button class="mini" id="negNone">Clear all</button>
+          <button class="mini" id="negSave">Save choices</button>
+          <span class="mono" id="negSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
+        </div>
+        <div class="tbl" style="max-height:300px">
+          <table>
+            <thead><tr><th style="width:60px">Negative</th><th>Product / service</th><th class="num">Lines</th></tr></thead>
+            <tbody id="negBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="sec hide" id="runSec">
+        <h2><span class="no">03</span> Run</h2>
+        <div class="g3">
+          <div>
+            <label for="delay">Delay between invoices (seconds)</label>
+            <input type="number" id="delay" value="1.5" step="0.5" min="0.5">
+            <p class="hint">Raise this if QuickBooks reports inventory lock errors.</p>
+          </div>
+        </div>
+        <div style="margin-top:16px">
+          <button class="run" id="btnStart">Start upload</button>
+        </div>
+        <div class="prog"><i id="bar"></i></div>
+        <div class="runhint" id="stat">Ready</div>
+        <div class="log" id="log"></div>
+        <div class="acts" style="margin-top:12px;margin-bottom:0">
+          <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
+          <button class="mini" id="btnCopyLog">Copy log</button>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <p><b>What happens:</b> invoices are created one at a time with a pause between each, so QuickBooks does not lock the inventory items. A failed invoice is retried up to five times before it is recorded as failed.</p>
+      <p><b>Safe to re-run:</b> only the failed invoices are re-sent when you press Retry — the ones that succeeded are not duplicated.</p>
+    </footer>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var invoices = [], failedList = [], negSet = {}, itemCounts = {}, running = false;
+  var logLines = [];
+
+  /* ---------- connection ---------- */
+  fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
+    if(s.connected){
+      $('dot').classList.add('on');
+      $('connText').textContent = s.companyName || s.realmId;
+      $('main').classList.remove('hide');
+      loadNegatives(function(){ checkIncoming(); });
+    } else {
+      $('connText').textContent = 'Not connected';
+      $('gate').classList.remove('hide');
+    }
+  });
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function setStat(el, cls, html){ el.className = 'stat ' + cls; el.innerHTML = html; }
+
+  function log(msg, cls){
+    var line = new Date().toLocaleTimeString() + '  ' + msg;
+    logLines.push(line);
+    var d = document.createElement('div');
+    if(cls) d.className = cls;
+    d.textContent = line;
+    $('log').appendChild(d);
+    $('log').scrollTop = $('log').scrollHeight;
+  }
+
+  /* ---------- saved negative items ---------- */
+  function loadNegatives(done){
+    fetch('/api/negative-items')
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        (d.items || []).forEach(function(n){ negSet[n.toLowerCase()] = true; });
+        if(done) done();
+      })
+      .catch(function(){ if(done) done(); });
+  }
+
+  /* ---------- incoming from Convert ---------- */
+  function checkIncoming(){
+    var raw = null;
+    try { raw = sessionStorage.getItem('pendingInvoices'); } catch(e){}
+    if(!raw) return;
+    try {
+      var list = JSON.parse(raw);
+      if(!list || !list.length) return;
+      sessionStorage.removeItem('pendingInvoices');
+      accept(list, 'Received from the Convert page');
+      $('fileArea').classList.add('hide');
+      $('fromConvert').classList.remove('hide');
+      $('fromConvert').textContent =
+        list.length + ' invoice' + (list.length===1?'':'s') + ' received from the Convert page. ' +
+        'To use a file instead, reload this page.';
+    } catch(e){}
+  }
+
+  /* ---------- file input ---------- */
+  var z = $('zoneFile'), inp = $('file');
+  z.addEventListener('click', function(){ inp.click(); });
+  z.addEventListener('keydown', function(e){
+    if(e.key==='Enter'||e.key===' '){ e.preventDefault(); inp.click(); } });
+  ['dragenter','dragover'].forEach(function(ev){
+    z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.add('hot'); }); });
+  ['dragleave','drop'].forEach(function(ev){
+    z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.remove('hot'); }); });
+  z.addEventListener('drop', function(e){ if(e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
+  inp.addEventListener('change', function(){ if(inp.files[0]) readFile(inp.files[0]); });
+
+  function readFile(f){
+    var fd = new FormData();
+    fd.append('file', f);
+    setStat($('statFile'), 'busy', 'Reading ' + f.name + '…');
+    fetch('/api/preview', { method:'POST', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ setStat($('statFile'),'bad', d.error); return; }
+        setStat($('statFile'),'ok','<b>'+f.name+'</b><i>'+nf(d.count)+' invoices · '+nf(d.totalLines)+
+          ' lines · customer: '+(d.customers.join(', ')||'—')+'</i>');
+        accept(d.invoices, f.name);
+      })
+      .catch(function(e){ setStat($('statFile'),'bad','Could not read the file: '+e.message); });
+  }
+
+  /* ---------- accept a set of invoices ---------- */
+  function accept(list, label){
+    invoices = list;
+    itemCounts = {};
+    list.forEach(function(inv){
+      inv.lines.forEach(function(l){
+        if(!l.item) return;
+        itemCounts[l.item] = (itemCounts[l.item] || 0) + 1;
+      });
+    });
+    $('srcAside').textContent = nf(list.length) + ' invoices';
+    buildNegTable();
+    $('negSec').classList.remove('hide');
+    $('runSec').classList.remove('hide');
+    var totalLines = list.reduce(function(s,i){ return s + i.lines.length; }, 0);
+    if(label !== 'Received from the Convert page'){
+      /* file stat already shown */
+    }
+    log('Loaded ' + nf(list.length) + ' invoices, ' + nf(totalLines) + ' lines.', 'info');
+  }
+
+  function buildNegTable(){
+    var names = Object.keys(itemCounts).sort();
+    var body = $('negBody');
+    body.innerHTML = '';
+    var frag = document.createDocumentFragment();
+    var ticked = 0;
+
+    names.forEach(function(name){
+      var tr = document.createElement('tr');
+
+      var td1 = document.createElement('td');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.style.accentColor = 'var(--qbo)';
+      cb.style.width = '15px';
+      cb.style.height = '15px';
+      cb.checked = !!negSet[name.toLowerCase()];
+      if(cb.checked) ticked++;
+      cb.addEventListener('change', function(){
+        negSet[name.toLowerCase()] = this.checked;
+        if(!this.checked) delete negSet[name.toLowerCase()];
+        updateNegAside();
+      });
+      td1.appendChild(cb);
+
+      var td2 = document.createElement('td');
+      td2.textContent = name;
+
+      var td3 = document.createElement('td');
+      td3.className = 'num';
+      td3.textContent = itemCounts[name];
+
+      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+      frag.appendChild(tr);
+    });
+
+    body.appendChild(frag);
+    updateNegAside();
+  }
+
+  function updateNegAside(){
+    var n = 0;
+    Object.keys(itemCounts).forEach(function(name){
+      if(negSet[name.toLowerCase()]) n++;
+    });
+    $('negAside').textContent = n ? (n + ' marked negative') : 'none marked';
+  }
+
+  $('negNone').addEventListener('click', function(){
+    Object.keys(itemCounts).forEach(function(name){ delete negSet[name.toLowerCase()]; });
+    buildNegTable();
+  });
+
+  $('negSave').addEventListener('click', function(){
+    var items = Object.keys(negSet).filter(function(k){ return negSet[k]; });
+    fetch('/api/negative-items', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ items: items })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(){
+      $('negSaved').textContent = 'Saved';
+      setTimeout(function(){ $('negSaved').textContent = ''; }, 2500);
+    })
+    .catch(function(e){ $('negSaved').textContent = 'Save failed'; });
+  });
+
+  /* ---------- upload ---------- */
+  function negativeList(){
+    return Object.keys(negSet).filter(function(k){ return negSet[k]; });
+  }
+
+  function runUpload(list){
+    if(running) return;
+    running = true;
+    failedList = [];
+    $('btnStart').disabled = true;
+    $('btnRetry').style.display = 'none';
+    $('bar').style.width = '0%';
+    $('log').innerHTML = '';
+    logLines.length = 0;
+
+    fetch('/api/upload', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        invoices: list,
+        delay: (parseFloat($('delay').value) || 1.5) * 1000,
+        negativeItems: negativeList()
+      })
+    })
+    .then(function(res){
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      function pump(){
+        return reader.read().then(function(step){
+          if(step.done){ finish(); return; }
+          buffer += decoder.decode(step.value, {stream:true});
+          var parts = buffer.split('\n\n');
+          buffer = parts.pop();
+          parts.forEach(handle);
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(function(e){
+      log('Connection error: ' + e.message, 'err');
+      finish();
+    });
+  }
+
+  function handle(part){
+    if(part.indexOf('data: ') !== 0) return;
+    var ev;
+    try{ ev = JSON.parse(part.slice(6)); }catch(e){ return; }
+
+    if(ev.type === 'log')       log(ev.msg, 'info');
+    else if(ev.type === 'ok')   log('OK      ' + ev.doc + '   (QB Id ' + ev.id + ')', 'ok');
+    else if(ev.type === 'retry')log('retry ' + ev.attempt + '/5  ' + ev.doc + '  ' + ev.msg, 'warn');
+    else if(ev.type === 'fail'){ log('FAILED  ' + ev.doc + '  ' + ev.msg, 'err'); failedList.push(ev.doc); }
+    else if(ev.type === 'error')log('ERROR: ' + ev.msg, 'err');
+    else if(ev.type === 'progress'){
+      var pct = Math.round((ev.current / ev.total) * 100);
+      $('bar').style.width = pct + '%';
+      $('stat').textContent = ev.done + ' done · ' + ev.failed + ' failed · ' +
+        (ev.total - ev.current) + ' remaining';
+    }
+    else if(ev.type === 'complete'){
+      log('--- Complete: ' + ev.done + ' succeeded, ' + ev.failed + ' failed ---',
+          ev.failed ? 'warn' : 'ok');
+    }
+  }
+
+  function finish(){
+    running = false;
+    $('btnStart').disabled = false;
+    if(failedList.length){
+      $('btnRetry').style.display = 'inline-block';
+      $('btnRetry').textContent = 'Retry failed only (' + failedList.length + ')';
+    }
+  }
+
+  $('btnStart').addEventListener('click', function(){
+    if(!invoices.length){ log('Load a file first.', 'err'); return; }
+    runUpload(invoices);
+  });
+
+  $('btnRetry').addEventListener('click', function(){
+    if(!failedList.length) return;
+    var set = {};
+    failedList.forEach(function(d){ set[d] = 1; });
+    var list = invoices.filter(function(inv){ return set[inv.docNumber]; });
+    if(!list.length) return;
+    log('Retrying ' + list.length + ' failed invoices…', 'warn');
+    runUpload(list);
+  });
+
+  $('btnCopyLog').addEventListener('click', function(){
+    var ta = document.createElement('textarea');
+    ta.value = logLines.join('\n');
+    ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); $('btnCopyLog').textContent = 'Copied'; }
+    catch(e){ $('btnCopyLog').textContent = 'Copy failed'; }
+    document.body.removeChild(ta);
+    setTimeout(function(){ $('btnCopyLog').textContent = 'Copy log'; }, 2000);
+  });
+})();
+</script>
+</body>
+</html>
