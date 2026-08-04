@@ -6,9 +6,9 @@ import crypto from 'crypto';
 
 import {
   initDb, saveCompany, getCompany, logUpload,
-  getNegativeItems, setNegativeItems,
-  getMappings, saveMapping
+  getNegativeItems, setNegativeItems
 } from './db.js';
+import { initMappings, getMappings, saveMapping } from './mappings.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
   getOrCreateCustomer, postInvoice, qbQuery
@@ -460,6 +460,7 @@ app.post('/api/upload', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 initDb()
+  .then(() => initMappings())
   .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
   .catch(err => {
     console.error('DB init failed:', err);
