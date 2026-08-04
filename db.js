@@ -7,7 +7,6 @@ export const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Tables banayein agar mojood na hon
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS companies (
@@ -29,6 +28,15 @@ export async function initDb() {
       message      TEXT,
       intuit_tid   TEXT,
       created_at   TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS negative_items (
+      realm_id    TEXT NOT NULL,
+      item_name   TEXT NOT NULL,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (realm_id, item_name)
     );
   `);
 
@@ -62,5 +70,24 @@ export async function logUpload(realmId, docNumber, status, message, tid) {
     `INSERT INTO upload_logs (realm_id, doc_number, status, message, intuit_tid)
      VALUES ($1, $2, $3, $4, $5)`,
     [realmId, docNumber, status, (message || '').slice(0, 1000), tid || null]
+  );
+}
+
+export async function getNegativeItems(realmId) {
+  const r = await pool.query(
+    'SELECT item_name FROM negative_items WHERE realm_id = $1',
+    [realmId]
+  );
+  return r.rows.map(x => x.item_name);
+}
+
+export async function setNegativeItems(realmId, items) {
+  await pool.query('DELETE FROM negative_items WHERE realm_id = $1', [realmId]);
+  if (!items || !items.length) return;
+  const values = items.map((_, i) => `($1, $${i + 2})`).join(',');
+  await pool.query(
+    `INSERT INTO negative_items (realm_id, item_name) VALUES ${values}
+     ON CONFLICT DO NOTHING`,
+    [realmId, ...items]
   );
 }
