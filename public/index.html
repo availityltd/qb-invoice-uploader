@@ -3,203 +3,768 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QuickBooks Invoice Uploader</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    background: #f4f6f8; margin: 0; padding: 24px; color: #222;
-  }
-  .wrap { max-width: 780px; margin: 0 auto; }
-  .card {
-    background: #fff; border-radius: 10px; padding: 22px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 18px;
-  }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .sub { color: #666; font-size: 14px; margin-bottom: 20px; }
-  .status { display: flex; align-items: center; gap: 10px; font-size: 15px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: #c62828; }
-  .dot.on { background: #2ca01c; }
-  button {
-    padding: 10px 18px; border: none; border-radius: 6px;
-    cursor: pointer; font-size: 14px; font-weight: 600;
-  }
-  .primary { background: #2ca01c; color: #fff; }
-  .blue { background: #0077c5; color: #fff; }
-  .grey { background: #e0e0e0; color: #444; }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  input[type=file], input[type=number] {
-    width: 100%; padding: 9px; border: 1px solid #ccc;
-    border-radius: 6px; margin-bottom: 12px;
-  }
-  label { font-size: 13px; color: #555; display: block; margin-bottom: 5px; }
-  .bar-bg { background: #e8e8e8; border-radius: 6px; height: 20px; overflow: hidden; margin: 12px 0 6px; }
-  .bar { height: 100%; width: 0; background: #2ca01c; transition: width .3s; }
-  .stat { text-align: center; font-size: 13px; color: #555; margin-bottom: 12px; }
-  #log {
-    background: #1e1e1e; color: #ddd; border-radius: 6px; padding: 12px;
-    height: 280px; overflow-y: auto; font-family: Consolas, monospace; font-size: 12px;
-  }
-  .ok { color: #6bd66b; } .err { color: #ff7b7b; } .warn { color: #ffc46b; } .info { color: #8ec9ff; }
-  .hide { display: none; }
-  .summary { background: #eef7ee; border-left: 4px solid #2ca01c; padding: 12px; border-radius: 5px; font-size: 14px; margin-bottom: 14px; }
-</style>
+<title>Convert · Shopify orders to QuickBooks</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<div class="wrap">
 
-  <div class="card">
-    <h1>QuickBooks Invoice Uploader</h1>
-    <div class="sub">Upload an Excel file and create invoices directly in QuickBooks Online.</div>
-    <div class="status">
-      <span class="dot" id="dot"></span>
-      <span id="statusText">Checking connection...</span>
+<div class="topbar"><div class="in">
+  <a class="mark" href="/">
+    <img src="/logo.svg" alt="">
+    <span style="display:block">
+      <b>Shopify orders to QuickBooks</b>
+      <span>Invoice pipeline</span>
+    </span>
+  </a>
+  <nav>
+    <a href="/" class="on">Convert</a>
+    <a href="/upload.html">Upload</a>
+  </nav>
+  <div class="conn"><span class="dot" id="dot"></span><span id="connText">Checking…</span></div>
+</div></div>
+
+<div class="shell">
+
+  <div class="sheet">
+    <div class="sec">
+      <h2><span class="no">01</span> Source files <span class="aside">CSV only</span></h2>
+      <div class="two">
+        <div>
+          <div class="zone" id="zoneShop" tabindex="0" role="button">
+            <span><b>Shopify orders</b><span>Orders → Export → CSV</span></span>
+            <span class="pick">Browse</span>
+          </div>
+          <input type="file" id="fileShop" accept=".csv,text/csv">
+          <div class="stat" id="statShop"></div>
+        </div>
+        <div>
+          <div class="zone" id="zoneCat" tabindex="0" role="button">
+            <span><b>QuickBooks product list</b><span>SKU + Product/Service columns</span></span>
+            <span class="pick">Browse</span>
+          </div>
+          <input type="file" id="fileCat" accept=".csv,text/csv">
+          <div class="stat" id="statCat"></div>
+        </div>
+      </div>
     </div>
-    <div style="margin-top:14px;">
-      <button class="primary" id="btnConnect">Connect to QuickBooks</button>
-      <button class="grey hide" id="btnDisconnect">Disconnect</button>
+
+    <div class="sec">
+      <h2><span class="no">02</span> Which orders</h2>
+      <label class="chk" style="margin-top:0">
+        <input type="radio" name="scope" value="all" checked><span>All orders in the file</span></label>
+      <label class="chk" style="margin-left:22px">
+        <input type="radio" name="scope" value="gap"><span>Only orders not yet in QuickBooks</span></label>
+
+      <div id="gapBox" class="hide" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
+        <div class="g3">
+          <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
+          <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="solid" id="btnFetch" style="width:100%">Fetch from QuickBooks</button>
+          </div>
+        </div>
+        <p class="hint">The date range is read from your connected company. Order numbers are compared loosely, so <code>#0012</code> and <code>12</code> count as the same invoice.</p>
+        <div class="stat" id="statQb"></div>
+      </div>
+    </div>
+
+    <div class="sec" id="lookupBox" style="display:none">
+      <h2><span class="no">03</span> Verify a product <span class="aside">optional</span></h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <input type="text" id="lookupIn" placeholder="Enter a SKU or product name" style="flex:1;min-width:190px">
+        <button class="mini" id="lookupGo">Look up</button>
+      </div>
+      <div class="mono" id="lookupOut" style="margin-top:9px;font-size:12.5px;color:var(--muted);min-height:18px;word-break:break-all"></div>
+    </div>
+
+    <div class="sec">
+      <h2><span class="no">04</span> Invoice settings</h2>
+      <div class="g3">
+        <div>
+          <label for="gname">Customer name on all invoices</label>
+          <input type="text" id="gname" value="Shopify Sale - {mon}{yy}">
+          <p class="hint"><code>{mon}</code> Oct · <code>{yy}</code> 26 · <code>{month}</code> · <code>{yyyy}</code></p>
+        </div>
+        <div>
+          <label for="terms">Terms</label>
+          <select id="terms">
+            <option value="0" selected>Due on receipt</option>
+            <option value="15">Net 15</option>
+            <option value="30">Net 30</option>
+            <option value="60">Net 60</option>
+          </select>
+        </div>
+        <div>
+          <label for="dfmt">Date format</label>
+          <select id="dfmt">
+            <option value="dmy" selected>dd/mm/yyyy</option>
+            <option value="mdy">mm/dd/yyyy</option>
+            <option value="iso">yyyy-mm-dd</option>
+          </select>
+        </div>
+      </div>
+      <label class="chk"><input type="checkbox" id="optPaid"><span>Paid orders only</span></label>
+      <div class="g3" style="margin-top:16px">
+        <div>
+          <label for="rowCap">Rows per file</label>
+          <input type="text" id="rowCap" value="1000" inputmode="numeric">
+          <p class="hint">An invoice is never split across two files.</p>
+        </div>
+        <div>
+          <label for="invCap">Invoices per file</label>
+          <input type="text" id="invCap" value="" placeholder="no limit" inputmode="numeric">
+        </div>
+        <div>
+          <label for="matchMode">Matching rule</label>
+          <select id="matchMode">
+            <option value="sku" selected>SKU to SKU only</option>
+            <option value="skuname">SKU, then product name</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <button class="run" id="run" disabled>Convert</button>
+      <p class="runhint" id="runHint">Still required: Shopify orders CSV and QuickBooks product list CSV</p>
     </div>
   </div>
 
-  <div class="card hide" id="uploadCard">
-    <label>Excel file (.xlsx or .csv)</label>
-    <input type="file" id="file" accept=".xlsx,.xls,.csv">
+  <div id="results" class="hide">
+    <div class="sheet">
+      <div class="sec" style="padding-bottom:0;border-bottom:0">
+        <h2><span class="no">05</span> Result <span class="aside" id="timing"></span></h2>
+      </div>
+      <div class="figs">
+        <div><span>Invoices</span><b id="sInv">0</b></div>
+        <div><span>Lines</span><b id="sLines">0</b></div>
+        <div><span>Files</span><b id="sFiles">0</b></div>
+        <div><span>Total</span><b id="sTotal">0.00</b></div>
+      </div>
+      <div class="sec">
+        <h2 style="margin-bottom:8px">Match breakdown <span class="aside"><b id="kTot">0</b> lines</span></h2>
+        <div class="bar">
+          <i id="barSku" style="width:0%;background:var(--ok)"></i>
+          <i id="barName" style="width:0%;background:var(--accent)"></i>
+          <i id="barMiss" style="width:0%;background:var(--warn)"></i>
+        </div>
+        <div class="keys">
+          <div><em style="background:var(--ok)"></em> Matched on SKU <b id="kSku">0</b></div>
+          <div><em style="background:var(--accent)"></em> Matched on name <b id="kName">0</b></div>
+          <div><em style="background:var(--warn)"></em> Unmatched <b id="kMiss">0</b></div>
+        </div>
+      </div>
+      <div class="sec" id="notes"></div>
+    </div>
 
-    <div id="summary" class="summary hide"></div>
+    <div class="sheet">
+      <div class="sec">
+        <h2><span class="no">06</span> Next step <span class="aside" id="capNote"></span></h2>
+        <div class="acts">
+          <button class="solid" id="btnSend">Send to Upload</button>
+          <button class="mini" id="dlall">Download all files</button>
+          <button class="mini" id="dlun">Unmatched products</button>
+        </div>
+        <div id="partList"></div>
+      </div>
+    </div>
 
-    <label>Delay between invoices (seconds)</label>
-    <input type="number" id="delay" value="1.5" step="0.5" min="0.5">
-
-    <label style="margin-bottom:14px;">
-      <input type="checkbox" id="negDiscount"> Make discount lines negative
-    </label>
-
-    <button class="blue" id="btnUpload" disabled>Start Upload</button>
-
-    <div class="bar-bg"><div class="bar" id="bar"></div></div>
-    <div class="stat" id="stat">Ready</div>
-    <div id="log"></div>
+    <div class="sheet hide" id="unBox">
+      <div class="sec">
+        <h2><span class="no">07</span> Not found in the QuickBooks list <span class="aside" id="unCount"></span></h2>
+        <div class="tbl">
+          <table><thead><tr><th>SKU</th><th>Shopify product name</th><th class="num">Lines</th></tr></thead>
+          <tbody id="unBody"></tbody></table>
+        </div>
+      </div>
+    </div>
   </div>
 
+  <footer>
+    <p><b>Send to Upload</b> passes the converted invoices straight to the Upload page — no file needed. <b>Download</b> gives you the CSV files for a manual QuickBooks import instead.</p>
+    <p><b>Matching:</b> each Shopify line SKU is looked up in your QuickBooks product list, and the matching Product/Service name is written to the output. Lines whose SKU is not in the list keep the Shopify name, and QuickBooks will reject them — add those products first, export the list again, and re-run.</p>
+  </footer>
 </div>
 
 <script>
-let invoices = [];
+(function(){
+  "use strict";
+  var MISSING_CAP = 200;
+  var shop = null, cat = null, result = null, qbNumbers = null;
+  function $(id){ return document.getElementById(id); }
 
-const $ = id => document.getElementById(id);
-
-function log(msg, cls = '') {
-  const d = document.createElement('div');
-  if (cls) d.className = cls;
-  d.textContent = new Date().toLocaleTimeString() + '  ' + msg;
-  $('log').appendChild(d);
-  $('log').scrollTop = $('log').scrollHeight;
-}
-
-async function checkStatus() {
-  const r = await fetch('/auth/status');
-  const s = await r.json();
-  if (s.connected) {
-    $('dot').classList.add('on');
-    $('statusText').textContent = 'Connected: ' + (s.companyName || s.realmId);
-    $('btnConnect').classList.add('hide');
-    $('btnDisconnect').classList.remove('hide');
-    $('uploadCard').classList.remove('hide');
-  } else {
-    $('dot').classList.remove('on');
-    $('statusText').textContent = 'Not connected';
-    $('btnConnect').classList.remove('hide');
-    $('btnDisconnect').classList.add('hide');
-    $('uploadCard').classList.add('hide');
-  }
-}
-
-$('btnConnect').onclick = () => location.href = '/auth/connect';
-
-$('btnDisconnect').onclick = async () => {
-  await fetch('/auth/disconnect', { method: 'POST' });
-  location.reload();
-};
-
-$('file').onchange = async e => {
-  const f = e.target.files[0];
-  if (!f) return;
-
-  const fd = new FormData();
-  fd.append('file', f);
-
-  $('summary').classList.add('hide');
-  $('btnUpload').disabled = true;
-
-  try {
-    const r = await fetch('/api/preview', { method: 'POST', body: fd });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-
-    invoices = d.invoices;
-    $('summary').innerHTML =
-      `<b>${d.count}</b> invoices &middot; <b>${d.totalLines}</b> lines<br>` +
-      `Customer: ${d.customers.join(', ') || '(none)'}`;
-    $('summary').classList.remove('hide');
-    $('btnUpload').disabled = false;
-    log(`File loaded: ${d.count} invoices, ${d.totalLines} lines.`, 'ok');
-  } catch (err) {
-    log('Error: ' + err.message, 'err');
-  }
-};
-
-$('btnUpload').onclick = async () => {
-  if (!invoices.length) return;
-
-  $('log').innerHTML = '';
-  $('btnUpload').disabled = true;
-  $('bar').style.width = '0%';
-
-  const res = await fetch('/api/upload', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      invoices,
-      delay: (parseFloat($('delay').value) || 1.5) * 1000,
-      negDiscount: $('negDiscount').checked
-    })
+  /* ---------- connection ---------- */
+  fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
+    if(s.connected){
+      $('dot').classList.add('on');
+      $('connText').textContent = s.companyName || s.realmId;
+    } else {
+      $('connText').textContent = 'Not connected';
+    }
   });
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  var t = new Date();
+  $('dTo').value = isoD(t);
+  $('dFrom').value = isoD(new Date(t.getFullYear(), t.getMonth(), 1));
+  function isoD(d){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  Array.prototype.forEach.call(document.getElementsByName('scope'), function(r){
+    r.addEventListener('change', function(){
+      $('gapBox').classList.toggle('hide', this.value !== 'gap');
+      ready();
+    });
+  });
 
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop();
-
-    for (const part of parts) {
-      if (!part.startsWith('data: ')) continue;
-      const ev = JSON.parse(part.slice(6));
-
-      if (ev.type === 'log')      log(ev.msg, 'info');
-      else if (ev.type === 'ok')  log(`OK  ${ev.doc}  (QB Id ${ev.id})`, 'ok');
-      else if (ev.type === 'retry') log(`retry ${ev.attempt}/5  ${ev.doc}  ${ev.msg}`, 'warn');
-      else if (ev.type === 'fail') log(`FAILED  ${ev.doc}  ${ev.msg}`, 'err');
-      else if (ev.type === 'error') log('ERROR: ' + ev.msg, 'err');
-      else if (ev.type === 'progress') {
-        const pct = Math.round((ev.current / ev.total) * 100);
-        $('bar').style.width = pct + '%';
-        $('stat').textContent = `${ev.done} done · ${ev.failed} failed · ${ev.total - ev.current} remaining`;
+  /* ---------- CSV parser ---------- */
+  function parseCSV(text){
+    var rows=[], row=[], i=0, n=text.length, nonEmpty=false;
+    if(text.charCodeAt(0)===0xFEFF) i=1;
+    function endRow(){ if(nonEmpty) rows.push(row); row=[]; nonEmpty=false; }
+    while(i<n){
+      var ch=text.charCodeAt(i), val;
+      if(ch===34){
+        var j=i+1, buf=null, seg;
+        for(;;){
+          var q=text.indexOf('"',j);
+          if(q<0){ seg=text.slice(j); j=n; buf=buf===null?seg:buf+seg; break; }
+          if(text.charCodeAt(q+1)===34){ seg=text.slice(j,q+1); buf=buf===null?seg:buf+seg; j=q+2; }
+          else { seg=text.slice(j,q); buf=buf===null?seg:buf+seg; j=q+1; break; }
+        }
+        val=buf===null?"":buf; i=j;
+      }else{
+        var k=i;
+        while(k<n){ var c=text.charCodeAt(k); if(c===44||c===13||c===10) break; k++; }
+        val=text.slice(i,k); i=k;
       }
-      else if (ev.type === 'complete') {
-        log(`--- Complete: ${ev.done} succeeded, ${ev.failed} failed ---`, ev.failed ? 'warn' : 'ok');
-        $('btnUpload').disabled = false;
+      row.push(val);
+      if(val!=="") nonEmpty=true;
+      if(i<n){
+        var d=text.charCodeAt(i);
+        if(d===44){ i++; }
+        else{ if(d===13&&text.charCodeAt(i+1)===10) i++; i++; endRow(); }
       }
     }
+    if(row.length) endRow();
+    return rows;
   }
-};
 
-checkStatus();
+  function esc(v){ v=(v==null)?"":String(v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function buildCSV(head,rows){
+    var out=new Array(rows.length+1);
+    out[0]=head.join(",");
+    for(var i=0;i<rows.length;i++){
+      var r=rows[i], line=new Array(r.length);
+      for(var j=0;j<r.length;j++) line[j]=esc(r[j]);
+      out[i+1]=line.join(",");
+    }
+    return out.join("\r\n")+"\r\n";
+  }
+  function download(name,csv){
+    var b=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    var a=document.createElement("a"); a.href=URL.createObjectURL(b); a.download=name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
+  }
+
+  /* ---------- helpers ---------- */
+  var MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var MONTH=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  function num(v){ var f=parseFloat(String(v==null?"":v).replace(/[^0-9.\-]/g,"")); return isNaN(f)?0:f; }
+  function money(n){ return (Math.round(n*100)/100).toFixed(2); }
+  function grp(n){ var p=money(n).split("."); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g,",")+"."+p[1]; }
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
+  function pad(n){ return n<10?"0"+n:""+n; }
+  function key(s){
+    if(!s) return "";
+    s=String(s);
+    if(/[\u200B-\u200D\uFEFF\u00A0]/.test(s)) s=s.replace(/[\u200B-\u200D\uFEFF]/g,"").replace(/\u00A0/g," ");
+    return s.trim().toLowerCase().replace(/\s+/g," ");
+  }
+  function loose(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,""); }
+  function normInv(v){
+    var s=String(v==null?"":v).replace(/\u00a0/g,' ').replace(/[\u200b-\u200d\ufeff]/g,'').trim();
+    if(!s) return '';
+    s=s.replace(/(\d),(\d)/g,'$1$2').replace(/^(\d+)\.0+$/,'$1');
+    s=s.replace(/^[#\s]+/,'').replace(/\s+/g,' ').toLowerCase();
+    return s.replace(/^0+(?=[0-9])/,'').replace(/([^0-9])0+([0-9])/g,'$1$2');
+  }
+  function digitsOf(v){ return String(v==null?"":v).replace(/[^0-9]/g,'').replace(/^0+(?=[0-9])/,''); }
+  function parseDate(s){
+    if(!s) return null;
+    s=String(s);
+    var m=s.match(/^\s*(\d{4})-(\d{2})-(\d{2})/);
+    if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+    m=s.match(/^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(m) return new Date(+m[3],+m[2]-1,+m[1]);
+    var d=new Date(s.trim());
+    return isNaN(d.getTime())?null:new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  }
+  function fmtDate(d,mode){
+    if(!d) return "";
+    var D=pad(d.getDate()),M=pad(d.getMonth()+1),Y=d.getFullYear();
+    if(mode==="mdy") return M+"/"+D+"/"+Y;
+    if(mode==="iso") return Y+"-"+M+"-"+D;
+    return D+"/"+M+"/"+Y;
+  }
+  function addDays(d,n){ var x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+  function paint(fn){ requestAnimationFrame(function(){ setTimeout(fn,0); }); }
+  function setStat(el,cls,html){ el.className="stat "+cls; el.innerHTML=html; }
+
+  /* ---------- Shopify column detection ---------- */
+  var NEED=[
+    {k:"order",  g:["name","order name","order number","order id","order"]},
+    {k:"date",   g:["created at","paid at","processed at","date"]},
+    {k:"item",   g:["lineitem name","line item name","product title","item name","title"]},
+    {k:"qty",    g:["lineitem quantity","line item quantity","quantity","qty"]},
+    {k:"rate",   g:["lineitem price","line item price","price"]},
+    {k:"sku",    g:["lineitem sku","line item sku","variant sku","sku"]},
+    {k:"ship",   g:["shipping","shipping price"]},
+    {k:"tax",    g:["taxes","total tax","tax"]},
+    {k:"disc",   g:["discount amount","total discount","discount"]},
+    {k:"status", g:["financial status","payment status"]},
+    {k:"cust",   g:["billing name","customer name","shipping name"]},
+    {k:"email",  g:["email","contact email"]},
+    {k:"a1",     g:["billing address1","billing street","address1"]},
+    {k:"a2",     g:["billing address2","address2"]},
+    {k:"city",   g:["billing city","city"]},
+    {k:"prov",   g:["billing province name","billing province","province","state"]},
+    {k:"zip",    g:["billing zip","zip","postal code"]},
+    {k:"country",g:["billing country","country"]},
+    {k:"phone",  g:["billing phone","phone"]}
+  ];
+  function detect(headers){
+    var low=headers.map(key), map={};
+    NEED.forEach(function(f){
+      var idx=-1,i,g;
+      for(g=0;g<f.g.length&&idx<0;g++) idx=low.indexOf(f.g[g]);
+      for(g=0;g<f.g.length&&idx<0;g++) for(i=0;i<low.length&&idx<0;i++) if(low[i].indexOf(f.g[g])>-1) idx=i;
+      map[f.k]=idx;
+    });
+    return map;
+  }
+
+  /* ---------- file input ---------- */
+  function decodeBytes(buf){
+    try{ return {text:new TextDecoder("utf-8",{fatal:true}).decode(buf),enc:"UTF-8"}; }
+    catch(e){
+      try{ return {text:new TextDecoder("windows-1252").decode(buf),enc:"Windows-1252"}; }
+      catch(e2){ return {text:new TextDecoder("utf-8").decode(buf),enc:"UTF-8"}; }
+    }
+  }
+  function mb(bytes){ return (bytes>0)?((bytes/1048576).toFixed(1)+" MB"):""; }
+  function wire(zoneId,inputId,statId,handler){
+    var z=$(zoneId), inp=$(inputId);
+    z.addEventListener("click",function(){ inp.click(); });
+    z.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click();} });
+    ["dragenter","dragover"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.add("hot");}); });
+    ["dragleave","drop"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.remove("hot");}); });
+    z.addEventListener("drop",function(e){ if(e.dataTransfer.files[0]) read(e.dataTransfer.files[0],statId,handler); });
+    inp.addEventListener("change",function(){ if(inp.files[0]) read(inp.files[0],statId,handler); });
+  }
+  function read(file,statId,handler){
+    var s=$(statId);
+    if(/\.xlsx?$/i.test(file.name)){
+      setStat(s,"bad","Excel workbooks are not supported here. In Excel, use File → Save As → CSV.");
+      handler(null); return;
+    }
+    setStat(s,"busy","Reading "+file.name+" ("+mb(file.size)+")…");
+    var r=new FileReader();
+    r.onerror=function(){ setStat(s,"bad","The file could not be read."); handler(null); };
+    r.onload=function(){
+      paint(function(){
+        var t0=performance.now();
+        var d=decodeBytes(r.result);
+        var rows=parseCSV(d.text);
+        handler({name:file.name,size:file.size,rows:rows,enc:d.enc,
+          bad:d.text.indexOf("\uFFFD")>-1, ms:Math.round(performance.now()-t0)});
+      });
+    };
+    r.readAsArrayBuffer(file);
+  }
+
+  wire("zoneShop","fileShop","statShop",function(res){
+    var s=$("statShop");
+    if(!res){ shop=null; ready(); return; }
+    if(res.rows.length<2){ setStat(s,"bad","No data rows found."); shop=null; ready(); return; }
+    var headers=res.rows[0].map(function(h){return String(h).trim();});
+    var map=detect(headers);
+    var need=["order","date","item","qty","rate"].filter(function(k){ return map[k]<0; });
+    if(need.length){
+      setStat(s,"bad","This does not look like a Shopify orders export. Missing: "+need.join(", "));
+      shop=null; ready(); return;
+    }
+    shop={name:res.name,rows:res.rows.slice(1),map:map};
+    setStat(s,res.bad?"bad":"ok","<b>"+res.name+"</b><i>"+nf(shop.rows.length)+" rows · "+res.enc+
+      (map.sku<0?" · no SKU column":"")+(res.bad?" · some characters corrupted":"")+"</i>");
+    ready();
+  });
+
+  wire("zoneCat","fileCat","statCat",function(res){
+    var s=$("statCat");
+    if(!res){ cat=null; ready(); return; }
+    var rows=res.rows;
+    if(rows.length<2){ setStat(s,"bad","No products found."); cat=null; ready(); return; }
+    var head=rows[0].map(key), si=-1, ni=-1, i;
+    for(i=0;i<head.length;i++){
+      if(si<0 && head[i].indexOf("sku")>-1) si=i;
+      if(ni<0 && (head[i].indexOf("product")>-1||head[i].indexOf("service")>-1||head[i].indexOf("name")>-1)) ni=i;
+    }
+    var body=rows.slice(1), guessed=false;
+    if(si<0||ni<0||si===ni){ si=0; ni=1; body=rows; guessed=true; }
+    var map={}, byName={}, byLoose={}, clash={}, n=0;
+    for(i=0;i<body.length;i++){
+      var r=body[i];
+      var sku=r[si]==null?"":String(r[si]).trim(), name=r[ni]==null?"":String(r[ni]).trim();
+      if(!name) continue;
+      var ks=key(sku);
+      if(ks && map[ks]===undefined) map[ks]=name;
+      var kn=key(name);
+      if(byName[kn]===undefined) byName[kn]=name;
+      var lk=loose(name);
+      if(byLoose[lk]!==undefined && byLoose[lk]!==name) clash[lk]=1; else byLoose[lk]=name;
+      n++;
+    }
+    for(var ck in clash) delete byLoose[ck];
+    if(!n){ setStat(s,"bad","Could not identify the SKU and Product/Service columns."); cat=null; ready(); return; }
+    cat={name:res.name,map:map,byName:byName,byLoose:byLoose,count:n,
+      skuHead:guessed?"column 1":(rows[0][si]||"column "+(si+1)),
+      nameHead:guessed?"column 2":(rows[0][ni]||"column "+(ni+1)),
+      ship:map[key("Shipping")]||"", disc:map[key("DiscountItem")]||""};
+    setStat(s,res.bad?"bad":"ok","<b>"+res.name+"</b><i>"+nf(n)+" products · SKU: "+cat.skuHead+
+      " · name: "+cat.nameHead+(cat.ship?" · shipping ✓":" · no shipping item")+
+      (cat.disc?" · discount ✓":" · no discount item")+"</i>");
+    $("lookupBox").style.display="block";
+    ready();
+  });
+
+  /* ---------- lookup ---------- */
+  $("lookupGo").addEventListener("click",doLookup);
+  $("lookupIn").addEventListener("keydown",function(e){ if(e.key==="Enter") doLookup(); });
+  function doLookup(){
+    var q=$("lookupIn").value, out=$("lookupOut");
+    if(!cat){ out.style.color='var(--neg)'; out.textContent="Load the QuickBooks product list first."; return; }
+    if(!q.trim()){ out.textContent=""; return; }
+    var hit=cat.map[key(q)];
+    if(hit){ out.style.color='var(--ok)'; out.textContent="Matched on SKU → "+hit; return; }
+    hit=cat.byName[key(q)];
+    if(hit){ out.style.color='var(--ok)'; out.textContent="Matched on name → "+hit; return; }
+    hit=cat.byLoose[loose(q)];
+    if(hit){ out.style.color='var(--ok)'; out.textContent="Matched after normalising → "+hit; return; }
+    out.style.color='var(--neg)';
+    out.textContent="Not in this list — "+q.length+" characters: "+
+      Array.prototype.map.call(q,function(ch){
+        var c=ch.charCodeAt(0);
+        return (c<32||c===160||(c>=8203&&c<=8205)||c===65279)?("[U+"+c.toString(16).toUpperCase()+"]"):ch;
+      }).join("");
+  }
+
+  /* ---------- fetch QB invoices ---------- */
+  $("btnFetch").addEventListener("click",function(){
+    var from=$("dFrom").value, to=$("dTo").value;
+    if(!from||!to){ setStat($("statQb"),"bad","Choose both dates first."); return; }
+    setStat($("statQb"),"busy","Reading invoices from QuickBooks…");
+    $("btnFetch").disabled=true;
+    fetch('/api/qb-invoices?from='+from+'&to='+to)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        $("btnFetch").disabled=false;
+        if(d.error){ setStat($("statQb"),"bad",d.error); qbNumbers=null; ready(); return; }
+        qbNumbers=d.numbers;
+        setStat($("statQb"),"ok","<b>"+nf(d.count)+" invoices already in QuickBooks</b><i>"+from+" to "+to+"</i>");
+        ready();
+      })
+      .catch(function(e){
+        $("btnFetch").disabled=false;
+        setStat($("statQb"),"bad","Could not reach QuickBooks: "+e.message);
+      });
+  });
+
+  function scopeVal(){
+    var r=document.querySelector('input[name=scope]:checked');
+    return r?r.value:'all';
+  }
+
+  function ready(){
+    var gap = scopeVal()==='gap';
+    var ok = !!(shop && cat) && (!gap || !!qbNumbers);
+    $("run").disabled=!ok;
+    var need=[];
+    if(!shop) need.push("Shopify orders CSV");
+    if(!cat) need.push("QuickBooks product list CSV");
+    if(gap && !qbNumbers) need.push("QuickBooks invoice list");
+    $("runHint").textContent = ok ? "" : ("Still required: "+need.join(", "));
+  }
+
+  /* ---------- convert ---------- */
+  var HEADER=["*InvoiceNo","*Customer","*InvoiceDate","*DueDate","Terms","Location","Memo",
+    "Item(Product/Service)","ItemDescription","ItemQuantity","ItemRate","*ItemAmount","Service Date"];
+
+  function convert(){
+    var t0=performance.now();
+    var m=shop.map, rows=shop.rows, R=rows.length;
+    var dfmt=$("dfmt").value, termDays=parseInt($("terms").value,10);
+    var gTpl=$("gname").value.trim()||"Shopify Sale";
+    var paidOnly=$("optPaid").checked;
+    var byNameToo=$("matchMode").value==="skuname";
+    var ROW_CAP=Math.max(1,parseInt($("rowCap").value,10)||1000);
+    var INV_CAP=parseInt($("invCap").value,10); if(!(INV_CAP>0)) INV_CAP=0;
+    var shipName=cat.ship||"Shipping", discName=cat.disc||"Discount";
+    var termS=termDays===0?"Due on receipt":"Net "+termDays;
+    var cMap=cat.map, cName=cat.byName, cLoose=cat.byLoose;
+
+    var gapMode = scopeVal()==='gap';
+    var qbSet=null, qbDig=null;
+    if(gapMode && qbNumbers){
+      qbSet={}; qbDig={};
+      for(var qi=0;qi<qbNumbers.length;qi++){
+        var kk=normInv(qbNumbers[qi]); if(kk) qbSet[kk]=1;
+        var dd=digitsOf(qbNumbers[qi]); if(dd) qbDig[dd]=1;
+      }
+    }
+
+    var resCache={};
+    function resolve(sku,raw){
+      var ck=sku+"\u0000"+raw, v=resCache[ck];
+      if(v!==undefined) return v;
+      var hit=null, via=0;
+      if(sku){ hit=cMap[key(sku)]; if(hit) via=1; }
+      if(!hit&&byNameToo){ hit=cName[key(raw)]; if(hit) via=2; }
+      if(!hit&&byNameToo){ hit=cLoose[loose(raw)]; if(hit) via=2; }
+      v=resCache[ck]={name:hit,via:via};
+      return v;
+    }
+
+    var iOrder=m.order,iDate=m.date,iItem=m.item,iQty=m.qty,iRate=m.rate,iSku=m.sku,
+        iShip=m.ship,iTax=m.tax,iDisc=m.disc,iStat=m.status,iCust=m.cust,iMail=m.email,
+        iA1=m.a1,iA2=m.a2,iCity=m.city,iProv=m.prov,iZip=m.zip,iCtry=m.country;
+    function cell(r,i){ return (i>=0&&i<r.length&&r[i]!=null)?String(r[i]).trim():""; }
+
+    var groups=[], index={}, last=null, i;
+    for(i=0;i<R;i++){
+      var r=rows[i], k=cell(r,iOrder);
+      if(k) last=k; else k=last;
+      if(!k) continue;
+      var g=index[k];
+      if(g===undefined){ g=index[k]={head:r,lines:[]}; groups.push(g); g.k=k; }
+      if(cell(r,iItem)) g.lines.push(r);
+    }
+
+    var parts=[], cur=[], curInv=[], curObjs=[], flatCount=0,
+        allInvoices=[], unmatched={}, unOrder=[], skipped=0, noLines=0, alreadyInQb=0,
+        grand=0, bySku=0, byName=0, oversize=0,
+        dateCache={}, gnameCache={}, badName="";
+
+    function gname(iso,d){
+      var v=gnameCache[iso];
+      if(v!==undefined) return v;
+      var mo=d.getMonth();
+      v=gTpl.replace(/\{mon\}/g,MON[mo]).replace(/\{month\}/g,MONTH[mo])
+            .replace(/\{yyyy\}/g,d.getFullYear()).replace(/\{yy\}/g,String(d.getFullYear()).slice(-2));
+      gnameCache[iso]=v; return v;
+    }
+
+    for(var gi=0;gi<groups.length;gi++){
+      var grp2=groups[gi], head=grp2.head, lines=grp2.lines;
+      if(!lines.length){ noLines++; continue; }
+      if(paidOnly){
+        var st=cell(head,iStat).toLowerCase();
+        if(st&&st!=="paid"&&st!=="partially_paid"){ skipped++; continue; }
+      }
+      if(gapMode && qbSet){
+        var nk=normInv(grp2.k), nd=digitsOf(grp2.k);
+        if(qbSet[nk] || (nd && qbDig[nd])){ alreadyInQb++; continue; }
+      }
+
+      var rawDate=cell(head,iDate), dc=dateCache[rawDate];
+      if(dc===undefined){
+        var d0=parseDate(rawDate)||new Date();
+        dc=dateCache[rawDate]={d:d0,s:fmtDate(d0,dfmt),due:fmtDate(addDays(d0,termDays),dfmt),
+          isoDate:isoD(d0), isoDue:isoD(addDays(d0,termDays)),
+          iso:d0.getFullYear()+"-"+d0.getMonth()};
+      }
+      var custName=gname(dc.iso,dc.d);
+      var buyer=cell(head,iCust)||cell(head,iMail)||"Unknown";
+      var ap=[cell(head,iA1),cell(head,iA2),cell(head,iCity),cell(head,iProv),cell(head,iZip),cell(head,iCtry)];
+      var addr="";
+      for(i=0;i<6;i++) if(ap[i]) addr=addr?addr+", "+ap[i]:ap[i];
+      var memo=buyer+(addr?" — "+addr:"")+" — order "+grp2.k;
+      var invNo=grp2.k.charCodeAt(0)===35?grp2.k.slice(1):grp2.k;
+
+      var block=[], objLines=[];
+      function push(item,qty,rate,amount){
+        block.push([invNo,custName,dc.s,dc.due,termS,"",memo,item,"",
+                    qty.toFixed(2),money(rate),money(amount),dc.s]);
+        objLines.push({item:item,desc:"",qty:qty,rate:Math.round(rate*100)/100,
+                       amt:Math.round(amount*100)/100,svc:dc.isoDate});
+        grand+=amount;
+        if(!badName&&item.indexOf("\uFFFD")>-1) badName=item;
+      }
+
+      for(i=0;i<lines.length;i++){
+        var line=lines[i];
+        var sku=cell(line,iSku), raw=cell(line,iItem);
+        var qty=num(cell(line,iQty))||1, rate=num(cell(line,iRate));
+        var res=resolve(sku,raw), hit=res.name;
+        if(hit){ if(res.via===1) bySku++; else byName++; }
+        else{
+          hit=raw;
+          var uk=sku+"|"+raw, u=unmatched[uk];
+          if(u===undefined){ u=unmatched[uk]={sku:sku,item:raw,count:0}; unOrder.push(uk); }
+          u.count++;
+        }
+        push(hit,qty,rate,qty*rate);
+      }
+
+      var sh=num(cell(head,iShip));
+      if(sh!==0) push(shipName,1,sh,sh);
+      var ds=num(cell(head,iDisc));
+      if(ds>0) push(discName,1,ds,ds);
+      var tx=num(cell(head,iTax));
+      if(tx!==0) push("Sales Tax",1,tx,tx);
+
+      allInvoices.push({docNumber:invNo,customer:custName,txnDate:dc.isoDate,
+                        dueDate:dc.isoDue,terms:termS,memo:memo,lines:objLines});
+
+      if(block.length>ROW_CAP) oversize++;
+      if(cur.length&&(cur.length+block.length>ROW_CAP||(INV_CAP&&curInv.length>=INV_CAP))){
+        parts.push({rows:cur,invs:curInv}); cur=[]; curInv=[];
+      }
+      for(i=0;i<block.length;i++) cur.push(block[i]);
+      curInv.push(invNo);
+      flatCount+=block.length;
+    }
+    if(cur.length) parts.push({rows:cur,invs:curInv});
+
+    var unRows=new Array(unOrder.length), unLines=0;
+    for(i=0;i<unOrder.length;i++){
+      var uu=unmatched[unOrder[i]];
+      unRows[i]=[uu.sku,uu.item,uu.count]; unLines+=uu.count;
+    }
+
+    result={parts:parts,lines:flatCount,invoices:allInvoices.length,total:grand,
+      bySku:bySku,byName:byName,unmatched:unRows,unLines:unLines,skipped:skipped,
+      noLines:noLines,alreadyInQb:alreadyInQb,oversize:oversize,rowCap:ROW_CAP,
+      badName:badName,allInvoices:allInvoices,ms:Math.round(performance.now()-t0)};
+    render();
+  }
+
+  function note(box,cls,text){
+    var d=document.createElement("div"); d.className="note "+cls; d.textContent=text; box.appendChild(d);
+  }
+  function cellNode(text,cls){
+    var td=document.createElement("td"); td.textContent=text; if(cls) td.className=cls; return td;
+  }
+
+  function render(){
+    var r=result;
+    $("results").classList.remove("hide");
+    var nb=$("notes"); nb.innerHTML="";
+    if(!r.lines){
+      note(nb,"warn","No invoices were produced — every order was filtered out.");
+      return;
+    }
+
+    $("sInv").textContent=nf(r.invoices);
+    $("sLines").textContent=nf(r.lines);
+    $("sFiles").textContent=r.parts.length;
+    $("sTotal").textContent=grp(r.total);
+
+    var tot=r.bySku+r.byName+r.unLines||1;
+    $("barSku").style.width=(r.bySku/tot*100)+"%";
+    $("barName").style.width=(r.byName/tot*100)+"%";
+    $("barMiss").style.width=(r.unLines/tot*100)+"%";
+    $("kSku").textContent=nf(r.bySku);
+    $("kName").textContent=nf(r.byName);
+    $("kMiss").textContent=nf(r.unLines);
+    $("kTot").textContent=nf(tot);
+    $("timing").textContent=r.ms+" ms";
+
+    if(r.alreadyInQb) note(nb,"ok",nf(r.alreadyInQb)+" order"+(r.alreadyInQb===1?"":"s")+" skipped — already in QuickBooks.");
+    if(r.badName) note(nb,"warn","At least one product name contains a corrupted character, for example “"+r.badName+"”. Re-save the product list from Excel using CSV UTF-8.");
+    if(r.unmatched.length) note(nb,"warn",nf(r.unLines)+" line"+(r.unLines===1?"":"s")+" across "+r.unmatched.length+" product"+(r.unmatched.length===1?"":"s")+" could not be matched. QuickBooks will reject those lines — add the products first.");
+    if(r.oversize) note(nb,"warn",r.oversize+" invoice"+(r.oversize===1?"":"s")+" exceed the per-file row limit on their own.");
+    if(r.byName) note(nb,"info",nf(r.byName)+" line"+(r.byName===1?"":"s")+" matched on product name rather than SKU.");
+    if(r.skipped) note(nb,"info",nf(r.skipped)+" order"+(r.skipped===1?"":"s")+" excluded — payment status was not paid.");
+    if(r.noLines) note(nb,"info",nf(r.noLines)+" order"+(r.noLines===1?"":"s")+" contained no line items.");
+    if(!r.unmatched.length&&!r.badName) note(nb,"ok","Every line matched the QuickBooks product list.");
+
+    $("capNote").textContent=r.parts.length===1
+      ? nf(r.lines)+" rows in one file"
+      : r.parts.length+" files · limit "+nf(r.rowCap)+" rows";
+
+    var pl=$("partList"); pl.innerHTML="";
+    var pf=document.createDocumentFragment();
+    r.parts.forEach(function(p,i){
+      var d=document.createElement("div"); d.className="frow";
+      var meta=document.createElement("div");
+      meta.innerHTML="<b>quickbooks-invoices-part-"+(i+1)+".csv</b><i>"+p.rows.length+" rows · "+
+        p.invs.length+" invoices · "+p.invs[0]+"–"+p.invs[p.invs.length-1]+"</i>";
+      var b=document.createElement("button"); b.className="mini"; b.textContent="Download";
+      b.addEventListener("click",function(){ download("quickbooks-invoices-part-"+(i+1)+".csv",buildCSV(HEADER,p.rows)); });
+      d.appendChild(meta); d.appendChild(b); pf.appendChild(d);
+    });
+    pl.appendChild(pf);
+
+    $("unBox").classList.toggle("hide",!r.unmatched.length);
+    if(r.unmatched.length){
+      $("unCount").textContent=r.unmatched.length+" products · "+nf(r.unLines)+" lines"+
+        (r.unmatched.length>MISSING_CAP?" · showing first "+MISSING_CAP:"");
+      var ub=$("unBody"); ub.innerHTML="";
+      var uf=document.createDocumentFragment();
+      for(var i=0;i<r.unmatched.length&&i<MISSING_CAP;i++){
+        var x=r.unmatched[i], tr=document.createElement("tr");
+        tr.appendChild(cellNode(x[0]||"—","mono"));
+        tr.appendChild(cellNode(x[1]));
+        tr.appendChild(cellNode(x[2],"num"));
+        uf.appendChild(tr);
+      }
+      ub.appendChild(uf);
+    }
+
+    $("results").scrollIntoView({behavior:"smooth",block:"start"});
+  }
+
+  $("run").addEventListener("click",function(){
+    var btn=$("run");
+    btn.disabled=true; btn.textContent="Converting…";
+    paint(function(){
+      try{ convert(); }
+      catch(err){
+        $("results").classList.remove("hide");
+        var nb=$("notes"); nb.innerHTML="";
+        note(nb,"warn","Conversion failed: "+(err&&err.message?err.message:err));
+      }
+      btn.textContent="Convert"; btn.disabled=false; $("runHint").textContent="";
+    });
+  });
+
+  $("btnSend").addEventListener("click",function(){
+    if(!result||!result.allInvoices.length) return;
+    try{
+      sessionStorage.setItem('pendingInvoices',JSON.stringify(result.allInvoices));
+      location.href='/upload.html?from=convert';
+    }catch(e){
+      alert('Could not pass the data across: '+e.message+'\nUse Download instead.');
+    }
+  });
+
+  $("dlall").addEventListener("click",function(){
+    result.parts.forEach(function(p,i){
+      setTimeout(function(){ download("quickbooks-invoices-part-"+(i+1)+".csv",buildCSV(HEADER,p.rows)); },i*350);
+    });
+  });
+  $("dlun").addEventListener("click",function(){
+    download("unmatched-products.csv",buildCSV(["SKU","Shopify product name","Lines"],result.unmatched));
+  });
+
+  ready();
+})();
 </script>
 </body>
 </html>
