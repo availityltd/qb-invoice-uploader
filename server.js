@@ -233,9 +233,8 @@ app.get('/api/qb-products', async (req, res) => {
     let start = 1;
 
     while (true) {
-      const q = await qbQuery(realmId, token,
-        `SELECT Id, Name, Sku, Type, Active FROM Item ` +
-        `STARTPOSITION ${start} MAXRESULTS 1000`);
+     const q = await qbQuery(realmId, token,
+        `SELECT * FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
       const arr = q.Item || [];
       arr.forEach(it => {
         products.push({ id: it.Id, name: it.Name, sku: it.Sku || '', active: it.Active !== false });
