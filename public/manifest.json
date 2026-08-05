@@ -1,0 +1,43 @@
+{
+  "name": "Shopify Orders to QuickBooks",
+  "short_name": "Shopify → QBO",
+  "description": "Convert Shopify order exports into QuickBooks Online invoices and upload them directly.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0F2E24",
+  "theme_color": "#0F2E24",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Convert orders",
+      "url": "/",
+      "description": "Turn a Shopify export into QuickBooks invoices"
+    },
+    {
+      "name": "Upload to QuickBooks",
+      "url": "/upload.html",
+      "description": "Create invoices in QuickBooks"
+    }
+  ]
+}
