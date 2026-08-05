@@ -9,7 +9,9 @@ import {
   getNegativeItems, setNegativeItems
 } from './db.js';
 import { initMappings, getMappings, saveMapping } from './mappings.js';
-import { listCompanies } from './companies.js';
+import {
+  initUsers, upsertUser, getUser, linkCompany, userOwns, companiesForUser
+} from './users.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
   getOrCreateCustomer, postInvoice, qbQuery
@@ -25,6 +27,40 @@ app.use(express.static('public'));
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const AUTH_URL = 'https://appcenter.intuit.com/connect/oauth2';
 const TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
+const USERINFO_URL = 'https://accounts.platform.intuit.com/v1/openid_connect/userinfo';
+
+const SESSION_SECRET = process.env.SESSION_SECRET || process.env.QB_CLIENT_SECRET || 'dev-secret';
+
+// ==================== session helpers ====================
+function sign(sub) {
+  const mac = crypto.createHmac('sha256', SESSION_SECRET).update(sub).digest('hex');
+  return sub + '.' + mac;
+}
+function verify(token) {
+  if (!token) return null;
+  const i = token.lastIndexOf('.');
+  if (i < 1) return null;
+  const sub = token.slice(0, i), mac = token.slice(i + 1);
+  const good = crypto.createHmac('sha256', SESSION_SECRET).update(sub).digest('hex');
+  if (mac.length !== good.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(good))) return null;
+  return sub;
+}
+function currentUser(req) {
+  return verify(req.cookies.uid);
+}
+
+async function requireCompany(req, res) {
+  const sub = currentUser(req);
+  if (!sub) { res.status(401).json({ error: 'Not signed in' }); return null; }
+  const realmId = req.cookies.realm_id;
+  if (!realmId) { res.status(401).json({ error: 'No company selected' }); return null; }
+  if (!(await userOwns(sub, realmId))) {
+    res.status(403).json({ error: 'This company is not linked to your account' });
+    return null;
+  }
+  return realmId;
+}
 
 // ==================== OAuth ====================
 app.get('/auth/connect', (req, res) => {
@@ -34,7 +70,7 @@ app.get('/auth/connect', (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.QB_CLIENT_ID,
     response_type: 'code',
-    scope: 'com.intuit.quickbooks.accounting',
+    scope: 'com.intuit.quickbooks.accounting openid profile email',
     redirect_uri: `${BASE_URL}/auth/callback`,
     state
   });
@@ -50,7 +86,7 @@ app.get('/auth/callback', async (req, res) => {
       return res.status(400).send('Invalid state. Please try connecting again.');
     }
     res.clearCookie('oauth_state');
-    if (!code || !realmId) return res.status(400).send('Missing code or realmId');
+    if (!code) return res.status(400).send('Missing authorization code');
 
     const basic = Buffer.from(
       `${process.env.QB_CLIENT_ID}:${process.env.QB_CLIENT_SECRET}`
@@ -71,20 +107,48 @@ app.get('/auth/callback', async (req, res) => {
     });
 
     const tokens = await tokenRes.json();
-    if (!tokens.refresh_token) {
+    if (!tokens.access_token) {
       return res.status(400).send('Token exchange failed: ' + JSON.stringify(tokens).slice(0, 300));
     }
 
-    await saveCompany(realmId, null, tokens.refresh_token);
-
+    // who is this person?
+    let sub = null, email = null, name = null;
     try {
-      const info = await getCompanyInfo(realmId, tokens.access_token);
-      await saveCompany(realmId, info.CompanyName, tokens.refresh_token);
+      const ui = await fetch(USERINFO_URL, {
+        headers: { 'Authorization': 'Bearer ' + tokens.access_token, 'Accept': 'application/json' }
+      });
+      if (ui.ok) {
+        const info = await ui.json();
+        sub = info.sub;
+        email = info.email || null;
+        name = [info.givenName, info.familyName].filter(Boolean).join(' ') || null;
+      }
     } catch (e) {
-      console.error('CompanyInfo error:', e.message);
+      console.error('userinfo error:', e.message);
     }
 
-    res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+    if (!sub) {
+      return res.status(400).send(
+        'Could not identify your Intuit account. Please try signing in again.'
+      );
+    }
+
+    await upsertUser(sub, email, name);
+    res.cookie('uid', sign(sub), { httpOnly: true, maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
+
+    // a company was authorised too
+    if (realmId && tokens.refresh_token) {
+      await saveCompany(realmId, null, tokens.refresh_token);
+      try {
+        const info = await getCompanyInfo(realmId, tokens.access_token);
+        await saveCompany(realmId, info.CompanyName, tokens.refresh_token);
+      } catch (e) {
+        console.error('CompanyInfo error:', e.message);
+      }
+      await linkCompany(sub, realmId);
+      res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+    }
+
     res.redirect('/?connected=1');
 
   } catch (err) {
@@ -94,36 +158,69 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 app.get('/auth/status', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.json({ signedIn: false, connected: false });
+
+  const user = await getUser(sub);
   const realmId = req.cookies.realm_id;
-  if (!realmId) return res.json({ connected: false });
+
+  if (!realmId || !(await userOwns(sub, realmId))) {
+    return res.json({
+      signedIn: true,
+      connected: false,
+      user: user ? (user.name || user.email) : null
+    });
+  }
+
   const company = await getCompany(realmId);
-  if (!company) return res.json({ connected: false });
-  res.json({ connected: true, companyName: company.company_name, realmId });
+  res.json({
+    signedIn: true,
+    connected: !!company,
+    companyName: company ? company.company_name : null,
+    realmId,
+    user: user ? (user.name || user.email) : null
+  });
 });
 
 app.post('/auth/disconnect', (req, res) => {
   res.clearCookie('realm_id');
   res.json({ ok: true });
 });
+
+app.post('/auth/signout', (req, res) => {
+  res.clearCookie('realm_id');
+  res.clearCookie('uid');
+  res.json({ ok: true });
+});
+
 app.get('/auth/companies', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.json({ companies: [], current: null });
-  const company = await getCompany(realmId);
-  if (!company) return res.json({ companies: [], current: null });
-  res.json({
-    companies: [{ realmId: company.realm_id, name: company.company_name || company.realm_id }],
-    current: realmId
-  });
+  const sub = currentUser(req);
+  if (!sub) return res.json({ companies: [], current: null });
+  try {
+    const list = await companiesForUser(sub);
+    res.json({ companies: list, current: req.cookies.realm_id || null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/auth/switch', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.status(401).json({ error: 'Not signed in' });
+
   const { realmId } = req.body;
   if (!realmId) return res.status(400).json({ error: 'realmId required' });
+  if (!(await userOwns(sub, realmId))) {
+    return res.status(403).json({ error: 'This company is not linked to your account' });
+  }
+
   const company = await getCompany(realmId);
   if (!company) return res.status(404).json({ error: 'Company not connected' });
+
   res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
   res.json({ ok: true, companyName: company.company_name });
 });
+
 // ==================== Helpers ====================
 function clean(s) {
   return String(s ?? '').replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '').trim();
@@ -229,22 +326,22 @@ app.post('/api/preview', upload.single('file'), (req, res) => {
 
 // ==================== Negative items ====================
 app.get('/api/negative-items', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
   res.json({ items: await getNegativeItems(realmId) });
 });
 
 app.post('/api/negative-items', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
   await setNegativeItems(realmId, req.body.items || []);
   res.json({ ok: true });
 });
 
 // ==================== QB products ====================
 app.get('/api/qb-products', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
   try {
     const token = await getAccessToken(realmId);
@@ -252,7 +349,7 @@ app.get('/api/qb-products', async (req, res) => {
     let start = 1;
 
     while (true) {
-     const q = await qbQuery(realmId, token,
+      const q = await qbQuery(realmId, token,
         `SELECT * FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
       const arr = q.Item || [];
       arr.forEach(it => {
@@ -271,14 +368,14 @@ app.get('/api/qb-products', async (req, res) => {
 
 // ==================== Item mappings ====================
 app.get('/api/mappings', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
   res.json({ mappings: await getMappings(realmId) });
 });
 
 app.post('/api/mappings', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
   const list = req.body.mappings || [];
   try {
@@ -294,8 +391,8 @@ app.post('/api/mappings', async (req, res) => {
 
 // ==================== Gap check ====================
 app.get('/api/qb-invoices', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
@@ -392,8 +489,8 @@ function buildPayload(inv, customerId, itemMap, termMap, negSet) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 app.post('/api/upload', async (req, res) => {
-  const realmId = req.cookies.realm_id;
-  if (!realmId) return res.status(401).json({ error: 'Not connected' });
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
   const { invoices, delay = 1500, negativeItems = [] } = req.body;
   if (!Array.isArray(invoices) || !invoices.length) {
@@ -479,6 +576,7 @@ const PORT = process.env.PORT || 3000;
 
 initDb()
   .then(() => initMappings())
+  .then(() => initUsers())
   .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
   .catch(err => {
     console.error('DB init failed:', err);
