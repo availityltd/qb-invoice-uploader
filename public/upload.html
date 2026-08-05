@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Upload · Shopify orders to QuickBooks</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -109,7 +111,6 @@
   var invoices = [], failedList = [], negSet = {}, itemCounts = {}, running = false;
   var logLines = [];
 
-  /* ---------- connection ---------- */
   fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
     if(s.connected){
       $('dot').classList.add('on');
@@ -136,7 +137,6 @@
     $('log').scrollTop = $('log').scrollHeight;
   }
 
-  /* ---------- saved negative items ---------- */
   function loadNegatives(done){
     fetch('/api/negative-items')
       .then(function(r){ return r.json(); })
@@ -147,7 +147,6 @@
       .catch(function(){ if(done) done(); });
   }
 
-  /* ---------- incoming from Convert ---------- */
   function checkIncoming(){
     var raw = null;
     try { raw = sessionStorage.getItem('pendingInvoices'); } catch(e){}
@@ -156,7 +155,7 @@
       var list = JSON.parse(raw);
       if(!list || !list.length) return;
       sessionStorage.removeItem('pendingInvoices');
-      accept(list, 'Received from the Convert page');
+      accept(list);
       $('fileArea').classList.add('hide');
       $('fromConvert').classList.remove('hide');
       $('fromConvert').textContent =
@@ -165,7 +164,6 @@
     } catch(e){}
   }
 
-  /* ---------- file input ---------- */
   var z = $('zoneFile'), inp = $('file');
   z.addEventListener('click', function(){ inp.click(); });
   z.addEventListener('keydown', function(e){
@@ -187,13 +185,12 @@
         if(d.error){ setStat($('statFile'),'bad', d.error); return; }
         setStat($('statFile'),'ok','<b>'+f.name+'</b><i>'+nf(d.count)+' invoices · '+nf(d.totalLines)+
           ' lines · customer: '+(d.customers.join(', ')||'—')+'</i>');
-        accept(d.invoices, f.name);
+        accept(d.invoices);
       })
       .catch(function(e){ setStat($('statFile'),'bad','Could not read the file: '+e.message); });
   }
 
-  /* ---------- accept a set of invoices ---------- */
-  function accept(list, label){
+  function accept(list){
     invoices = list;
     itemCounts = {};
     list.forEach(function(inv){
@@ -207,9 +204,6 @@
     $('negSec').classList.remove('hide');
     $('runSec').classList.remove('hide');
     var totalLines = list.reduce(function(s,i){ return s + i.lines.length; }, 0);
-    if(label !== 'Received from the Convert page'){
-      /* file stat already shown */
-    }
     log('Loaded ' + nf(list.length) + ' invoices, ' + nf(totalLines) + ' lines.', 'info');
   }
 
@@ -218,7 +212,6 @@
     var body = $('negBody');
     body.innerHTML = '';
     var frag = document.createDocumentFragment();
-    var ticked = 0;
 
     names.forEach(function(name){
       var tr = document.createElement('tr');
@@ -230,10 +223,9 @@
       cb.style.width = '15px';
       cb.style.height = '15px';
       cb.checked = !!negSet[name.toLowerCase()];
-      if(cb.checked) ticked++;
       cb.addEventListener('change', function(){
-        negSet[name.toLowerCase()] = this.checked;
-        if(!this.checked) delete negSet[name.toLowerCase()];
+        if(this.checked) negSet[name.toLowerCase()] = true;
+        else delete negSet[name.toLowerCase()];
         updateNegAside();
       });
       td1.appendChild(cb);
@@ -278,10 +270,9 @@
       $('negSaved').textContent = 'Saved';
       setTimeout(function(){ $('negSaved').textContent = ''; }, 2500);
     })
-    .catch(function(e){ $('negSaved').textContent = 'Save failed'; });
+    .catch(function(){ $('negSaved').textContent = 'Save failed'; });
   });
 
-  /* ---------- upload ---------- */
   function negativeList(){
     return Object.keys(negSet).filter(function(k){ return negSet[k]; });
   }
@@ -385,6 +376,14 @@
     setTimeout(function(){ $('btnCopyLog').textContent = 'Copy log'; }, 2000);
   });
 })();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw.js').catch(function(){});
+  });
+}
 </script>
 </body>
 </html>
