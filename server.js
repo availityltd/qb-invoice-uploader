@@ -9,6 +9,7 @@ import {
   getNegativeItems, setNegativeItems
 } from './db.js';
 import { initMappings, getMappings, saveMapping } from './mappings.js';
+import { listCompanies } from './companies.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
   getOrCreateCustomer, postInvoice, qbQuery
@@ -104,7 +105,23 @@ app.post('/auth/disconnect', (req, res) => {
   res.clearCookie('realm_id');
   res.json({ ok: true });
 });
+app.get('/auth/companies', async (req, res) => {
+  try {
+    const list = await listCompanies();
+    res.json({ companies: list, current: req.cookies.realm_id || null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
+app.post('/auth/switch', async (req, res) => {
+  const { realmId } = req.body;
+  if (!realmId) return res.status(400).json({ error: 'realmId required' });
+  const company = await getCompany(realmId);
+  if (!company) return res.status(404).json({ error: 'Company not connected' });
+  res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+  res.json({ ok: true, companyName: company.company_name });
+});
 // ==================== Helpers ====================
 function clean(s) {
   return String(s ?? '').replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '').trim();
