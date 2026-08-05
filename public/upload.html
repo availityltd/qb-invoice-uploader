@@ -26,7 +26,8 @@
     <a href="/">Convert</a>
     <a href="/upload.html" class="on">Upload</a>
   </nav>
-  <div class="conn"><span class="dot" id="dot"></span><span id="connText">Checking…</span></div>
+  <div class="conn" id="connBox"><span class="dot" id="dot"></span><span id="connText">Checking…</span><span class="caret">▼</span>
+    <div class="switcher" id="switcher"></div></div>
 </div></div>
 
 <div class="shell">
@@ -384,6 +385,54 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(function(){});
   });
 }
+</script>
+  <script>
+(function(){
+  var box=document.getElementById('connBox');
+  var sw=document.getElementById('switcher');
+  if(!box||!sw) return;
+
+  box.addEventListener('click',function(e){
+    e.stopPropagation();
+    if(sw.classList.contains('open')){ sw.classList.remove('open'); return; }
+    sw.innerHTML='<div class="head">Loading…</div>';
+    sw.classList.add('open');
+    fetch('/auth/companies').then(function(r){return r.json();}).then(function(d){
+      var h='<div class="head">QuickBooks companies</div>';
+      sw.innerHTML=h;
+      (d.companies||[]).forEach(function(c){
+        var b=document.createElement('button');
+        b.textContent=c.name;
+        if(c.realmId===d.current) b.className='cur';
+        b.addEventListener('click',function(ev){
+          ev.stopPropagation();
+          if(c.realmId===d.current){ sw.classList.remove('open'); return; }
+          fetch('/auth/switch',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({realmId:c.realmId})})
+            .then(function(){ location.reload(); });
+        });
+        sw.appendChild(b);
+      });
+      var add=document.createElement('button');
+      add.className='add'; add.textContent='+ Connect another company';
+      add.addEventListener('click',function(ev){ ev.stopPropagation(); location.href='/auth/connect'; });
+      sw.appendChild(add);
+
+      if(d.current){
+        var out=document.createElement('button');
+        out.className='out'; out.textContent='Disconnect this session';
+        out.addEventListener('click',function(ev){
+          ev.stopPropagation();
+          fetch('/auth/disconnect',{method:'POST'}).then(function(){ location.reload(); });
+        });
+        sw.appendChild(out);
+      }
+    }).catch(function(){ sw.innerHTML='<div class="head">Could not load companies</div>'; });
+  });
+
+  document.addEventListener('click',function(){ sw.classList.remove('open'); });
+  sw.addEventListener('click',function(e){ e.stopPropagation(); });
+})();
 </script>
 </body>
 </html>
