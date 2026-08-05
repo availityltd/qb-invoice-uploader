@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Convert · Shopify orders to QuickBooks</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -229,7 +231,6 @@
       qbNumbers=null, mappings={}, pending=[], result=null;
   function $(id){ return document.getElementById(id); }
 
-  /* ---------- helpers ---------- */
   function key(s){
     if(!s) return "";
     s=String(s);
@@ -285,7 +286,6 @@
   var MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   var MONTH=["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-  /* ---------- CSV ---------- */
   function parseCSV(text){
     var rows=[], row=[], i=0, n=text.length, nonEmpty=false;
     if(text.charCodeAt(0)===0xFEFF) i=1;
@@ -335,7 +335,6 @@
     setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
   }
 
-  /* ---------- connection ---------- */
   fetch('/auth/status').then(function(r){return r.json();}).then(function(s){
     if(s.connected){
       $('dot').classList.add('on');
@@ -359,7 +358,6 @@
     });
   });
 
-  /* ---------- QB products from API (for the dropdown) ---------- */
   function loadProducts(){
     $('prodAside').textContent='loading QuickBooks products…';
     fetch('/api/qb-products').then(function(r){return r.json();}).then(function(d){
@@ -386,7 +384,6 @@
     }).catch(function(){});
   }
 
-  /* ---------- Shopify column detection ---------- */
   var NEED=[
     {k:"order",  g:["name","order name","order number","order id","order"]},
     {k:"date",   g:["created at","paid at","processed at","date"]},
@@ -420,7 +417,6 @@
     return map;
   }
 
-  /* ---------- file zones ---------- */
   function wireZone(zoneId,inputId,handler){
     var z=$(zoneId), inp=$(inputId);
     z.addEventListener("click",function(){ inp.click(); });
@@ -430,7 +426,6 @@
     z.addEventListener("drop",function(e){ if(e.dataTransfer.files[0]) handler(e.dataTransfer.files[0]); });
     inp.addEventListener("change",function(){ if(inp.files[0]) handler(inp.files[0]); });
   }
-
   wireZone("zoneShop","fileShop",readShop);
   wireZone("zoneCat","fileCat",readCat);
 
@@ -505,7 +500,6 @@
     r.readAsArrayBuffer(file);
   }
 
-  /* ---------- QB invoice numbers ---------- */
   $('btnFetch').addEventListener("click",function(){
     var from=$('dFrom').value, to=$('dTo').value;
     if(!from||!to){ setStat($('statQb'),"bad","Choose both dates first."); return; }
@@ -542,7 +536,6 @@
     $('runHint').textContent = ok ? "" : ("Still required: "+need.join(", "));
   }
 
-  /* ---------- matching ---------- */
   function srcKey(sku,name){ return (key(sku)||'')+'\u0000'+(key(name)||''); }
 
   function findBySku(sku){
@@ -572,7 +565,6 @@
     return {unmatched:true, key:mk, sku:sku, name:name};
   }
 
-  /* ---------- scan ---------- */
   $('btnScan').addEventListener("click",function(){
     var m=shop.map, rows=shop.rows;
     function cell(r,i){ return (i>=0&&i<r.length&&r[i]!=null)?String(r[i]).trim():""; }
@@ -650,7 +642,6 @@
     doConvert();
   });
 
-  /* ---------- convert ---------- */
   var HEADER=["*InvoiceNo","*Customer","*InvoiceDate","*DueDate","Terms","Location","Memo",
     "Item(Product/Service)","ItemDescription","ItemQuantity","ItemRate","*ItemAmount","Service Date"];
 
@@ -896,6 +887,14 @@
 
   ready();
 })();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw.js').catch(function(){});
+  });
+}
 </script>
 </body>
 </html>
