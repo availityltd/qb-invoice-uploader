@@ -106,12 +106,14 @@ app.post('/auth/disconnect', (req, res) => {
   res.json({ ok: true });
 });
 app.get('/auth/companies', async (req, res) => {
-  try {
-    const list = await listCompanies();
-    res.json({ companies: list, current: req.cookies.realm_id || null });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  const realmId = req.cookies.realm_id;
+  if (!realmId) return res.json({ companies: [], current: null });
+  const company = await getCompany(realmId);
+  if (!company) return res.json({ companies: [], current: null });
+  res.json({
+    companies: [{ realmId: company.realm_id, name: company.company_name || company.realm_id }],
+    current: realmId
+  });
 });
 
 app.post('/auth/switch', async (req, res) => {
