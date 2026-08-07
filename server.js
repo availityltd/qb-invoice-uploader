@@ -327,7 +327,6 @@ app.post('/api/qb-invoice-file', upload.single('file'), (req, res) => {
 
     const wb = XLSX.read(req.file.buffer, { type: 'buffer', raw: true, cellDates: false });
     const numbers = [];
-    let scannedRows = 0;
 
     for (const sheetName of wb.SheetNames) {
       const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
@@ -335,7 +334,6 @@ app.post('/api/qb-invoice-file', upload.single('file'), (req, res) => {
       });
       if (!grid.length) continue;
 
-      // find the column that most looks like invoice / reference numbers
       let headerRow = -1, col = -1;
       for (let r = 0; r < Math.min(grid.length, 15) && headerRow < 0; r++) {
         const row = grid[r] || [];
@@ -348,7 +346,6 @@ app.post('/api/qb-invoice-file', upload.single('file'), (req, res) => {
       }
 
       if (headerRow < 0) {
-        // no header found — take the first column that holds mostly numeric-looking values
         const probe = grid.slice(0, 40);
         let best = -1, bestScore = 0;
         const width = Math.max(...probe.map(r => r.length));
@@ -366,7 +363,6 @@ app.post('/api/qb-invoice-file', upload.single('file'), (req, res) => {
 
       for (let r = headerRow + 1; r < grid.length; r++) {
         const v = clean((grid[r] || [])[col]);
-        scannedRows++;
         if (!v) continue;
         if (/^total$/i.test(v)) continue;
         numbers.push(v);
@@ -380,7 +376,7 @@ app.post('/api/qb-invoice-file', upload.single('file'), (req, res) => {
       });
     }
 
-    res.json({ count: unique.length, numbers: unique, scannedRows });
+    res.json({ count: unique.length, numbers: unique });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -459,8 +455,6 @@ app.get('/api/qb-invoices', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
 
-  // QuickBooks stops returning rows past STARTPOSITION 10000, so the range is
-  // split into short windows and each window is paged separately.
   function shiftDays(iso, n) {
     const d = new Date(iso + 'T00:00:00Z');
     d.setUTCDate(d.getUTCDate() + n);
@@ -586,6 +580,16 @@ function buildPayload(inv, customerId, itemMap, termMap, negSet) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// uploads that can be stopped mid-way
+const cancelFlags = new Map();
+
+app.post('/api/upload-cancel', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  cancelFlags.set(realmId, true);
+  res.json({ ok: true });
+});
+
 app.post('/api/upload', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -616,12 +620,25 @@ app.post('/api/upload', async (req, res) => {
 
     let done = 0, failed = 0;
     const failedList = [];
+    const doneList = [];
+    let cancelled = false;
+
+    cancelFlags.delete(realmId);
 
     for (let i = 0; i < invoices.length; i++) {
+      if (cancelFlags.get(realmId)) {
+        cancelled = true;
+        cancelFlags.delete(realmId);
+        const remaining = invoices.slice(i).map(x => x.docNumber);
+        send({ type: 'cancelled', done, failed, doneList, failedList, remaining });
+        break;
+      }
+
       const inv = invoices[i];
       let success = false, lastErr = '';
 
       for (let attempt = 1; attempt <= 5; attempt++) {
+        if (cancelFlags.get(realmId)) break;
         try {
           const custId = await getOrCreateCustomer(realmId, token, inv.customer, custCache);
           const payload = buildPayload(inv, custId, itemMap, termMap, negSet);
@@ -648,7 +665,7 @@ app.post('/api/upload', async (req, res) => {
         }
       }
 
-      if (success) done++;
+      if (success) { done++; doneList.push(inv.docNumber); }
       else {
         failed++;
         failedList.push(inv.docNumber);
@@ -660,10 +677,11 @@ app.post('/api/upload', async (req, res) => {
       if (i < invoices.length - 1) await sleep(Number(delay));
     }
 
-    send({ type: 'complete', done, failed, failedList });
+    if (!cancelled) send({ type: 'complete', done, failed, doneList, failedList });
     res.end();
 
   } catch (err) {
+    cancelFlags.delete(realmId);
     send({ type: 'error', msg: err.message });
     res.end();
   }
