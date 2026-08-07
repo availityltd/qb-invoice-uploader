@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+-<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -26,7 +26,7 @@
     <a href="/" class="on">Convert</a>
     <a href="/upload.html">Upload</a>
   </nav>
- <div class="conn" id="connBox"><span class="dot" id="dot"></span><span id="connText">Checking…</span><span class="caret">▼</span>
+  <div class="conn" id="connBox"><span class="dot" id="dot"></span><span id="connText">Checking…</span><span class="caret">▼</span>
     <div class="switcher" id="switcher"></div></div>
 </div></div>
 
@@ -72,13 +72,30 @@
         <input type="radio" name="scope" value="gap"><span>Only orders not yet in QuickBooks</span></label>
 
       <div id="gapBox" class="hide" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
-        <div class="g3">
-          <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
-          <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
-          <div style="display:flex;align-items:flex-end">
-            <button class="solid" id="btnFetch" style="width:100%">Fetch from QuickBooks</button>
+        <label class="chk" style="margin-top:0">
+          <input type="radio" name="qbsrc" value="api" checked><span>Read the invoice list from QuickBooks</span></label>
+        <label class="chk" style="margin-left:22px">
+          <input type="radio" name="qbsrc" value="file"><span>Upload an invoice list exported from QuickBooks</span></label>
+
+        <div id="qbApiBox" style="margin-top:14px">
+          <div class="g3">
+            <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
+            <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
+            <div style="display:flex;align-items:flex-end">
+              <button class="solid" id="btnFetch" style="width:100%">Fetch from QuickBooks</button>
+            </div>
           </div>
         </div>
+
+        <div id="qbFileBox" class="hide" style="margin-top:14px">
+          <div class="zone" id="zoneQbFile" tabindex="0" role="button">
+            <span><b>QuickBooks invoice list</b><span>Reports → Invoice List by Date → Export</span></span>
+            <span class="pick">Browse</span>
+          </div>
+          <input type="file" id="fileQb" accept=".xlsx,.xls,.csv">
+          <p class="hint">Any export with a <code>Ref no.</code> or <code>Invoice number</code> column works. Use this when the date range holds more invoices than QuickBooks will return.</p>
+        </div>
+
         <div class="stat" id="statQb"></div>
       </div>
 
@@ -420,6 +437,7 @@
 
   function wireZone(zoneId,inputId,handler){
     var z=$(zoneId), inp=$(inputId);
+    if(!z||!inp) return;
     z.addEventListener("click",function(){ inp.click(); });
     z.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click();} });
     ["dragenter","dragover"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.add("hot");}); });
@@ -429,6 +447,7 @@
   }
   wireZone("zoneShop","fileShop",readShop);
   wireZone("zoneCat","fileCat",readCat);
+  wireZone("zoneQbFile","fileQb",readQbFile);
 
   function readShop(file){
     var s=$('statShop');
@@ -501,6 +520,34 @@
     r.readAsArrayBuffer(file);
   }
 
+  Array.prototype.forEach.call(document.getElementsByName('qbsrc'), function(r){
+    r.addEventListener('change', function(){
+      var useFile = this.value === 'file';
+      $('qbApiBox').classList.toggle('hide', useFile);
+      $('qbFileBox').classList.toggle('hide', !useFile);
+      qbNumbers = null;
+      $('statQb').innerHTML = '';
+      $('statQb').className = 'stat';
+      ready();
+    });
+  });
+
+  function readQbFile(file){
+    var s=$('statQb');
+    setStat(s,"busy","Reading "+file.name+"…");
+    var fd=new FormData();
+    fd.append('file', file);
+    fetch('/api/qb-invoice-file',{method:'POST',body:fd})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.error){ setStat(s,"bad",d.error); qbNumbers=null; ready(); return; }
+        qbNumbers=d.numbers;
+        setStat(s,"ok","<b>"+nf(d.count)+" invoice numbers read</b><i>"+file.name+"</i>");
+        ready();
+      })
+      .catch(function(e){ setStat(s,"bad","Could not read the file: "+e.message); qbNumbers=null; ready(); });
+  }
+
   $('btnFetch').addEventListener("click",function(){
     var from=$('dFrom').value, to=$('dTo').value;
     if(!from||!to){ setStat($('statQb'),"bad","Choose both dates first."); return; }
@@ -512,7 +559,8 @@
         $('btnFetch').disabled=false;
         if(d.error){ setStat($('statQb'),"bad",d.error); qbNumbers=null; ready(); return; }
         qbNumbers=d.numbers;
-        setStat($('statQb'),"ok","<b>"+nf(d.count)+" invoices already in QuickBooks</b><i>"+from+" to "+to+"</i>");
+        setStat($('statQb'),"ok","<b>"+nf(d.count)+" invoices already in QuickBooks</b><i>"+from+" to "+to+
+          (d.windows?(" · "+d.windows+" windows"):"")+"</i>");
         ready();
       })
       .catch(function(e){
@@ -891,13 +939,6 @@
 </script>
 
 <script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('/sw.js').catch(function(){});
-  });
-}
-</script>
-<script>
 (function(){
   var box=document.getElementById('connBox');
   var sw=document.getElementById('switcher');
@@ -942,6 +983,14 @@ if ('serviceWorker' in navigator) {
   document.addEventListener('click',function(){ sw.classList.remove('open'); });
   sw.addEventListener('click',function(e){ e.stopPropagation(); });
 })();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw.js').catch(function(){});
+  });
+}
 </script>
 </body>
 </html>
