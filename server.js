@@ -357,7 +357,7 @@ app.get('/api/qb-products', async (req, res) => {
       });
       if (arr.length < 1000) break;
       start += 1000;
-      if (start > 20000) break;
+      if (start > 20000000) break;
     }
 
     res.json({ count: products.length, products });
