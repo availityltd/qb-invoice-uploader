@@ -111,7 +111,6 @@ app.get('/auth/callback', async (req, res) => {
       return res.status(400).send('Token exchange failed: ' + JSON.stringify(tokens).slice(0, 300));
     }
 
-    // who is this person?
     let sub = null, email = null, name = null;
     try {
       const ui = await fetch(USERINFO_URL, {
@@ -128,15 +127,12 @@ app.get('/auth/callback', async (req, res) => {
     }
 
     if (!sub) {
-      return res.status(400).send(
-        'Could not identify your Intuit account. Please try signing in again.'
-      );
+      return res.status(400).send('Could not identify your Intuit account. Please try signing in again.');
     }
 
     await upsertUser(sub, email, name);
     res.cookie('uid', sign(sub), { httpOnly: true, maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
 
-    // a company was authorised too
     if (realmId && tokens.refresh_token) {
       await saveCompany(realmId, null, tokens.refresh_token);
       try {
@@ -324,6 +320,72 @@ app.post('/api/preview', upload.single('file'), (req, res) => {
   }
 });
 
+// ==================== QB invoice list from an uploaded file ====================
+app.post('/api/qb-invoice-file', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer', raw: true, cellDates: false });
+    const numbers = [];
+    let scannedRows = 0;
+
+    for (const sheetName of wb.SheetNames) {
+      const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
+        header: 1, raw: false, defval: '', blankrows: false
+      });
+      if (!grid.length) continue;
+
+      // find the column that most looks like invoice / reference numbers
+      let headerRow = -1, col = -1;
+      for (let r = 0; r < Math.min(grid.length, 15) && headerRow < 0; r++) {
+        const row = grid[r] || [];
+        for (let c = 0; c < row.length; c++) {
+          const h = clean(row[c]).toLowerCase();
+          if (/^(ref no\.?|reference number|invoice no\.?|invoice number|doc number|docnumber|num|number|no\.?|invoice)$/.test(h)) {
+            headerRow = r; col = c; break;
+          }
+        }
+      }
+
+      if (headerRow < 0) {
+        // no header found — take the first column that holds mostly numeric-looking values
+        const probe = grid.slice(0, 40);
+        let best = -1, bestScore = 0;
+        const width = Math.max(...probe.map(r => r.length));
+        for (let c = 0; c < width; c++) {
+          let score = 0;
+          probe.forEach(r => {
+            const v = clean(r[c]);
+            if (v && /^[#]?\d[\d\-\/]*$/.test(v)) score++;
+          });
+          if (score > bestScore) { bestScore = score; best = c; }
+        }
+        if (best < 0 || bestScore < 3) continue;
+        headerRow = -1; col = best;
+      }
+
+      for (let r = headerRow + 1; r < grid.length; r++) {
+        const v = clean((grid[r] || [])[col]);
+        scannedRows++;
+        if (!v) continue;
+        if (/^total$/i.test(v)) continue;
+        numbers.push(v);
+      }
+    }
+
+    const unique = [...new Set(numbers)];
+    if (!unique.length) {
+      return res.status(400).json({
+        error: 'No invoice numbers found. Make sure the file has a column named "Ref no." or "Invoice number".'
+      });
+    }
+
+    res.json({ count: unique.length, numbers: unique, scannedRows });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ==================== Negative items ====================
 app.get('/api/negative-items', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -357,7 +419,7 @@ app.get('/api/qb-products', async (req, res) => {
       });
       if (arr.length < 1000) break;
       start += 1000;
-      if (start > 20000000) break;
+      if (start > 9000) break;
     }
 
     res.json({ count: products.length, products });
@@ -389,7 +451,7 @@ app.post('/api/mappings', async (req, res) => {
   }
 });
 
-// ==================== Gap check ====================
+// ==================== QB invoice numbers (windowed) ====================
 app.get('/api/qb-invoices', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -397,24 +459,60 @@ app.get('/api/qb-invoices', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
 
-  try {
-    const token = await getAccessToken(realmId);
-    const numbers = [];
+  // QuickBooks stops returning rows past STARTPOSITION 10000, so the range is
+  // split into short windows and each window is paged separately.
+  function shiftDays(iso, n) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  async function fetchWindow(token, a, b, depth) {
+    const out = [];
     let start = 1;
+    let hitCap = false;
 
     while (true) {
       const q = await qbQuery(realmId, token,
         `SELECT DocNumber, TxnDate FROM Invoice ` +
-        `WHERE TxnDate >= '${from}' AND TxnDate <= '${to}' ` +
+        `WHERE TxnDate >= '${a}' AND TxnDate <= '${b}' ` +
         `STARTPOSITION ${start} MAXRESULTS 1000`);
       const arr = q.Invoice || [];
-      arr.forEach(inv => { if (inv.DocNumber) numbers.push(inv.DocNumber); });
+      arr.forEach(inv => { if (inv.DocNumber) out.push(inv.DocNumber); });
       if (arr.length < 1000) break;
       start += 1000;
-      if (start > 20000000) break;
+      if (start > 9000) { hitCap = true; break; }
     }
 
-    res.json({ count: numbers.length, numbers });
+    if (hitCap && depth < 8 && a !== b) {
+      const days = Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+      if (days >= 1) {
+        const mid = shiftDays(a, Math.floor(days / 2));
+        const left = await fetchWindow(token, a, mid, depth + 1);
+        const right = await fetchWindow(token, shiftDays(mid, 1), b, depth + 1);
+        return left.concat(right);
+      }
+    }
+    return out;
+  }
+
+  try {
+    const token = await getAccessToken(realmId);
+    const all = [];
+    let cursor = from;
+    let windows = 0;
+
+    while (cursor <= to && windows < 400) {
+      let end = shiftDays(cursor, 6);
+      if (end > to) end = to;
+      const part = await fetchWindow(token, cursor, end, 0);
+      all.push(...part);
+      cursor = shiftDays(end, 1);
+      windows++;
+    }
+
+    const numbers = [...new Set(all)];
+    res.json({ count: numbers.length, numbers, windows });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -540,13 +638,13 @@ app.post('/api/upload', async (req, res) => {
           if (!result.retryable) break;
 
           send({ type: 'retry', doc: inv.docNumber, attempt, msg: result.msg.slice(0, 100) });
-          await sleep(attempt * 3000);
+          await sleep(attempt * 15000);
 
         } catch (e) {
           lastErr = e.message;
           if (/not found in QuickBooks/.test(e.message)) break;
           send({ type: 'retry', doc: inv.docNumber, attempt, msg: e.message.slice(0, 100) });
-          await sleep(attempt * 3000);
+          await sleep(attempt * 15000);
         }
       }
 
