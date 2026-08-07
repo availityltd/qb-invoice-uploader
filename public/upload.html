@@ -87,20 +87,32 @@
         </div>
         <div style="margin-top:16px">
           <button class="run" id="btnStart">Start upload</button>
+          <button class="run" id="btnStop" style="display:none;background:var(--neg)">Stop upload</button>
         </div>
         <div class="prog"><i id="bar"></i></div>
         <div class="runhint" id="stat">Ready</div>
         <div class="log" id="log"></div>
         <div class="acts" style="margin-top:12px;margin-bottom:0">
           <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
+          <button class="mini" id="btnResume" style="display:none">Upload the remaining ones</button>
           <button class="mini" id="btnCopyLog">Copy log</button>
+        </div>
+      </div>
+
+      <div class="sec hide" id="resultSec">
+        <h2><span class="no">04</span> Download lists <span class="aside" id="resAside"></span></h2>
+        <div class="acts" style="margin-bottom:0">
+          <button class="mini" id="dlDone">Uploaded invoices</button>
+          <button class="mini" id="dlFailed">Failed invoices</button>
+          <button class="mini" id="dlRemaining">Not attempted</button>
+          <button class="solid" id="dlRemainingFile">Download remaining as import file</button>
         </div>
       </div>
     </div>
 
     <footer>
       <p><b>What happens:</b> invoices are created one at a time with a pause between each, so QuickBooks does not lock the inventory items. A failed invoice is retried up to five times before it is recorded as failed.</p>
-      <p><b>Safe to re-run:</b> only the failed invoices are re-sent when you press Retry — the ones that succeeded are not duplicated.</p>
+      <p><b>Stopping is safe:</b> the invoices already created stay in QuickBooks. Everything not yet attempted can be downloaded as a ready-to-use import file, or uploaded here in one click.</p>
     </footer>
   </div>
 </div>
@@ -109,7 +121,8 @@
 (function(){
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
-  var invoices = [], failedList = [], negSet = {}, itemCounts = {}, running = false;
+  var invoices = [], failedList = [], doneList = [], remainingList = [],
+      negSet = {}, itemCounts = {}, running = false;
   var logLines = [];
 
   fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
@@ -136,6 +149,28 @@
     d.textContent = line;
     $('log').appendChild(d);
     $('log').scrollTop = $('log').scrollHeight;
+  }
+
+  function esc(v){ v=(v==null)?"":String(v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function buildCSV(head,rows){
+    var out=[head.join(",")];
+    for(var i=0;i<rows.length;i++){
+      var r=rows[i], line=[];
+      for(var j=0;j<r.length;j++) line.push(esc(r[j]));
+      out.push(line.join(","));
+    }
+    return out.join("\r\n")+"\r\n";
+  }
+  function download(name,csv){
+    var b=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    var a=document.createElement("a"); a.href=URL.createObjectURL(b); a.download=name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
+  }
+  function fmtDate(iso){
+    if(!iso) return "";
+    var p=String(iso).split("-");
+    return p.length===3 ? (p[2]+"/"+p[1]+"/"+p[0]) : iso;
   }
 
   function loadNegatives(done){
@@ -216,7 +251,6 @@
 
     names.forEach(function(name){
       var tr = document.createElement('tr');
-
       var td1 = document.createElement('td');
       var cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -230,14 +264,11 @@
         updateNegAside();
       });
       td1.appendChild(cb);
-
       var td2 = document.createElement('td');
       td2.textContent = name;
-
       var td3 = document.createElement('td');
       td3.className = 'num';
       td3.textContent = itemCounts[name];
-
       tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
       frag.appendChild(tr);
     });
@@ -281,9 +312,15 @@
   function runUpload(list){
     if(running) return;
     running = true;
-    failedList = [];
+    failedList = []; doneList = []; remainingList = [];
     $('btnStart').disabled = true;
+    $('btnStart').style.display = 'none';
+    $('btnStop').style.display = 'block';
+    $('btnStop').disabled = false;
+    $('btnStop').textContent = 'Stop upload';
     $('btnRetry').style.display = 'none';
+    $('btnResume').style.display = 'none';
+    $('resultSec').classList.add('hide');
     $('bar').style.width = '0%';
     $('log').innerHTML = '';
     logLines.length = 0;
@@ -328,7 +365,7 @@
     if(ev.type === 'log')       log(ev.msg, 'info');
     else if(ev.type === 'ok')   log('OK      ' + ev.doc + '   (QB Id ' + ev.id + ')', 'ok');
     else if(ev.type === 'retry')log('retry ' + ev.attempt + '/5  ' + ev.doc + '  ' + ev.msg, 'warn');
-    else if(ev.type === 'fail'){ log('FAILED  ' + ev.doc + '  ' + ev.msg, 'err'); failedList.push(ev.doc); }
+    else if(ev.type === 'fail') log('FAILED  ' + ev.doc + '  ' + ev.msg, 'err');
     else if(ev.type === 'error')log('ERROR: ' + ev.msg, 'err');
     else if(ev.type === 'progress'){
       var pct = Math.round((ev.current / ev.total) * 100);
@@ -336,18 +373,47 @@
       $('stat').textContent = ev.done + ' done · ' + ev.failed + ' failed · ' +
         (ev.total - ev.current) + ' remaining';
     }
+    else if(ev.type === 'cancelled'){
+      doneList = ev.doneList || [];
+      failedList = ev.failedList || [];
+      remainingList = ev.remaining || [];
+      log('--- Stopped: ' + ev.done + ' uploaded, ' + ev.failed + ' failed, ' +
+          remainingList.length + ' not attempted ---', 'warn');
+      showResults();
+    }
     else if(ev.type === 'complete'){
+      doneList = ev.doneList || [];
+      failedList = ev.failedList || [];
+      remainingList = [];
       log('--- Complete: ' + ev.done + ' succeeded, ' + ev.failed + ' failed ---',
           ev.failed ? 'warn' : 'ok');
+      showResults();
     }
+  }
+
+  function showResults(){
+    $('resultSec').classList.remove('hide');
+    $('resAside').textContent =
+      nf(doneList.length) + ' uploaded · ' + nf(failedList.length) + ' failed · ' +
+      nf(remainingList.length) + ' not attempted';
+    $('dlDone').disabled = !doneList.length;
+    $('dlFailed').disabled = !failedList.length;
+    $('dlRemaining').disabled = !remainingList.length;
+    $('dlRemainingFile').disabled = !remainingList.length;
   }
 
   function finish(){
     running = false;
+    $('btnStop').style.display = 'none';
+    $('btnStart').style.display = 'block';
     $('btnStart').disabled = false;
     if(failedList.length){
       $('btnRetry').style.display = 'inline-block';
       $('btnRetry').textContent = 'Retry failed only (' + failedList.length + ')';
+    }
+    if(remainingList.length){
+      $('btnResume').style.display = 'inline-block';
+      $('btnResume').textContent = 'Upload the remaining ones (' + remainingList.length + ')';
     }
   }
 
@@ -356,14 +422,70 @@
     runUpload(invoices);
   });
 
-  $('btnRetry').addEventListener('click', function(){
-    if(!failedList.length) return;
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    $('btnStop').textContent = 'Stopping…';
+    log('Stop requested — finishing the current invoice…', 'warn');
+    fetch('/api/upload-cancel', { method:'POST' }).catch(function(){});
+  });
+
+  function pickInvoices(docs){
     var set = {};
-    failedList.forEach(function(d){ set[d] = 1; });
-    var list = invoices.filter(function(inv){ return set[inv.docNumber]; });
+    docs.forEach(function(d){ set[d] = 1; });
+    return invoices.filter(function(inv){ return set[inv.docNumber]; });
+  }
+
+  $('btnRetry').addEventListener('click', function(){
+    var list = pickInvoices(failedList);
     if(!list.length) return;
-    log('Retrying ' + list.length + ' failed invoices…', 'warn');
     runUpload(list);
+  });
+
+  $('btnResume').addEventListener('click', function(){
+    var list = pickInvoices(remainingList);
+    if(!list.length) return;
+    runUpload(list);
+  });
+
+  $('dlDone').addEventListener('click', function(){
+    if(!doneList.length) return;
+    download('uploaded-invoices.csv', buildCSV(['Invoice number'], doneList.map(function(d){ return [d]; })));
+  });
+
+  $('dlFailed').addEventListener('click', function(){
+    if(!failedList.length) return;
+    download('failed-invoices.csv', buildCSV(['Invoice number'], failedList.map(function(d){ return [d]; })));
+  });
+
+  $('dlRemaining').addEventListener('click', function(){
+    if(!remainingList.length) return;
+    download('not-attempted-invoices.csv', buildCSV(['Invoice number'], remainingList.map(function(d){ return [d]; })));
+  });
+
+  var HEADER = ["*InvoiceNo","*Customer","*InvoiceDate","*DueDate","Terms","Location","Memo",
+    "Item(Product/Service)","ItemDescription","ItemQuantity","ItemRate","*ItemAmount","Service Date"];
+
+  $('dlRemainingFile').addEventListener('click', function(){
+    var list = pickInvoices(remainingList);
+    if(!list.length) return;
+    var negs = {};
+    negativeList().forEach(function(k){ negs[k] = 1; });
+    var rows = [];
+    list.forEach(function(inv){
+      inv.lines.forEach(function(l){
+        var amt = l.amt, rate = l.rate || l.amt;
+        if(negs[String(l.item).toLowerCase()]){
+          amt = -Math.abs(amt); rate = -Math.abs(rate);
+        }
+        rows.push([
+          inv.docNumber, inv.customer, fmtDate(inv.txnDate), fmtDate(inv.dueDate),
+          inv.terms || '', '', inv.memo || '', l.item, l.desc || '',
+          Number(l.qty).toFixed(2), Number(rate).toFixed(2), Number(amt).toFixed(2),
+          fmtDate(l.svc || inv.txnDate)
+        ]);
+      });
+    });
+    download('remaining-invoices-import.csv', buildCSV(HEADER, rows));
   });
 
   $('btnCopyLog').addEventListener('click', function(){
@@ -380,13 +502,6 @@
 </script>
 
 <script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('/sw.js').catch(function(){});
-  });
-}
-</script>
-  <script>
 (function(){
   var box=document.getElementById('connBox');
   var sw=document.getElementById('switcher');
@@ -398,8 +513,7 @@ if ('serviceWorker' in navigator) {
     sw.innerHTML='<div class="head">Loading…</div>';
     sw.classList.add('open');
     fetch('/auth/companies').then(function(r){return r.json();}).then(function(d){
-      var h='<div class="head">QuickBooks companies</div>';
-      sw.innerHTML=h;
+      sw.innerHTML='<div class="head">QuickBooks companies</div>';
       (d.companies||[]).forEach(function(c){
         var b=document.createElement('button');
         b.textContent=c.name;
@@ -417,7 +531,6 @@ if ('serviceWorker' in navigator) {
       add.className='add'; add.textContent='+ Connect another company';
       add.addEventListener('click',function(ev){ ev.stopPropagation(); location.href='/auth/connect'; });
       sw.appendChild(add);
-
       if(d.current){
         var out=document.createElement('button');
         out.className='out'; out.textContent='Disconnect this session';
@@ -433,6 +546,14 @@ if ('serviceWorker' in navigator) {
   document.addEventListener('click',function(){ sw.classList.remove('open'); });
   sw.addEventListener('click',function(e){ e.stopPropagation(); });
 })();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw.js').catch(function(){});
+  });
+}
 </script>
 </body>
 </html>
