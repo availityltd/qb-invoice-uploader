@@ -411,7 +411,7 @@ app.get('/api/qb-invoices', async (req, res) => {
       arr.forEach(inv => { if (inv.DocNumber) numbers.push(inv.DocNumber); });
       if (arr.length < 1000) break;
       start += 1000;
-      if (start > 20000) break;
+      if (start > 2000000) break;
     }
 
     res.json({ count: numbers.length, numbers });
