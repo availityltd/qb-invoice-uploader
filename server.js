@@ -602,10 +602,26 @@ app.post('/api/upload', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
-  const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const send = obj => {
+    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch (e) {}
+  };
   const negSet = new Set(negativeItems.map(s => String(s).toLowerCase()));
+
+  // keep the connection alive through long retries
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch (e) {}
+  }, 10000);
+
+  // if the browser disappears, stop rather than carry on unseen
+  let clientGone = false;
+  req.on('close', () => {
+    clientGone = true;
+    clearInterval(heartbeat);
+    cancelFlags.set(realmId, true);
+  });
 
   try {
     send({ type: 'log', msg: 'Connecting to QuickBooks...' });
@@ -626,7 +642,7 @@ app.post('/api/upload', async (req, res) => {
     cancelFlags.delete(realmId);
 
     for (let i = 0; i < invoices.length; i++) {
-      if (cancelFlags.get(realmId)) {
+      if (clientGone || cancelFlags.get(realmId)) {
         cancelled = true;
         cancelFlags.delete(realmId);
         const remaining = invoices.slice(i).map(x => x.docNumber);
@@ -638,7 +654,7 @@ app.post('/api/upload', async (req, res) => {
       let success = false, lastErr = '';
 
       for (let attempt = 1; attempt <= 5; attempt++) {
-        if (cancelFlags.get(realmId)) break;
+        if (clientGone || cancelFlags.get(realmId)) break;
         try {
           const custId = await getOrCreateCustomer(realmId, token, inv.customer, custCache);
           const payload = buildPayload(inv, custId, itemMap, termMap, negSet);
@@ -655,13 +671,13 @@ app.post('/api/upload', async (req, res) => {
           if (!result.retryable) break;
 
           send({ type: 'retry', doc: inv.docNumber, attempt, msg: result.msg.slice(0, 100) });
-          await sleep(attempt * 15000);
+          await sleep(attempt * 5000);
 
         } catch (e) {
           lastErr = e.message;
           if (/not found in QuickBooks/.test(e.message)) break;
           send({ type: 'retry', doc: inv.docNumber, attempt, msg: e.message.slice(0, 100) });
-          await sleep(attempt * 15000);
+          await sleep(attempt * 5000);
         }
       }
 
@@ -678,11 +694,13 @@ app.post('/api/upload', async (req, res) => {
     }
 
     if (!cancelled) send({ type: 'complete', done, failed, doneList, failedList });
+    clearInterval(heartbeat);
     res.end();
 
   } catch (err) {
     cancelFlags.delete(realmId);
     send({ type: 'error', msg: err.message });
+    clearInterval(heartbeat);
     res.end();
   }
 });
