@@ -578,10 +578,23 @@ function buildPayload(inv, customerId, itemMap, termMap, negSet) {
   return p;
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
 // uploads that can be stopped mid-way
 const cancelFlags = new Map();
+
+// a wait that wakes up early when the run is cancelled
+function sleepUnlessCancelled(ms, realmId, isGone) {
+  return new Promise(resolve => {
+    const step = 250;
+    let waited = 0;
+    const t = setInterval(() => {
+      waited += step;
+      if (waited >= ms || cancelFlags.get(realmId) || isGone()) {
+        clearInterval(t);
+        resolve();
+      }
+    }, step);
+  });
+}
 
 app.post('/api/upload-cancel', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -610,18 +623,17 @@ app.post('/api/upload', async (req, res) => {
   };
   const negSet = new Set(negativeItems.map(s => String(s).toLowerCase()));
 
-  // keep the connection alive through long retries
   const heartbeat = setInterval(() => {
     try { res.write(': ping\n\n'); } catch (e) {}
   }, 10000);
 
-  // if the browser disappears, stop rather than carry on unseen
   let clientGone = false;
   req.on('close', () => {
     clientGone = true;
     clearInterval(heartbeat);
     cancelFlags.set(realmId, true);
   });
+  const isGone = () => clientGone;
 
   try {
     send({ type: 'log', msg: 'Connecting to QuickBooks...' });
@@ -671,13 +683,13 @@ app.post('/api/upload', async (req, res) => {
           if (!result.retryable) break;
 
           send({ type: 'retry', doc: inv.docNumber, attempt, msg: result.msg.slice(0, 100) });
-          await sleep(attempt * 5000);
+          await sleepUnlessCancelled(attempt * 5000, realmId, isGone);
 
         } catch (e) {
           lastErr = e.message;
           if (/not found in QuickBooks/.test(e.message)) break;
           send({ type: 'retry', doc: inv.docNumber, attempt, msg: e.message.slice(0, 100) });
-          await sleep(attempt * 5000);
+          await sleepUnlessCancelled(attempt * 5000, realmId, isGone);
         }
       }
 
@@ -690,7 +702,9 @@ app.post('/api/upload', async (req, res) => {
       }
 
       send({ type: 'progress', done, failed, total: invoices.length, current: i + 1 });
-      if (i < invoices.length - 1) await sleep(Number(delay));
+      if (i < invoices.length - 1) {
+        await sleepUnlessCancelled(Number(delay), realmId, isGone);
+      }
     }
 
     if (!cancelled) send({ type: 'complete', done, failed, doneList, failedList });
