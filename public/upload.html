@@ -69,6 +69,8 @@
           <button class="mini" id="negSave">Save choices</button>
           <span class="mono" id="negSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
         </div>
+        <input type="text" id="negSearch" placeholder="Search products…"
+               style="margin-bottom:10px;font-family:var(--sans);font-size:14px">
         <div class="tbl" style="max-height:300px">
           <table>
             <thead><tr><th style="width:60px">Negative</th><th>Product / service</th><th class="num">Lines</th></tr></thead>
@@ -118,8 +120,9 @@
     </div>
 
     <footer>
-      <p><b>Automatic batches:</b> invoices are sent in batches so each run finishes well inside the hosting time limit. When one batch ends the next starts on its own — you do not need to press anything.</p>
-      <p><b>Safe to interrupt:</b> progress is saved as it goes. If the connection drops or you close the app, the button becomes Resume and picks up exactly where it stopped. Nothing is uploaded twice.</p>
+      <p><b>Automatic batches:</b> invoices are sent in batches so each run finishes well inside the hosting time limit. When one batch ends the next starts on its own.</p>
+      <p><b>Failures are retried:</b> anything that fails is tried again automatically, up to three more rounds, with a growing pause between them — QuickBooks asks for a few minutes after these errors. Press the button to skip a wait.</p>
+      <p><b>Safe to interrupt:</b> progress is saved as it goes. If the connection drops or you close the app, the button becomes Resume and picks up exactly where it stopped.</p>
     </footer>
   </div>
 </div>
@@ -132,6 +135,8 @@
   var invoices = [], negSet = {}, itemCounts = {}, logLines = [];
   var running = false, stopRequested = false;
   var doneSet = {}, failedSet = {}, cursor = 0, retryMode = false, retryList = [];
+  var autoRound = 0, MAX_AUTO_ROUNDS = 3;
+  var batchStart = 0, autoTimer = null, pendingRetry = null;
   var STORE = 'sqbo_upload_progress';
 
   fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
@@ -203,12 +208,15 @@
   }
   function clearProgress(){
     try{ localStorage.removeItem(STORE); }catch(e){}
-    cursor = 0; doneSet = {}; failedSet = {};
   }
 
   $('btnClear').addEventListener('click', function(){
     clearProgress();
+    cursor = 0; doneSet = {}; failedSet = {}; autoRound = 0;
+    if(autoTimer){ clearInterval(autoTimer); autoTimer = null; pendingRetry = null; }
     $('resumeNote').classList.add('hide');
+    $('resultSec').classList.add('hide');
+    $('btnRetry').style.display = 'none';
     $('btnStart').textContent = 'Start upload';
     $('bar').style.width = '0%';
     $('stat').textContent = 'Ready';
@@ -285,7 +293,6 @@
     $('runSec').classList.remove('hide');
     log('Loaded ' + nf(list.length) + ' invoices.', 'info');
 
-    // does saved progress belong to this same set?
     var p = loadProgress();
     if(p && p.total === list.length && p.first === list[0].docNumber && p.cursor > 0 && p.cursor < list.length){
       cursor = p.cursor;
@@ -303,6 +310,7 @@
       showResults();
     } else {
       clearProgress();
+      cursor = 0; doneSet = {}; failedSet = {}; autoRound = 0;
     }
     updateBatchAside();
   }
@@ -324,6 +332,8 @@
 
     names.forEach(function(name){
       var tr = document.createElement('tr');
+      tr.setAttribute('data-name', name.toLowerCase());
+
       var td1 = document.createElement('td');
       var cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -337,25 +347,46 @@
         updateNegAside();
       });
       td1.appendChild(cb);
+
       var td2 = document.createElement('td');
       td2.textContent = name;
+
       var td3 = document.createElement('td');
       td3.className = 'num';
       td3.textContent = itemCounts[name];
+
       tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
       frag.appendChild(tr);
     });
 
     body.appendChild(frag);
-    updateNegAside();
+    var q = $('negSearch').value.trim();
+    if(q) filterNeg();
+    else updateNegAside();
   }
 
-  function updateNegAside(){
+  function filterNeg(){
+    var q = $('negSearch').value.trim().toLowerCase();
+    var rows = $('negBody').getElementsByTagName('tr');
+    var shown = 0;
+    for(var i=0;i<rows.length;i++){
+      var name = rows[i].getAttribute('data-name') || '';
+      var hit = !q || name.indexOf(q) > -1;
+      rows[i].style.display = hit ? '' : 'none';
+      if(hit) shown++;
+    }
+    updateNegAside(q ? shown : null);
+  }
+  $('negSearch').addEventListener('input', filterNeg);
+
+  function updateNegAside(shown){
     var n = 0;
     Object.keys(itemCounts).forEach(function(name){
       if(negSet[name.toLowerCase()]) n++;
     });
-    $('negAside').textContent = n ? (n + ' marked negative') : 'none marked';
+    var txt = n ? (n + ' marked negative') : 'none marked';
+    if(shown !== null && shown !== undefined) txt = shown + ' shown · ' + txt;
+    $('negAside').textContent = txt;
   }
 
   $('negNone').addEventListener('click', function(){
@@ -446,8 +477,11 @@
     else if(ev.type === 'retry') log('retry ' + ev.attempt + '/5  ' + ev.doc + '  ' + ev.msg, 'warn');
     else if(ev.type === 'fail'){
       log('FAILED  ' + ev.doc + '  ' + ev.msg, 'err');
-      failedSet[ev.doc] = 1;
-      if(/duplicate document number/i.test(ev.msg)) doneSet[ev.doc] = 1;
+      if(/duplicate document number/i.test(ev.msg)){
+        doneSet[ev.doc] = 1; delete failedSet[ev.doc];
+      } else {
+        failedSet[ev.doc] = 1;
+      }
     }
     else if(ev.type === 'error') log('ERROR: ' + ev.msg, 'err');
     else if(ev.type === 'progress'){
@@ -455,40 +489,32 @@
       saveProgress();
       paintProgress();
     }
-    else if(ev.type === 'cancelled'){
-      outcome.cancelled = true;
-    }
-    else if(ev.type === 'complete'){
-      outcome.ok = true;
-    }
+    else if(ev.type === 'cancelled'){ outcome.cancelled = true; }
+    else if(ev.type === 'complete'){ outcome.ok = true; }
   }
 
   function paintProgress(){
-    var total = retryMode ? retryList.length : invoices.length;
-    var pos = retryMode ? Object.keys(doneSet).length : cursor;
-    var pct = total ? Math.round(pos / total * 100) : 0;
+    var pct = invoices.length ? Math.round(cursor / invoices.length * 100) : 0;
     $('bar').style.width = pct + '%';
-    var d = 0, f = 0;
-    Object.keys(doneSet).forEach(function(){ d++; });
-    Object.keys(failedSet).forEach(function(k){ if(!doneSet[k]) f++; });
+    var d = Object.keys(doneSet).length;
+    var f = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; }).length;
     $('stat').textContent = d + ' done · ' + f + ' failed · ' +
       Math.max(0, invoices.length - cursor) + ' remaining';
   }
 
   /* ---------- the whole run ---------- */
-  var batchStart = 0;
-
   async function runAll(list, isRetry){
     if(running) return;
     running = true; stopRequested = false; retryMode = !!isRetry;
     retryList = isRetry ? list : [];
+
+    if(autoTimer){ clearInterval(autoTimer); autoTimer = null; pendingRetry = null; }
 
     $('btnStart').style.display = 'none';
     $('btnStop').style.display = 'block';
     $('btnStop').disabled = false;
     $('btnStop').textContent = 'Stop upload';
     $('btnRetry').style.display = 'none';
-    $('resultSec').classList.add('hide');
     $('resumeNote').classList.add('hide');
 
     var size = Math.max(10, parseInt($('batchSize').value,10) || 90);
@@ -502,8 +528,8 @@
       batchStart = isRetry ? 0 : startAt;
       var batchNo = Math.floor(startAt / size) + 1;
       var batchesTotal = Math.ceil(total / size);
-      log('--- Batch ' + batchNo + ' of ' + batchesTotal + ' · invoices ' +
-          (startAt + 1) + '–' + Math.min(startAt + size, total) + ' ---', 'info');
+      log('--- ' + (isRetry ? 'Retry batch ' : 'Batch ') + batchNo + ' of ' + batchesTotal +
+          ' · invoices ' + (startAt + 1) + '–' + Math.min(startAt + size, total) + ' ---', 'info');
 
       var out = await sendBatch(slice);
 
@@ -521,33 +547,78 @@
       saveProgress();
     }
 
-    finish(list, isRetry);
+    finish(isRetry);
   }
 
-  function finish(list, isRetry){
+  function finish(isRetry){
     running = false;
     $('btnStop').style.display = 'none';
     $('btnStart').style.display = 'block';
     $('btnStart').disabled = false;
 
-    var remaining = invoices.length - cursor;
-    if(!isRetry && remaining > 0){
+    var mainLeft = invoices.length - cursor;
+    if(mainLeft > 0){
       $('btnStart').textContent = 'Resume from invoice ' + nf(cursor + 1);
     } else {
       $('btnStart').textContent = 'Start upload';
-      if(!isRetry && remaining <= 0){
-        log('--- All invoices processed ---', 'ok');
-        clearProgress();
-      }
     }
 
+    showResults();
+    updateBatchAside();
+    paintProgress();
+
     var failedOnly = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
+
     if(failedOnly.length){
       $('btnRetry').style.display = 'inline-block';
       $('btnRetry').textContent = 'Retry failed only (' + failedOnly.length + ')';
     }
-    showResults();
-    updateBatchAside();
+
+    var mainDone = mainLeft <= 0;
+
+    // everything sent once — now keep working on the failures on its own
+    if(failedOnly.length && mainDone && !stopRequested && autoRound < MAX_AUTO_ROUNDS){
+      autoRound++;
+      var wait = autoRound * 120;
+      var set = {};
+      failedOnly.forEach(function(d){ set[d] = 1; });
+      var list2 = invoices.filter(function(inv){ return set[inv.docNumber]; });
+
+      if(list2.length){
+        log('Retry round ' + autoRound + ' of ' + MAX_AUTO_ROUNDS + ' — ' + list2.length +
+            ' failed invoice' + (list2.length===1?'':'s') + ', starting in ' + wait + ' seconds. ' +
+            'QuickBooks asks for a few minutes after these errors.', 'warn');
+
+        pendingRetry = list2;
+        var left = wait;
+        $('btnStart').textContent = 'Retrying ' + list2.length + ' in ' + left + 's — press to start now';
+
+        autoTimer = setInterval(function(){
+          left--;
+          if(stopRequested || running){
+            clearInterval(autoTimer); autoTimer = null; pendingRetry = null;
+            return;
+          }
+          if(left <= 0){
+            clearInterval(autoTimer); autoTimer = null;
+            var go = pendingRetry; pendingRetry = null;
+            if(go && go.length) runAll(go, true);
+            return;
+          }
+          $('btnStart').textContent = 'Retrying ' + list2.length + ' in ' + left + 's — press to start now';
+        }, 1000);
+        return;
+      }
+    }
+
+    if(mainDone && !failedOnly.length){
+      log('--- All invoices uploaded ---', 'ok');
+      clearProgress();
+    } else if(mainDone && failedOnly.length && autoRound >= MAX_AUTO_ROUNDS){
+      log('--- ' + failedOnly.length + ' invoice' + (failedOnly.length===1?'':'s') +
+          ' still failing after ' + MAX_AUTO_ROUNDS + ' automatic rounds. ' +
+          'Use Retry failed only, or download the list below. ---', 'warn');
+    }
   }
 
   function remainingDocs(){
@@ -569,12 +640,22 @@
 
   $('btnStart').addEventListener('click', function(){
     if(!invoices.length){ log('Load a file first.', 'err'); return; }
-    if(cursor === 0){ $('log').innerHTML = ''; logLines.length = 0; }
+
+    if(autoTimer && pendingRetry && pendingRetry.length){
+      clearInterval(autoTimer); autoTimer = null;
+      var go = pendingRetry; pendingRetry = null;
+      log('Starting the retry now.', 'warn');
+      runAll(go, true);
+      return;
+    }
+
+    if(cursor === 0){ $('log').innerHTML = ''; logLines.length = 0; autoRound = 0; }
     runAll(invoices, false);
   });
 
   $('btnStop').addEventListener('click', function(){
     stopRequested = true;
+    if(autoTimer){ clearInterval(autoTimer); autoTimer = null; pendingRetry = null; }
     $('btnStop').disabled = true;
     $('btnStop').textContent = 'Stopping…';
     log('Stop requested — finishing the current invoice…', 'warn');
