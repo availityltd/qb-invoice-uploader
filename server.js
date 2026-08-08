@@ -512,7 +512,6 @@ app.get('/api/qb-invoices', async (req, res) => {
   }
 });
 // ==================== Duplicate finder / fixer ====================
-// Reads invoices in a date range with enough detail to spot #12345 vs 12345 pairs.
 app.get('/api/qb-invoice-details', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -533,17 +532,24 @@ app.get('/api/qb-invoice-details', async (req, res) => {
 
     while (true) {
       const q = await qbQuery(realmId, token,
-        `SELECT Id, DocNumber, TxnDate, TotalAmt, SyncToken FROM Invoice ` +
+        `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, SyncToken FROM Invoice ` +
         `WHERE TxnDate >= '${a}' AND TxnDate <= '${b}' ` +
         `STARTPOSITION ${start} MAXRESULTS 1000`);
       const arr = q.Invoice || [];
-      arr.forEach(inv => out.push({
-        id: inv.Id,
-        doc: inv.DocNumber || '',
-        date: inv.TxnDate || '',
-        total: inv.TotalAmt,
-        syncToken: inv.SyncToken
-      }));
+      arr.forEach(inv => {
+        const total = Number(inv.TotalAmt || 0);
+        const bal = Number(inv.Balance === undefined ? total : inv.Balance);
+        out.push({
+          id: inv.Id,
+          doc: inv.DocNumber || '',
+          date: inv.TxnDate || '',
+          total: total,
+          balance: bal,
+          paid: total > 0 && bal <= 0.005,
+          partial: bal > 0.005 && bal < total - 0.005,
+          syncToken: inv.SyncToken
+        });
+      });
       if (arr.length < 1000) break;
       start += 1000;
       if (start > 9000) { hitCap = true; break; }
@@ -583,17 +589,25 @@ app.get('/api/qb-invoice-details', async (req, res) => {
       groups.get(k).push(inv);
     });
 
-    const pairs = [];
-    const plainOnly = [];
+    const pairs = [];       // one # version and one plain version
+    const plainOnly = [];   // plain with no # twin
+    const sameStyle = [];   // the same number written the same way, more than once
 
     groups.forEach((list, k) => {
       const withHash = list.filter(x => x.doc.charAt(0) === '#');
       const plain = list.filter(x => x.doc.charAt(0) !== '#');
 
+      if (withHash.length > 1) {
+        sameStyle.push({ digits: k, style: 'hash', copies: withHash });
+      }
+      if (plain.length > 1) {
+        sameStyle.push({ digits: k, style: 'plain', copies: plain });
+      }
+
       if (withHash.length && plain.length) {
         pairs.push({ digits: k, withHash, plain });
-      } else if (plain.length && !withHash.length) {
-        plain.forEach(p => plainOnly.push(p));
+      } else if (plain.length === 1 && !withHash.length) {
+        plainOnly.push(plain[0]);
       }
     });
 
@@ -601,8 +615,10 @@ app.get('/api/qb-invoice-details', async (req, res) => {
       total: all.length,
       pairs,
       plainOnly,
+      sameStyle,
       pairCount: pairs.length,
-      plainOnlyCount: plainOnly.length
+      plainOnlyCount: plainOnly.length,
+      sameStyleCount: sameStyle.length
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
