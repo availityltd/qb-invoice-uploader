@@ -511,7 +511,195 @@ app.get('/api/qb-invoices', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ==================== Duplicate finder / fixer ====================
+// Reads invoices in a date range with enough detail to spot #12345 vs 12345 pairs.
+app.get('/api/qb-invoice-details', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
+
+  function shiftDays(iso, n) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  async function fetchWindow(token, a, b, depth) {
+    const out = [];
+    let start = 1;
+    let hitCap = false;
+
+    while (true) {
+      const q = await qbQuery(realmId, token,
+        `SELECT Id, DocNumber, TxnDate, TotalAmt, SyncToken FROM Invoice ` +
+        `WHERE TxnDate >= '${a}' AND TxnDate <= '${b}' ` +
+        `STARTPOSITION ${start} MAXRESULTS 1000`);
+      const arr = q.Invoice || [];
+      arr.forEach(inv => out.push({
+        id: inv.Id,
+        doc: inv.DocNumber || '',
+        date: inv.TxnDate || '',
+        total: inv.TotalAmt,
+        syncToken: inv.SyncToken
+      }));
+      if (arr.length < 1000) break;
+      start += 1000;
+      if (start > 9000) { hitCap = true; break; }
+    }
+
+    if (hitCap && depth < 8 && a !== b) {
+      const days = Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+      if (days >= 1) {
+        const mid = shiftDays(a, Math.floor(days / 2));
+        const left = await fetchWindow(token, a, mid, depth + 1);
+        const right = await fetchWindow(token, shiftDays(mid, 1), b, depth + 1);
+        return left.concat(right);
+      }
+    }
+    return out;
+  }
+
+  try {
+    const token = await getAccessToken(realmId);
+    const all = [];
+    let cursor = from, windows = 0;
+
+    while (cursor <= to && windows < 400) {
+      let end = shiftDays(cursor, 6);
+      if (end > to) end = to;
+      all.push(...await fetchWindow(token, cursor, end, 0));
+      cursor = shiftDays(end, 1);
+      windows++;
+    }
+
+    // group by the digits so #12345 and 12345 land together
+    const groups = new Map();
+    all.forEach(inv => {
+      const k = digitsOf(inv.doc);
+      if (!k) return;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(inv);
+    });
+
+    const pairs = [];
+    const plainOnly = [];
+
+    groups.forEach((list, k) => {
+      const withHash = list.filter(x => x.doc.charAt(0) === '#');
+      const plain = list.filter(x => x.doc.charAt(0) !== '#');
+
+      if (withHash.length && plain.length) {
+        pairs.push({ digits: k, withHash, plain });
+      } else if (plain.length && !withHash.length) {
+        plain.forEach(p => plainOnly.push(p));
+      }
+    });
+
+    res.json({
+      total: all.length,
+      pairs,
+      plainOnly,
+      pairCount: pairs.length,
+      plainOnlyCount: plainOnly.length
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Rename an invoice's DocNumber (used to put the # back on)
+app.post('/api/invoice-rename', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { id, newDoc } = req.body;
+  if (!id || !newDoc) return res.status(400).json({ error: 'id and newDoc required' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const q = await qbQuery(realmId, token, `SELECT * FROM Invoice WHERE Id = '${id}'`);
+    const inv = (q.Invoice || [])[0];
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+
+    const r = await fetch(
+      `https://quickbooks.api.intuit.com/v3/company/${realmId}/invoice?minorversion=70`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          Id: inv.Id,
+          SyncToken: inv.SyncToken,
+          sparse: true,
+          DocNumber: newDoc
+        })
+      }
+    );
+
+    const text = await r.text();
+    if (!r.ok) {
+      let msg = text.slice(0, 300);
+      try {
+        const f = JSON.parse(text).Fault;
+        if (f?.Error?.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+      } catch (e) {}
+      return res.status(400).json({ error: msg });
+    }
+
+    res.json({ ok: true, id: inv.Id, newDoc });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Delete an invoice — only ever called for one id at a time, from the review table
+app.post('/api/invoice-delete', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { id } = req.body;
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const q = await qbQuery(realmId, token, `SELECT * FROM Invoice WHERE Id = '${id}'`);
+    const inv = (q.Invoice || [])[0];
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+
+    const r = await fetch(
+      `https://quickbooks.api.intuit.com/v3/company/${realmId}/invoice?operation=delete&minorversion=70`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ Id: inv.Id, SyncToken: inv.SyncToken })
+      }
+    );
+
+    const text = await r.text();
+    if (!r.ok) {
+      let msg = text.slice(0, 300);
+      try {
+        const f = JSON.parse(text).Fault;
+        if (f?.Error?.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+      } catch (e) {}
+      return res.status(400).json({ error: msg });
+    }
+
+    await logUpload(realmId, inv.DocNumber, 'deleted', `QB Id ${inv.Id} removed as a duplicate`, null);
+    res.json({ ok: true, id: inv.Id, doc: inv.DocNumber });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.post('/api/gap-check', (req, res) => {
   const { qbNumbers = [], shopifyNumbers = [] } = req.body;
 
