@@ -11,6 +11,21 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+  .cat{display:flex;align-items:flex-start;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .cat:last-child{border-bottom:0}
+  .cat .count{font-family:var(--mono);font-size:24px;font-weight:500;min-width:64px;
+              font-variant-numeric:tabular-nums;line-height:1.1}
+  .cat .count.zero{color:var(--faint)}
+  .cat .body{flex:1;min-width:260px}
+  .cat .title{font-size:14.5px;font-weight:600;margin-bottom:3px}
+  .cat .desc{font-size:12.5px;color:var(--muted);max-width:62ch}
+  .cat .go{align-self:center}
+  .cat.off{opacity:.45}
+  .danger{background:var(--neg)!important;color:#fff!important;border-color:var(--neg)!important}
+  .hand{border-left:3px solid var(--warn);padding-left:12px;background:var(--warn-soft);
+        border-radius:0 4px 4px 0}
+</style>
 </head>
 <body>
 
@@ -36,7 +51,7 @@
   <div id="gate" class="gate hide">
     <img src="/logo.svg" alt="">
     <h2>Connect your QuickBooks company</h2>
-    <p>This page reads your invoices so you can review them. Nothing is changed until you press a button on a row.</p>
+    <p>This page reads your invoices so you can review them. Nothing changes until you press a button.</p>
     <button class="solid" id="btnConnect">Connect to QuickBooks</button>
   </div>
 
@@ -44,13 +59,12 @@
 
     <div class="note bad" style="margin-bottom:20px">
       <b>Take a backup first.</b> Deleting an invoice in QuickBooks cannot be undone.
-      Go to QuickBooks → Settings → Export data before using the delete buttons on this page.
-      Try one row, check the result in QuickBooks, and only then carry on.
+      Go to QuickBooks → Settings → Export data before using any button here.
     </div>
 
     <div class="sheet">
       <div class="sec">
-        <h2><span class="no">01</span> Which period <span class="aside" id="scanAside"></span></h2>
+        <h2><span class="no">01</span> Scan <span class="aside" id="scanAside"></span></h2>
         <div class="g3">
           <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
           <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
@@ -58,61 +72,121 @@
             <button class="solid" id="btnScan" style="width:100%">Scan QuickBooks</button>
           </div>
         </div>
-        <p class="hint">QuickBooks treats <code>#91306999</code> and <code>91306999</code> as two separate invoices. This finds where both exist for the same order.</p>
+        <p class="hint">Invoices are grouped by their digits, so <code>#91306999</code> and <code>91306999</code> land together — and so do two copies written exactly the same way.</p>
         <div class="stat" id="statScan"></div>
       </div>
     </div>
 
-    <div class="sheet hide" id="pairSheet">
+    <div class="sheet hide" id="resultSheet">
       <div class="sec">
-        <h2><span class="no">02</span> Same order twice <span class="aside" id="pairAside"></span></h2>
-        <p class="hint" style="margin:0 0 14px">Both a <code>#</code> version and a plain version exist. Check the amounts match, then remove whichever one you do not want. The <code>#</code> version matches your older records, so that is usually the one to keep.</p>
-        <div class="tbl" style="max-height:460px">
-          <table>
-            <thead><tr>
-              <th>Order</th>
-              <th>With #</th>
-              <th>Plain</th>
-              <th class="num">Amounts</th>
-              <th style="min-width:200px">Action</th>
-            </tr></thead>
-            <tbody id="pairBody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+        <h2><span class="no">02</span> What was found <span class="aside" id="foundAside"></span></h2>
 
-    <div class="sheet hide" id="plainSheet">
-      <div class="sec">
-        <h2><span class="no">03</span> Plain only — no duplicate <span class="aside" id="plainAside"></span></h2>
-        <p class="hint" style="margin:0 0 14px">These have no <code>#</code> twin, so nothing is duplicated. Add the <code>#</code> so they line up with the rest of your records. Nothing is deleted here.</p>
-        <div class="acts">
-          <button class="solid" id="btnAddAllHash">Add # to all of them</button>
-          <span class="mono" id="addAllStat" style="font-size:12px;align-self:center;color:var(--muted)"></span>
+        <div class="cat" id="cat_bothUnpaid">
+          <span class="count">0</span>
+          <span class="body">
+            <span class="title">Same order as <code>#</code> and plain — neither paid</span>
+            <span class="desc">Amounts match and no payment is attached to either. Removing one of them leaves the order intact.</span>
+          </span>
+          <span class="go">
+            <button class="mini" data-act="bothUnpaid:plain">Delete the plain ones</button>
+            <button class="mini" data-act="bothUnpaid:hash">Delete the # ones</button>
+          </span>
         </div>
-        <div class="tbl" style="max-height:460px">
-          <table>
-            <thead><tr>
-              <th>Invoice</th><th>Date</th><th class="num">Amount</th><th style="min-width:170px">Action</th>
-            </tr></thead>
-            <tbody id="plainBody"></tbody>
-          </table>
+
+        <div class="cat" id="cat_hashPaid">
+          <span class="count">0</span>
+          <span class="body">
+            <span class="title">Same order — the <code>#</code> one is paid</span>
+            <span class="desc">The payment sits on the <code>#</code> version, so the plain one is the spare.</span>
+          </span>
+          <span class="go"><button class="solid" data-act="hashPaid:plain">Delete the unpaid plain ones</button></span>
+        </div>
+
+        <div class="cat" id="cat_plainPaid">
+          <span class="count">0</span>
+          <span class="body">
+            <span class="title">Same order — the plain one is paid</span>
+            <span class="desc">The payment sits on the plain version, so the <code>#</code> one is the spare.</span>
+          </span>
+          <span class="go"><button class="solid" data-act="plainPaid:hash">Delete the unpaid # ones</button></span>
+        </div>
+
+        <div class="cat" id="cat_dupOnePaid">
+          <span class="count">0</span>
+          <span class="body">
+            <span class="title">Same number more than once — one copy is paid</span>
+            <span class="desc">Written the same way, but there twice or more. The paid copy stays; the unpaid extras go.</span>
+          </span>
+          <span class="go"><button class="solid" data-act="dupOnePaid:unpaid">Delete the unpaid copies</button></span>
+        </div>
+
+        <div class="cat" id="cat_dupAllUnpaid">
+          <span class="count">0</span>
+          <span class="body">
+            <span class="title">Same number more than once — none paid</span>
+            <span class="desc">All copies are unpaid and carry the same amount, so one is kept and the rest removed.</span>
+          </span>
+          <span class="go"><button class="mini" data-act="dupAllUnpaid:extras">Keep one, delete the rest</button></span>
+        </div>
+
+        <div class="cat" id="cat_plainOnly">
+          <span class="count">0</span>
+          <span class="body">
+            <span class="title">Plain invoices with no twin</span>
+            <span class="desc">Nothing is duplicated here. Adding the <code>#</code> lines them up with your older records. Nothing is deleted.</span>
+          </span>
+          <span class="go"><button class="solid" data-act="plainOnly:rename">Add # to all of them</button></span>
+        </div>
+
+        <div class="hand" style="margin-top:18px;padding-top:14px;padding-bottom:14px">
+          <div style="font-weight:600;font-size:13.5px;margin-bottom:10px">Left for you to look at</div>
+
+          <div class="cat" id="cat_bothPaid" style="padding-top:8px">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Both copies carry a payment</span>
+              <span class="desc">Deleting either one breaks a payment record. Open these in QuickBooks and decide there.</span>
+            </span>
+            <span class="go"><button class="mini" data-act="bothPaid:list">Download the list</button></span>
+          </div>
+
+          <div class="cat" id="cat_dupAllPaid" style="padding-top:8px">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Same number more than once — every copy paid</span>
+              <span class="desc">Every copy has money against it. These need a decision in QuickBooks.</span>
+            </span>
+            <span class="go"><button class="mini" data-act="dupAllPaid:list">Download the list</button></span>
+          </div>
+
+          <div class="cat" id="cat_amountDiffers" style="padding-top:8px;border-bottom:0">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Same number but different amounts</span>
+              <span class="desc">These are probably not the same order at all, so nothing here is touched.</span>
+            </span>
+            <span class="go"><button class="mini" data-act="amountDiffers:list">Download the list</button></span>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="sheet hide" id="logSheet">
       <div class="sec">
-        <h2><span class="no">04</span> What was changed</h2>
-        <div class="log" id="log" style="height:220px"></div>
+        <h2><span class="no">03</span> What was changed <span class="aside" id="runStat"></span></h2>
+        <div class="prog"><i id="bar"></i></div>
+        <div class="log" id="log" style="height:260px"></div>
         <div class="acts" style="margin-top:12px;margin-bottom:0">
+          <button class="mini" id="btnStop" style="display:none">Stop</button>
           <button class="mini" id="btnCopyLog">Copy log</button>
+          <button class="mini" id="btnRescan">Scan again</button>
         </div>
       </div>
     </div>
 
     <footer>
-      <p><b>One row at a time.</b> Every button on this page acts on a single invoice, so there is no way to remove a batch by accident. The amount column is there to confirm the two really are the same order before you delete anything.</p>
+      <p><b>Paid invoices are never removed by these buttons.</b> A payment in QuickBooks is attached to a particular invoice, so removing that invoice leaves the payment with nothing to sit against. Anything carrying money is put in the section at the bottom for you to handle in QuickBooks.</p>
+      <p><b>Scan again after a run</b> so the counts reflect what is actually in QuickBooks now.</p>
     </footer>
   </div>
 </div>
@@ -121,7 +195,7 @@
 (function(){
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
-  var logLines = [];
+  var data = null, logLines = [], stopFlag = false, busy = false;
 
   fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
     if(s.connected){
@@ -137,7 +211,7 @@
 
   function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function money(n){
-    if(n === null || n === undefined || n === '') return '—';
+    if(n === null || n === undefined || n === '') return '';
     var v = Number(n);
     if(isNaN(v)) return String(n);
     var p = v.toFixed(2).split('.');
@@ -147,6 +221,7 @@
   function isoD(d){
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   }
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
   function log(msg, cls){
     $('logSheet').classList.remove('hide');
@@ -159,237 +234,218 @@
     $('log').scrollTop = $('log').scrollHeight;
   }
 
+  function esc(v){ v=(v==null)?"":String(v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+  function buildCSV(head,rows){
+    var out=[head.join(",")];
+    rows.forEach(function(r){ out.push(r.map(esc).join(",")); });
+    return out.join("\r\n")+"\r\n";
+  }
+  function download(name,csv){
+    var b=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+    var a=document.createElement("a"); a.href=URL.createObjectURL(b); a.download=name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
+  }
+
   var t = new Date();
   $('dTo').value = isoD(t);
   $('dFrom').value = isoD(new Date(t.getFullYear(), t.getMonth(), 1));
 
   /* ---------- scan ---------- */
-  $('btnScan').addEventListener('click', function(){
+  function scan(){
     var from = $('dFrom').value, to = $('dTo').value;
     if(!from || !to){ setStat($('statScan'),'bad','Choose both dates first.'); return; }
 
     setStat($('statScan'),'busy','Reading invoices from QuickBooks…');
     $('btnScan').disabled = true;
-    $('pairSheet').classList.add('hide');
-    $('plainSheet').classList.add('hide');
+    $('resultSheet').classList.add('hide');
 
     fetch('/api/qb-invoice-details?from='+from+'&to='+to)
       .then(function(r){ return r.json(); })
       .then(function(d){
         $('btnScan').disabled = false;
         if(d.error){ setStat($('statScan'),'bad', d.error); return; }
-
-        setStat($('statScan'),'ok',
-          '<b>'+nf(d.total)+' invoices read</b><i>'+
-          nf(d.pairCount)+' order'+(d.pairCount===1?'':'s')+' exist twice · '+
-          nf(d.plainOnlyCount)+' plain invoice'+(d.plainOnlyCount===1?'':'s')+' with no # twin</i>');
-
+        data = d;
+        setStat($('statScan'),'ok','<b>'+nf(d.total)+' invoices read</b><i>'+from+' to '+to+'</i>');
         $('scanAside').textContent = from + ' to ' + to;
-        buildPairs(d.pairs || []);
-        buildPlain(d.plainOnly || []);
+        render();
       })
       .catch(function(e){
         $('btnScan').disabled = false;
         setStat($('statScan'),'bad','Could not reach QuickBooks: '+e.message);
       });
-  });
+  }
+  $('btnScan').addEventListener('click', scan);
+  $('btnRescan').addEventListener('click', scan);
 
-  /* ---------- pairs ---------- */
-  function buildPairs(pairs){
-    if(!pairs.length){ $('pairSheet').classList.add('hide'); return; }
-    $('pairSheet').classList.remove('hide');
-    $('pairAside').textContent = nf(pairs.length) + ' order' + (pairs.length===1?'':'s');
+  function render(){
+    var c = data.cat;
+    $('resultSheet').classList.remove('hide');
 
-    var body = $('pairBody');
-    body.innerHTML = '';
-    var frag = document.createDocumentFragment();
+    var totalIssues = c.bothUnpaid.length + c.hashPaid.length + c.plainPaid.length +
+                      c.bothPaid.length + c.dupOnePaid.length + c.dupAllUnpaid.length +
+                      c.dupAllPaid.length + c.amountDiffers.length;
+    $('foundAside').textContent = totalIssues
+      ? nf(totalIssues) + ' need attention · ' + nf(c.plainOnly.length) + ' need the #'
+      : (c.plainOnly.length ? nf(c.plainOnly.length) + ' need the #' : 'nothing to fix');
 
-    pairs.forEach(function(p){
-      var h = p.withHash[0], q = p.plain[0];
-      var tr = document.createElement('tr');
-
-      var td0 = document.createElement('td');
-      td0.className = 'mono';
-      td0.textContent = p.digits;
-
-      var td1 = document.createElement('td');
-      td1.className = 'mono';
-      td1.innerHTML = h.doc + '<br><span style="color:var(--faint);font-size:11px">Id ' + h.id + ' · ' + h.date + '</span>';
-
-      var td2 = document.createElement('td');
-      td2.className = 'mono';
-      td2.innerHTML = q.doc + '<br><span style="color:var(--faint);font-size:11px">Id ' + q.id + ' · ' + q.date + '</span>';
-
-      var same = Number(h.total) === Number(q.total);
-      var td3 = document.createElement('td');
-      td3.className = 'num mono';
-      td3.innerHTML = money(h.total) + '<br>' + money(q.total) +
-        '<br><span style="font-size:11px;color:' + (same ? 'var(--ok)' : 'var(--neg)') + '">' +
-        (same ? 'same ✓' : 'different ✕') + '</span>';
-
-      var td4 = document.createElement('td');
-
-      var bPlain = document.createElement('button');
-      bPlain.className = 'mini';
-      bPlain.textContent = 'Delete plain';
-      bPlain.style.marginRight = '6px';
-      bPlain.addEventListener('click', function(){
-        confirmDelete(q, 'plain', bPlain, tr, same);
-      });
-
-      var bHash = document.createElement('button');
-      bHash.className = 'mini';
-      bHash.textContent = 'Delete #';
-      bHash.addEventListener('click', function(){
-        confirmDelete(h, 'hash', bHash, tr, same);
-      });
-
-      td4.appendChild(bPlain);
-      td4.appendChild(bHash);
-
-      if(!same){
-        var warn = document.createElement('div');
-        warn.style.cssText = 'font-size:11px;color:var(--neg);margin-top:5px';
-        warn.textContent = 'Amounts differ — check in QuickBooks first';
-        td4.appendChild(warn);
-      }
-
-      tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2);
-      tr.appendChild(td3); tr.appendChild(td4);
-      frag.appendChild(tr);
+    ['bothUnpaid','hashPaid','plainPaid','bothPaid','dupOnePaid','dupAllUnpaid',
+     'dupAllPaid','amountDiffers','plainOnly'].forEach(function(k){
+      var box = $('cat_' + k);
+      if(!box) return;
+      var n = (c[k] || []).length;
+      var el = box.querySelector('.count');
+      el.textContent = nf(n);
+      el.classList.toggle('zero', n === 0);
+      box.classList.toggle('off', n === 0);
+      box.querySelectorAll('button').forEach(function(b){ b.disabled = (n === 0); });
     });
-
-    body.appendChild(frag);
   }
 
-  function confirmDelete(inv, which, btn, tr, same){
-    var msg = 'Delete invoice ' + inv.doc + ' (QuickBooks Id ' + inv.id + ', ' + money(inv.total) + ')?\n\n' +
-      (same ? '' : 'WARNING: the two amounts do not match, so these may not be the same order.\n\n') +
-      'This cannot be undone.';
+  /* ---------- picking what a button acts on ---------- */
+  function pickFor(act){
+    var c = data.cat, out = [];
+
+    if(act === 'bothUnpaid:plain')   c.bothUnpaid.forEach(function(p){ out.push(p.plain); });
+    else if(act === 'bothUnpaid:hash') c.bothUnpaid.forEach(function(p){ out.push(p.hash); });
+    else if(act === 'hashPaid:plain')  c.hashPaid.forEach(function(p){ out.push(p.plain); });
+    else if(act === 'plainPaid:hash')  c.plainPaid.forEach(function(p){ out.push(p.hash); });
+    else if(act === 'dupOnePaid:unpaid'){
+      c.dupOnePaid.forEach(function(g){ g.unpaidOnes.forEach(function(x){ out.push(x); }); });
+    }
+    else if(act === 'dupAllUnpaid:extras'){
+      c.dupAllUnpaid.forEach(function(g){
+        // keep the first, remove the rest
+        for(var i=1;i<g.copies.length;i++) out.push(g.copies[i]);
+      });
+    }
+    else if(act === 'plainOnly:rename') out = c.plainOnly.slice();
+
+    return out;
+  }
+
+  function describe(act, n){
+    var map = {
+      'bothUnpaid:plain':  'Delete ' + n + ' plain invoice' + (n===1?'':'s') + ', keeping the # version of each.',
+      'bothUnpaid:hash':   'Delete ' + n + ' # invoice' + (n===1?'':'s') + ', keeping the plain version of each.',
+      'hashPaid:plain':    'Delete ' + n + ' unpaid plain invoice' + (n===1?'':'s') + '. The paid # version stays.',
+      'plainPaid:hash':    'Delete ' + n + ' unpaid # invoice' + (n===1?'':'s') + '. The paid plain version stays.',
+      'dupOnePaid:unpaid': 'Delete ' + n + ' unpaid duplicate cop' + (n===1?'y':'ies') + '. Every paid copy stays.',
+      'dupAllUnpaid:extras': 'Delete ' + n + ' extra cop' + (n===1?'y':'ies') + '. One copy of each number is kept.',
+      'plainOnly:rename':  'Add # to ' + n + ' invoice' + (n===1?'':'s') + '. Nothing is deleted.'
+    };
+    return map[act] || '';
+  }
+
+  /* ---------- run ---------- */
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('button[data-act]');
+    if(!b || b.disabled || busy) return;
+    var act = b.getAttribute('data-act');
+
+    if(act.indexOf(':list') > -1){ downloadList(act.split(':')[0]); return; }
+
+    var list = pickFor(act);
+    if(!list.length) return;
+
+    var rename = act === 'plainOnly:rename';
+    var msg = describe(act, list.length) + '\n\n' +
+      (rename ? 'Only the invoice number changes.' : 'This cannot be undone.');
     if(!confirm(msg)) return;
 
-    btn.disabled = true;
-    btn.textContent = 'Deleting…';
+    run(list, rename, act);
+  });
 
-    fetch('/api/invoice-delete', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+  async function run(list, rename, act){
+    busy = true;
+    stopFlag = false;
+    $('logSheet').classList.remove('hide');
+    $('btnStop').style.display = 'inline-block';
+    document.querySelectorAll('button[data-act]').forEach(function(b){ b.disabled = true; });
+
+    log('--- ' + describe(act, list.length) + ' ---', 'info');
+
+    var ok = 0, bad = 0;
+
+    for(var i=0;i<list.length;i++){
+      if(stopFlag){ log('Stopped by you.', 'warn'); break; }
+      var inv = list[i];
+
+      $('bar').style.width = Math.round((i / list.length) * 100) + '%';
+      $('runStat').textContent = (i+1) + ' of ' + list.length;
+
+      var good = rename ? await renameOne(inv) : await deleteOne(inv);
+      if(good) ok++; else bad++;
+      await sleep(rename ? 600 : 800);
+    }
+
+    $('bar').style.width = '100%';
+    $('runStat').textContent = ok + (rename ? ' renamed' : ' deleted') + (bad ? ', ' + bad + ' failed' : '');
+    log('--- Finished: ' + ok + (rename ? ' renamed' : ' deleted') +
+        (bad ? ', ' + bad + ' failed' : '') + '. Press Scan again to refresh the counts. ---',
+        bad ? 'warn' : 'ok');
+
+    $('btnStop').style.display = 'none';
+    busy = false;
+    render();
+  }
+
+  function deleteOne(inv){
+    return fetch('/api/invoice-delete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ id: inv.id })
     })
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(d.error){
-        btn.disabled = false;
-        btn.textContent = which === 'plain' ? 'Delete plain' : 'Delete #';
-        log('Could not delete ' + inv.doc + ': ' + d.error, 'err');
-        return;
-      }
-      log('Deleted ' + inv.doc + ' (Id ' + inv.id + ')', 'ok');
-      tr.style.opacity = '0.4';
-      tr.querySelectorAll('button').forEach(function(b){ b.disabled = true; });
-      btn.textContent = 'Deleted';
+      if(d.error){ log('Could not delete ' + inv.doc + ': ' + d.error, 'err'); return false; }
+      log('Deleted ' + inv.doc + '   (Id ' + inv.id + ' · ' + money(inv.total) + ')', 'ok');
+      return true;
     })
-    .catch(function(e){
-      btn.disabled = false;
-      btn.textContent = which === 'plain' ? 'Delete plain' : 'Delete #';
-      log('Could not delete ' + inv.doc + ': ' + e.message, 'err');
-    });
+    .catch(function(e){ log('Could not delete ' + inv.doc + ': ' + e.message, 'err'); return false; });
   }
 
-  /* ---------- plain only ---------- */
-  var plainRows = [];
-
-  function buildPlain(list){
-    plainRows = [];
-    if(!list.length){ $('plainSheet').classList.add('hide'); return; }
-    $('plainSheet').classList.remove('hide');
-    $('plainAside').textContent = nf(list.length) + ' invoice' + (list.length===1?'':'s');
-
-    var body = $('plainBody');
-    body.innerHTML = '';
-    var frag = document.createDocumentFragment();
-
-    list.forEach(function(inv){
-      var tr = document.createElement('tr');
-
-      var td0 = document.createElement('td');
-      td0.className = 'mono';
-      td0.innerHTML = inv.doc + '<br><span style="color:var(--faint);font-size:11px">Id ' + inv.id + '</span>';
-
-      var td1 = document.createElement('td');
-      td1.className = 'mono';
-      td1.textContent = inv.date;
-
-      var td2 = document.createElement('td');
-      td2.className = 'num mono';
-      td2.textContent = money(inv.total);
-
-      var td3 = document.createElement('td');
-      var b = document.createElement('button');
-      b.className = 'mini';
-      b.textContent = 'Add # → #' + inv.doc;
-      b.addEventListener('click', function(){ addHash(inv, b, tr); });
-      td3.appendChild(b);
-
-      tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
-      frag.appendChild(tr);
-
-      plainRows.push({ inv: inv, btn: b, tr: tr });
-    });
-
-    body.appendChild(frag);
-  }
-
-  function addHash(inv, btn, tr){
-    btn.disabled = true;
-    btn.textContent = 'Renaming…';
-
+  function renameOne(inv){
     return fetch('/api/invoice-rename', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ id: inv.id, newDoc: '#' + inv.doc })
     })
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(d.error){
-        btn.disabled = false;
-        btn.textContent = 'Add # → #' + inv.doc;
-        log('Could not rename ' + inv.doc + ': ' + d.error, 'err');
-        return false;
-      }
+      if(d.error){ log('Could not rename ' + inv.doc + ': ' + d.error, 'err'); return false; }
       log('Renamed ' + inv.doc + ' → #' + inv.doc, 'ok');
-      tr.style.opacity = '0.4';
-      btn.textContent = 'Done';
       return true;
     })
-    .catch(function(e){
-      btn.disabled = false;
-      btn.textContent = 'Add # → #' + inv.doc;
-      log('Could not rename ' + inv.doc + ': ' + e.message, 'err');
-      return false;
-    });
+    .catch(function(e){ log('Could not rename ' + inv.doc + ': ' + e.message, 'err'); return false; });
   }
 
-  $('btnAddAllHash').addEventListener('click', async function(){
-    var todo = plainRows.filter(function(r){ return !r.btn.disabled; });
-    if(!todo.length) return;
-    if(!confirm('Add # to ' + todo.length + ' invoice' + (todo.length===1?'':'s') +
-                '?\n\nNothing is deleted — only the invoice number changes.')) return;
-
-    $('btnAddAllHash').disabled = true;
-    var ok = 0, bad = 0;
-
-    for(var i=0;i<todo.length;i++){
-      $('addAllStat').textContent = (i+1) + ' of ' + todo.length + '…';
-      var good = await addHash(todo[i].inv, todo[i].btn, todo[i].tr);
-      if(good) ok++; else bad++;
-      await new Promise(function(r){ setTimeout(r, 700); });
-    }
-
-    $('btnAddAllHash').disabled = false;
-    $('addAllStat').textContent = ok + ' renamed' + (bad ? ', ' + bad + ' failed' : '');
-    log('--- Finished: ' + ok + ' renamed, ' + bad + ' failed ---', bad ? 'warn' : 'ok');
+  $('btnStop').addEventListener('click', function(){
+    stopFlag = true;
+    $('btnStop').textContent = 'Stopping…';
+    setTimeout(function(){ $('btnStop').textContent = 'Stop'; }, 2000);
   });
+
+  /* ---------- download the hands-off lists ---------- */
+  function downloadList(kind){
+    var c = data.cat, rows = [], name = kind + '.csv';
+
+    if(kind === 'bothPaid' || kind === 'amountDiffers'){
+      c[kind].forEach(function(p){
+        rows.push([p.hash.doc, p.hash.id, p.hash.date, money(p.hash.total), money(p.hash.balance),
+                   p.plain.doc, p.plain.id, p.plain.date, money(p.plain.total), money(p.plain.balance)]);
+      });
+      download(name, buildCSV(
+        ['# invoice','# id','# date','# total','# outstanding',
+         'Plain invoice','Plain id','Plain date','Plain total','Plain outstanding'], rows));
+    } else if(kind === 'dupAllPaid'){
+      c[kind].forEach(function(g){
+        g.copies.forEach(function(x){
+          rows.push([x.doc, x.id, x.date, money(x.total), money(x.balance)]);
+        });
+      });
+      download(name, buildCSV(['Invoice','QuickBooks id','Date','Total','Outstanding'], rows));
+    }
+    log('Downloaded the ' + kind + ' list.', 'info');
+  }
 
   $('btnCopyLog').addEventListener('click', function(){
     var ta = document.createElement('textarea');
