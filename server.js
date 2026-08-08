@@ -24,6 +24,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
 
+const API = 'https://quickbooks.api.intuit.com';
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const AUTH_URL = 'https://appcenter.intuit.com/connect/oauth2';
 const TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
@@ -249,6 +250,12 @@ function digitsOf(v) {
   return String(v ?? '').replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
 }
 
+function shiftDays(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 // ==================== Excel preview ====================
 function parseWorkbook(buffer) {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
@@ -455,12 +462,6 @@ app.get('/api/qb-invoices', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
 
-  function shiftDays(iso, n) {
-    const d = new Date(iso + 'T00:00:00Z');
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-  }
-
   async function fetchWindow(token, a, b, depth) {
     const out = [];
     let start = 1;
@@ -493,14 +494,12 @@ app.get('/api/qb-invoices', async (req, res) => {
   try {
     const token = await getAccessToken(realmId);
     const all = [];
-    let cursor = from;
-    let windows = 0;
+    let cursor = from, windows = 0;
 
     while (cursor <= to && windows < 400) {
       let end = shiftDays(cursor, 6);
       if (end > to) end = to;
-      const part = await fetchWindow(token, cursor, end, 0);
-      all.push(...part);
+      all.push(...await fetchWindow(token, cursor, end, 0));
       cursor = shiftDays(end, 1);
       windows++;
     }
@@ -511,19 +510,46 @@ app.get('/api/qb-invoices', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-// ==================== Duplicate finder / fixer ====================
+
+app.post('/api/gap-check', (req, res) => {
+  const { qbNumbers = [], shopifyNumbers = [] } = req.body;
+
+  const qbSet = new Set();
+  const qbDigits = new Set();
+  qbNumbers.forEach(n => {
+    const k = normInv(n);
+    if (k) qbSet.add(k);
+    const d = digitsOf(n);
+    if (d) qbDigits.add(d);
+  });
+
+  const missing = [];
+  const present = [];
+  const seen = new Set();
+
+  shopifyNumbers.forEach(raw => {
+    const k = normInv(raw);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    if (qbSet.has(k) || qbDigits.has(digitsOf(raw))) present.push(String(raw).trim());
+    else missing.push(String(raw).trim());
+  });
+
+  res.json({
+    inQb: qbNumbers.length,
+    inShopify: seen.size,
+    present: present.length,
+    missing
+  });
+});
+
+// ==================== Duplicate finder ====================
 app.get('/api/qb-invoice-details', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
-
-  function shiftDays(iso, n) {
-    const d = new Date(iso + 'T00:00:00Z');
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-  }
 
   async function fetchWindow(token, a, b, depth) {
     const out = [];
@@ -580,7 +606,6 @@ app.get('/api/qb-invoice-details', async (req, res) => {
       windows++;
     }
 
-    // group by the digits so #12345 and 12345 land together
     const groups = new Map();
     all.forEach(inv => {
       const k = digitsOf(inv.doc);
@@ -589,42 +614,39 @@ app.get('/api/qb-invoice-details', async (req, res) => {
       groups.get(k).push(inv);
     });
 
-const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+    const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
     const isPaid = x => x.paid || x.partial;
 
     const cat = {
-      bothUnpaid: [],       // # and plain, neither paid — either can go
-      hashPaid: [],         // # is paid, plain is not — drop the plain one
-      plainPaid: [],        // plain is paid, # is not — drop the # one
-      bothPaid: [],         // both carry a payment — needs a person
-      amountDiffers: [],    // same digits but different totals — leave alone
-      dupOnePaid: [],       // same number twice, one paid — drop the unpaid extras
-      dupAllUnpaid: [],     // same number twice, none paid — keep one
-      dupAllPaid: [],       // same number twice, all paid — needs a person
-      plainOnly: []         // plain with no twin — just needs the #
+      bothUnpaid: [],
+      hashPaid: [],
+      plainPaid: [],
+      bothPaid: [],
+      amountDiffers: [],
+      dupOnePaid: [],
+      dupAllUnpaid: [],
+      dupAllPaid: [],
+      plainOnly: []
     };
 
     groups.forEach((list, k) => {
       const withHash = list.filter(x => x.doc.charAt(0) === '#');
       const plain = list.filter(x => x.doc.charAt(0) !== '#');
 
-      // the same number written the same way, more than once
-      [['hash', withHash], ['plain', plain]].forEach(([style, copies]) => {
+      [['hash', withHash], ['plain', plain]].forEach(pair => {
+        const style = pair[0], copies = pair[1];
         if (copies.length < 2) return;
         const paidOnes = copies.filter(isPaid);
         const unpaidOnes = copies.filter(x => !isPaid(x));
         const entry = { digits: k, style, copies, paidOnes, unpaidOnes };
-
         if (!paidOnes.length) cat.dupAllUnpaid.push(entry);
         else if (!unpaidOnes.length) cat.dupAllPaid.push(entry);
         else cat.dupOnePaid.push(entry);
       });
 
-      // one # version and one plain version of the same order
       if (withHash.length === 1 && plain.length === 1) {
         const h = withHash[0], p = plain[0];
         const entry = { digits: k, hash: h, plain: p };
-
         if (!near(h.total, p.total)) cat.amountDiffers.push(entry);
         else if (!isPaid(h) && !isPaid(p)) cat.bothUnpaid.push(entry);
         else if (isPaid(h) && !isPaid(p)) cat.hashPaid.push(entry);
@@ -632,13 +654,15 @@ const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
         else cat.bothPaid.push(entry);
       }
 
-      // a plain invoice on its own — only needs the # putting back
       if (plain.length === 1 && !withHash.length) cat.plainOnly.push(plain[0]);
     });
 
     res.json({ total: all.length, cat });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-// Rename an invoice's DocNumber (used to put the # back on)
 app.post('/api/invoice-rename', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -652,30 +676,27 @@ app.post('/api/invoice-rename', async (req, res) => {
     const inv = (q.Invoice || [])[0];
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
 
-    const r = await fetch(
-      `https://quickbooks.api.intuit.com/v3/company/${realmId}/invoice?minorversion=70`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          Id: inv.Id,
-          SyncToken: inv.SyncToken,
-          sparse: true,
-          DocNumber: newDoc
-        })
-      }
-    );
+    const r = await fetch(`${API}/v3/company/${realmId}/invoice?minorversion=70`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        Id: inv.Id,
+        SyncToken: inv.SyncToken,
+        sparse: true,
+        DocNumber: newDoc
+      })
+    });
 
     const text = await r.text();
     if (!r.ok) {
       let msg = text.slice(0, 300);
       try {
         const f = JSON.parse(text).Fault;
-        if (f?.Error?.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+        if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
       } catch (e) {}
       return res.status(400).json({ error: msg });
     }
@@ -686,7 +707,6 @@ app.post('/api/invoice-rename', async (req, res) => {
   }
 });
 
-// Delete an invoice — only ever called for one id at a time, from the review table
 app.post('/api/invoice-delete', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -700,25 +720,22 @@ app.post('/api/invoice-delete', async (req, res) => {
     const inv = (q.Invoice || [])[0];
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
 
-    const r = await fetch(
-      `https://quickbooks.api.intuit.com/v3/company/${realmId}/invoice?operation=delete&minorversion=70`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ Id: inv.Id, SyncToken: inv.SyncToken })
-      }
-    );
+    const r = await fetch(`${API}/v3/company/${realmId}/invoice?operation=delete&minorversion=70`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ Id: inv.Id, SyncToken: inv.SyncToken })
+    });
 
     const text = await r.text();
     if (!r.ok) {
       let msg = text.slice(0, 300);
       try {
         const f = JSON.parse(text).Fault;
-        if (f?.Error?.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+        if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
       } catch (e) {}
       return res.status(400).json({ error: msg });
     }
@@ -728,37 +745,6 @@ app.post('/api/invoice-delete', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-app.post('/api/gap-check', (req, res) => {
-  const { qbNumbers = [], shopifyNumbers = [] } = req.body;
-
-  const qbSet = new Set();
-  const qbDigits = new Set();
-  qbNumbers.forEach(n => {
-    const k = normInv(n);
-    if (k) qbSet.add(k);
-    const d = digitsOf(n);
-    if (d) qbDigits.add(d);
-  });
-
-  const missing = [];
-  const present = [];
-  const seen = new Set();
-
-  shopifyNumbers.forEach(raw => {
-    const k = normInv(raw);
-    if (!k || seen.has(k)) return;
-    seen.add(k);
-    if (qbSet.has(k) || qbDigits.has(digitsOf(raw))) present.push(String(raw).trim());
-    else missing.push(String(raw).trim());
-  });
-
-  res.json({
-    inQb: qbNumbers.length,
-    inShopify: seen.size,
-    present: present.length,
-    missing
-  });
 });
 
 // ==================== Upload ====================
@@ -795,10 +781,8 @@ function buildPayload(inv, customerId, itemMap, termMap, negSet) {
   return p;
 }
 
-// uploads that can be stopped mid-way
 const cancelFlags = new Map();
 
-// a wait that wakes up early when the run is cancelled
 function sleepUnlessCancelled(ms, realmId, isGone) {
   return new Promise(resolve => {
     const step = 250;
