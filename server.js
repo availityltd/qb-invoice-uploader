@@ -589,41 +589,54 @@ app.get('/api/qb-invoice-details', async (req, res) => {
       groups.get(k).push(inv);
     });
 
-    const pairs = [];       // one # version and one plain version
-    const plainOnly = [];   // plain with no # twin
-    const sameStyle = [];   // the same number written the same way, more than once
+const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+    const isPaid = x => x.paid || x.partial;
+
+    const cat = {
+      bothUnpaid: [],       // # and plain, neither paid — either can go
+      hashPaid: [],         // # is paid, plain is not — drop the plain one
+      plainPaid: [],        // plain is paid, # is not — drop the # one
+      bothPaid: [],         // both carry a payment — needs a person
+      amountDiffers: [],    // same digits but different totals — leave alone
+      dupOnePaid: [],       // same number twice, one paid — drop the unpaid extras
+      dupAllUnpaid: [],     // same number twice, none paid — keep one
+      dupAllPaid: [],       // same number twice, all paid — needs a person
+      plainOnly: []         // plain with no twin — just needs the #
+    };
 
     groups.forEach((list, k) => {
       const withHash = list.filter(x => x.doc.charAt(0) === '#');
       const plain = list.filter(x => x.doc.charAt(0) !== '#');
 
-      if (withHash.length > 1) {
-        sameStyle.push({ digits: k, style: 'hash', copies: withHash });
-      }
-      if (plain.length > 1) {
-        sameStyle.push({ digits: k, style: 'plain', copies: plain });
+      // the same number written the same way, more than once
+      [['hash', withHash], ['plain', plain]].forEach(([style, copies]) => {
+        if (copies.length < 2) return;
+        const paidOnes = copies.filter(isPaid);
+        const unpaidOnes = copies.filter(x => !isPaid(x));
+        const entry = { digits: k, style, copies, paidOnes, unpaidOnes };
+
+        if (!paidOnes.length) cat.dupAllUnpaid.push(entry);
+        else if (!unpaidOnes.length) cat.dupAllPaid.push(entry);
+        else cat.dupOnePaid.push(entry);
+      });
+
+      // one # version and one plain version of the same order
+      if (withHash.length === 1 && plain.length === 1) {
+        const h = withHash[0], p = plain[0];
+        const entry = { digits: k, hash: h, plain: p };
+
+        if (!near(h.total, p.total)) cat.amountDiffers.push(entry);
+        else if (!isPaid(h) && !isPaid(p)) cat.bothUnpaid.push(entry);
+        else if (isPaid(h) && !isPaid(p)) cat.hashPaid.push(entry);
+        else if (!isPaid(h) && isPaid(p)) cat.plainPaid.push(entry);
+        else cat.bothPaid.push(entry);
       }
 
-      if (withHash.length && plain.length) {
-        pairs.push({ digits: k, withHash, plain });
-      } else if (plain.length === 1 && !withHash.length) {
-        plainOnly.push(plain[0]);
-      }
+      // a plain invoice on its own — only needs the # putting back
+      if (plain.length === 1 && !withHash.length) cat.plainOnly.push(plain[0]);
     });
 
-    res.json({
-      total: all.length,
-      pairs,
-      plainOnly,
-      sameStyle,
-      pairCount: pairs.length,
-      plainOnlyCount: plainOnly.length,
-      sameStyleCount: sameStyle.length
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+    res.json({ total: all.length, cat });
 
 // Rename an invoice's DocNumber (used to put the # back on)
 app.post('/api/invoice-rename', async (req, res) => {
