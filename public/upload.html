@@ -433,16 +433,38 @@
         var reader = res.body.getReader();
         var decoder = new TextDecoder();
         var buffer = '';
+        var lastBeat = Date.now();
+        var settled = false;
+
+        // the server pings every 10s — if nothing arrives for 90s the link is dead
+        var watchdog = setInterval(function(){
+          if(Date.now() - lastBeat > 90000 && !settled){
+            settled = true;
+            clearInterval(watchdog);
+            try{ reader.cancel(); }catch(e){}
+            log('No response for 90 seconds — dropping this connection.', 'warn');
+            outcome.broke = true;
+            resolve(outcome);
+          }
+        }, 5000);
+
+        function done(){
+          if(settled) return;
+          settled = true;
+          clearInterval(watchdog);
+          resolve(outcome);
+        }
 
         function pump(){
           return reader.read().then(function(step){
-            if(step.done){ resolve(outcome); return; }
+            lastBeat = Date.now();
+            if(step.done){ done(); return; }
             buffer += decoder.decode(step.value, {stream:true});
             var parts = buffer.split('\n\n');
             buffer = parts.pop();
             parts.forEach(function(p){ handle(p, outcome); });
             return pump();
-          });
+          }).catch(function(){ done(); });
         }
         return pump();
       })
