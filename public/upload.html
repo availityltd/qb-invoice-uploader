@@ -46,6 +46,7 @@
         <h2><span class="no">01</span> Invoices to create <span class="aside" id="srcAside"></span></h2>
 
         <div id="fromConvert" class="note ok hide" style="margin-bottom:14px"></div>
+        <div id="resumeNote" class="note warn hide" style="margin-bottom:14px"></div>
 
         <div id="fileArea">
           <div class="zone" id="zoneFile" tabindex="0" role="button">
@@ -77,13 +78,19 @@
       </div>
 
       <div class="sec hide" id="runSec">
-        <h2><span class="no">03</span> Run</h2>
+        <h2><span class="no">03</span> Run <span class="aside" id="batchAside"></span></h2>
         <div class="g3">
           <div>
             <label for="delay">Delay between invoices (seconds)</label>
-            <input type="number" id="delay" value="1.5" step="0.5" min="0.5">
+            <input type="number" id="delay" value="1" step="0.5" min="0.5">
             <p class="hint">Raise this if QuickBooks reports inventory lock errors.</p>
           </div>
+          <div>
+            <label for="batchSize">Invoices per batch</label>
+            <input type="number" id="batchSize" value="90" step="10" min="10" max="300">
+            <p class="hint">Each batch is a separate run, so it finishes before the hosting time limit. Batches continue automatically.</p>
+          </div>
+          <div></div>
         </div>
         <div style="margin-top:16px">
           <button class="run" id="btnStart">Start upload</button>
@@ -94,8 +101,8 @@
         <div class="log" id="log"></div>
         <div class="acts" style="margin-top:12px;margin-bottom:0">
           <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
-          <button class="mini" id="btnResume" style="display:none">Upload the remaining ones</button>
           <button class="mini" id="btnCopyLog">Copy log</button>
+          <button class="mini" id="btnClear">Clear saved progress</button>
         </div>
       </div>
 
@@ -104,15 +111,15 @@
         <div class="acts" style="margin-bottom:0">
           <button class="mini" id="dlDone">Uploaded invoices</button>
           <button class="mini" id="dlFailed">Failed invoices</button>
-          <button class="mini" id="dlRemaining">Not attempted</button>
+          <button class="mini" id="dlRemaining">Not yet uploaded</button>
           <button class="solid" id="dlRemainingFile">Download remaining as import file</button>
         </div>
       </div>
     </div>
 
     <footer>
-      <p><b>What happens:</b> invoices are created one at a time with a pause between each, so QuickBooks does not lock the inventory items. A failed invoice is retried up to five times before it is recorded as failed.</p>
-      <p><b>Stopping is safe:</b> the invoices already created stay in QuickBooks. Everything not yet attempted can be downloaded as a ready-to-use import file, or uploaded here in one click.</p>
+      <p><b>Automatic batches:</b> invoices are sent in batches so each run finishes well inside the hosting time limit. When one batch ends the next starts on its own — you do not need to press anything.</p>
+      <p><b>Safe to interrupt:</b> progress is saved as it goes. If the connection drops or you close the app, the button becomes Resume and picks up exactly where it stopped. Nothing is uploaded twice.</p>
     </footer>
   </div>
 </div>
@@ -121,9 +128,11 @@
 (function(){
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
-  var invoices = [], failedList = [], doneList = [], remainingList = [],
-      negSet = {}, itemCounts = {}, running = false;
-  var logLines = [];
+
+  var invoices = [], negSet = {}, itemCounts = {}, logLines = [];
+  var running = false, stopRequested = false;
+  var doneSet = {}, failedSet = {}, cursor = 0, retryMode = false, retryList = [];
+  var STORE = 'sqbo_upload_progress';
 
   fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
     if(s.connected){
@@ -173,6 +182,41 @@
     return p.length===3 ? (p[2]+"/"+p[1]+"/"+p[0]) : iso;
   }
 
+  /* ---------- saved progress ---------- */
+  function saveProgress(){
+    try{
+      localStorage.setItem(STORE, JSON.stringify({
+        cursor: cursor,
+        done: Object.keys(doneSet),
+        failed: Object.keys(failedSet),
+        total: invoices.length,
+        first: invoices.length ? invoices[0].docNumber : null,
+        at: Date.now()
+      }));
+    }catch(e){}
+  }
+  function loadProgress(){
+    try{
+      var raw = localStorage.getItem(STORE);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function clearProgress(){
+    try{ localStorage.removeItem(STORE); }catch(e){}
+    cursor = 0; doneSet = {}; failedSet = {};
+  }
+
+  $('btnClear').addEventListener('click', function(){
+    clearProgress();
+    $('resumeNote').classList.add('hide');
+    $('btnStart').textContent = 'Start upload';
+    $('bar').style.width = '0%';
+    $('stat').textContent = 'Ready';
+    updateBatchAside();
+    log('Saved progress cleared.', 'warn');
+  });
+
+  /* ---------- negatives ---------- */
   function loadNegatives(done){
     fetch('/api/negative-items')
       .then(function(r){ return r.json(); })
@@ -239,9 +283,38 @@
     buildNegTable();
     $('negSec').classList.remove('hide');
     $('runSec').classList.remove('hide');
-    var totalLines = list.reduce(function(s,i){ return s + i.lines.length; }, 0);
-    log('Loaded ' + nf(list.length) + ' invoices, ' + nf(totalLines) + ' lines.', 'info');
+    log('Loaded ' + nf(list.length) + ' invoices.', 'info');
+
+    // does saved progress belong to this same set?
+    var p = loadProgress();
+    if(p && p.total === list.length && p.first === list[0].docNumber && p.cursor > 0 && p.cursor < list.length){
+      cursor = p.cursor;
+      doneSet = {}; (p.done||[]).forEach(function(d){ doneSet[d]=1; });
+      failedSet = {}; (p.failed||[]).forEach(function(d){ failedSet[d]=1; });
+      $('resumeNote').classList.remove('hide');
+      $('resumeNote').textContent =
+        'A previous run stopped at invoice ' + nf(cursor) + ' of ' + nf(list.length) + '. ' +
+        Object.keys(doneSet).length + ' uploaded, ' + Object.keys(failedSet).length +
+        ' failed. Press Resume to carry on from there.';
+      $('btnStart').textContent = 'Resume from invoice ' + nf(cursor + 1);
+      $('bar').style.width = Math.round(cursor / list.length * 100) + '%';
+      $('stat').textContent = Object.keys(doneSet).length + ' done · ' +
+        Object.keys(failedSet).length + ' failed · ' + (list.length - cursor) + ' remaining';
+      showResults();
+    } else {
+      clearProgress();
+    }
+    updateBatchAside();
   }
+
+  function updateBatchAside(){
+    if(!invoices.length){ $('batchAside').textContent = ''; return; }
+    var size = Math.max(10, parseInt($('batchSize').value,10) || 90);
+    var left = invoices.length - cursor;
+    var batches = Math.ceil(left / size);
+    $('batchAside').textContent = batches + ' batch' + (batches===1?'':'es') + ' of ' + size;
+  }
+  $('batchSize').addEventListener('change', updateBatchAside);
 
   function buildNegTable(){
     var names = Object.keys(itemCounts).sort();
@@ -309,164 +382,238 @@
     return Object.keys(negSet).filter(function(k){ return negSet[k]; });
   }
 
-  function runUpload(list){
-    if(running) return;
-    running = true;
-    failedList = []; doneList = []; remainingList = [];
-    $('btnStart').disabled = true;
-    $('btnStart').style.display = 'none';
-    $('btnStop').style.display = 'block';
-    $('btnStop').disabled = false;
-    $('btnStop').textContent = 'Stop upload';
-    $('btnRetry').style.display = 'none';
-    $('btnResume').style.display = 'none';
-    $('resultSec').classList.add('hide');
-    $('bar').style.width = '0%';
-    $('log').innerHTML = '';
-    logLines.length = 0;
+  /* ---------- one batch ---------- */
+  function sendBatch(list){
+    return new Promise(function(resolve){
+      var outcome = { ok:false, broke:false };
 
-    fetch('/api/upload', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        invoices: list,
-        delay: (parseFloat($('delay').value) || 1.5) * 1000,
-        negativeItems: negativeList()
+      fetch('/api/upload', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          invoices: list,
+          delay: (parseFloat($('delay').value) || 1) * 1000,
+          negativeItems: negativeList()
+        })
       })
-    })
-    .then(function(res){
-      var reader = res.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
+      .then(function(res){
+        if(!res.ok){
+          return res.json().then(function(d){
+            log('Server refused the batch: ' + (d.error || res.status), 'err');
+            outcome.broke = true;
+            resolve(outcome);
+          }).catch(function(){
+            log('Server refused the batch (' + res.status + ')', 'err');
+            outcome.broke = true;
+            resolve(outcome);
+          });
+        }
 
-      function pump(){
-        return reader.read().then(function(step){
-          if(step.done){ finish(); return; }
-          buffer += decoder.decode(step.value, {stream:true});
-          var parts = buffer.split('\n\n');
-          buffer = parts.pop();
-          parts.forEach(handle);
-          return pump();
-        });
-      }
-      return pump();
-    })
-    .catch(function(e){
-      log('Connection error: ' + e.message, 'err');
-      finish();
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        function pump(){
+          return reader.read().then(function(step){
+            if(step.done){ resolve(outcome); return; }
+            buffer += decoder.decode(step.value, {stream:true});
+            var parts = buffer.split('\n\n');
+            buffer = parts.pop();
+            parts.forEach(function(p){ handle(p, outcome); });
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(function(e){
+        log('Connection lost: ' + e.message, 'err');
+        outcome.broke = true;
+        resolve(outcome);
+      });
     });
   }
 
-  function handle(part){
+  function handle(part, outcome){
     if(part.indexOf('data: ') !== 0) return;
     var ev;
     try{ ev = JSON.parse(part.slice(6)); }catch(e){ return; }
 
     if(ev.type === 'log')       log(ev.msg, 'info');
-    else if(ev.type === 'ok')   log('OK      ' + ev.doc + '   (QB Id ' + ev.id + ')', 'ok');
-    else if(ev.type === 'retry')log('retry ' + ev.attempt + '/5  ' + ev.doc + '  ' + ev.msg, 'warn');
-    else if(ev.type === 'fail') log('FAILED  ' + ev.doc + '  ' + ev.msg, 'err');
-    else if(ev.type === 'error')log('ERROR: ' + ev.msg, 'err');
+    else if(ev.type === 'ok'){
+      log('OK      ' + ev.doc + '   (QB Id ' + ev.id + ')', 'ok');
+      doneSet[ev.doc] = 1; delete failedSet[ev.doc];
+    }
+    else if(ev.type === 'retry') log('retry ' + ev.attempt + '/5  ' + ev.doc + '  ' + ev.msg, 'warn');
+    else if(ev.type === 'fail'){
+      log('FAILED  ' + ev.doc + '  ' + ev.msg, 'err');
+      failedSet[ev.doc] = 1;
+      if(/duplicate document number/i.test(ev.msg)) doneSet[ev.doc] = 1;
+    }
+    else if(ev.type === 'error') log('ERROR: ' + ev.msg, 'err');
     else if(ev.type === 'progress'){
-      var pct = Math.round((ev.current / ev.total) * 100);
-      $('bar').style.width = pct + '%';
-      $('stat').textContent = ev.done + ' done · ' + ev.failed + ' failed · ' +
-        (ev.total - ev.current) + ' remaining';
+      if(!retryMode) cursor = batchStart + ev.current;
+      saveProgress();
+      paintProgress();
     }
     else if(ev.type === 'cancelled'){
-      doneList = ev.doneList || [];
-      failedList = ev.failedList || [];
-      remainingList = ev.remaining || [];
-      log('--- Stopped: ' + ev.done + ' uploaded, ' + ev.failed + ' failed, ' +
-          remainingList.length + ' not attempted ---', 'warn');
-      showResults();
+      outcome.cancelled = true;
     }
     else if(ev.type === 'complete'){
-      doneList = ev.doneList || [];
-      failedList = ev.failedList || [];
-      remainingList = [];
-      log('--- Complete: ' + ev.done + ' succeeded, ' + ev.failed + ' failed ---',
-          ev.failed ? 'warn' : 'ok');
-      showResults();
+      outcome.ok = true;
     }
   }
 
-  function showResults(){
-    $('resultSec').classList.remove('hide');
-    $('resAside').textContent =
-      nf(doneList.length) + ' uploaded · ' + nf(failedList.length) + ' failed · ' +
-      nf(remainingList.length) + ' not attempted';
-    $('dlDone').disabled = !doneList.length;
-    $('dlFailed').disabled = !failedList.length;
-    $('dlRemaining').disabled = !remainingList.length;
-    $('dlRemainingFile').disabled = !remainingList.length;
+  function paintProgress(){
+    var total = retryMode ? retryList.length : invoices.length;
+    var pos = retryMode ? Object.keys(doneSet).length : cursor;
+    var pct = total ? Math.round(pos / total * 100) : 0;
+    $('bar').style.width = pct + '%';
+    var d = 0, f = 0;
+    Object.keys(doneSet).forEach(function(){ d++; });
+    Object.keys(failedSet).forEach(function(k){ if(!doneSet[k]) f++; });
+    $('stat').textContent = d + ' done · ' + f + ' failed · ' +
+      Math.max(0, invoices.length - cursor) + ' remaining';
   }
 
-  function finish(){
+  /* ---------- the whole run ---------- */
+  var batchStart = 0;
+
+  async function runAll(list, isRetry){
+    if(running) return;
+    running = true; stopRequested = false; retryMode = !!isRetry;
+    retryList = isRetry ? list : [];
+
+    $('btnStart').style.display = 'none';
+    $('btnStop').style.display = 'block';
+    $('btnStop').disabled = false;
+    $('btnStop').textContent = 'Stop upload';
+    $('btnRetry').style.display = 'none';
+    $('resultSec').classList.add('hide');
+    $('resumeNote').classList.add('hide');
+
+    var size = Math.max(10, parseInt($('batchSize').value,10) || 90);
+    var startAt = isRetry ? 0 : cursor;
+    var total = list.length;
+
+    while(startAt < total){
+      if(stopRequested){ log('Stopped by you.', 'warn'); break; }
+
+      var slice = list.slice(startAt, startAt + size);
+      batchStart = isRetry ? 0 : startAt;
+      var batchNo = Math.floor(startAt / size) + 1;
+      var batchesTotal = Math.ceil(total / size);
+      log('--- Batch ' + batchNo + ' of ' + batchesTotal + ' · invoices ' +
+          (startAt + 1) + '–' + Math.min(startAt + size, total) + ' ---', 'info');
+
+      var out = await sendBatch(slice);
+
+      if(out.broke){
+        log('Batch interrupted. Press Resume to carry on from invoice ' + (cursor + 1) + '.', 'warn');
+        break;
+      }
+      if(out.cancelled || stopRequested){
+        log('Stopped.', 'warn');
+        break;
+      }
+
+      startAt += size;
+      if(!isRetry) cursor = Math.min(startAt, total);
+      saveProgress();
+    }
+
+    finish(list, isRetry);
+  }
+
+  function finish(list, isRetry){
     running = false;
     $('btnStop').style.display = 'none';
     $('btnStart').style.display = 'block';
     $('btnStart').disabled = false;
-    if(failedList.length){
+
+    var remaining = invoices.length - cursor;
+    if(!isRetry && remaining > 0){
+      $('btnStart').textContent = 'Resume from invoice ' + nf(cursor + 1);
+    } else {
+      $('btnStart').textContent = 'Start upload';
+      if(!isRetry && remaining <= 0){
+        log('--- All invoices processed ---', 'ok');
+        clearProgress();
+      }
+    }
+
+    var failedOnly = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
+    if(failedOnly.length){
       $('btnRetry').style.display = 'inline-block';
-      $('btnRetry').textContent = 'Retry failed only (' + failedList.length + ')';
+      $('btnRetry').textContent = 'Retry failed only (' + failedOnly.length + ')';
     }
-    if(remainingList.length){
-      $('btnResume').style.display = 'inline-block';
-      $('btnResume').textContent = 'Upload the remaining ones (' + remainingList.length + ')';
-    }
+    showResults();
+    updateBatchAside();
+  }
+
+  function remainingDocs(){
+    return invoices.slice(cursor).map(function(x){ return x.docNumber; });
+  }
+
+  function showResults(){
+    $('resultSec').classList.remove('hide');
+    var d = Object.keys(doneSet);
+    var f = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
+    var r = remainingDocs();
+    $('resAside').textContent =
+      nf(d.length) + ' uploaded · ' + nf(f.length) + ' failed · ' + nf(r.length) + ' not yet uploaded';
+    $('dlDone').disabled = !d.length;
+    $('dlFailed').disabled = !f.length;
+    $('dlRemaining').disabled = !r.length;
+    $('dlRemainingFile').disabled = !r.length;
   }
 
   $('btnStart').addEventListener('click', function(){
     if(!invoices.length){ log('Load a file first.', 'err'); return; }
-    runUpload(invoices);
+    if(cursor === 0){ $('log').innerHTML = ''; logLines.length = 0; }
+    runAll(invoices, false);
   });
 
   $('btnStop').addEventListener('click', function(){
+    stopRequested = true;
     $('btnStop').disabled = true;
     $('btnStop').textContent = 'Stopping…';
     log('Stop requested — finishing the current invoice…', 'warn');
     fetch('/api/upload-cancel', { method:'POST' }).catch(function(){});
   });
 
-  function pickInvoices(docs){
-    var set = {};
-    docs.forEach(function(d){ set[d] = 1; });
-    return invoices.filter(function(inv){ return set[inv.docNumber]; });
-  }
-
   $('btnRetry').addEventListener('click', function(){
-    var list = pickInvoices(failedList);
+    var failedOnly = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
+    var set = {};
+    failedOnly.forEach(function(d){ set[d] = 1; });
+    var list = invoices.filter(function(inv){ return set[inv.docNumber]; });
     if(!list.length) return;
-    runUpload(list);
-  });
-
-  $('btnResume').addEventListener('click', function(){
-    var list = pickInvoices(remainingList);
-    if(!list.length) return;
-    runUpload(list);
+    log('Retrying ' + list.length + ' failed invoices…', 'warn');
+    runAll(list, true);
   });
 
   $('dlDone').addEventListener('click', function(){
-    if(!doneList.length) return;
-    download('uploaded-invoices.csv', buildCSV(['Invoice number'], doneList.map(function(d){ return [d]; })));
+    var d = Object.keys(doneSet);
+    if(!d.length) return;
+    download('uploaded-invoices.csv', buildCSV(['Invoice number'], d.map(function(x){ return [x]; })));
   });
 
   $('dlFailed').addEventListener('click', function(){
-    if(!failedList.length) return;
-    download('failed-invoices.csv', buildCSV(['Invoice number'], failedList.map(function(d){ return [d]; })));
+    var f = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
+    if(!f.length) return;
+    download('failed-invoices.csv', buildCSV(['Invoice number'], f.map(function(x){ return [x]; })));
   });
 
   $('dlRemaining').addEventListener('click', function(){
-    if(!remainingList.length) return;
-    download('not-attempted-invoices.csv', buildCSV(['Invoice number'], remainingList.map(function(d){ return [d]; })));
+    var r = remainingDocs();
+    if(!r.length) return;
+    download('not-yet-uploaded.csv', buildCSV(['Invoice number'], r.map(function(x){ return [x]; })));
   });
 
   var HEADER = ["*InvoiceNo","*Customer","*InvoiceDate","*DueDate","Terms","Location","Memo",
     "Item(Product/Service)","ItemDescription","ItemQuantity","ItemRate","*ItemAmount","Service Date"];
 
   $('dlRemainingFile').addEventListener('click', function(){
-    var list = pickInvoices(remainingList);
+    var list = invoices.slice(cursor);
     if(!list.length) return;
     var negs = {};
     negativeList().forEach(function(k){ negs[k] = 1; });
