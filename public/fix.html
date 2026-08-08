@@ -12,19 +12,31 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 <style>
-  .cat{display:flex;align-items:flex-start;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .cat{padding:16px 0;border-bottom:1px solid var(--line)}
   .cat:last-child{border-bottom:0}
+  .cat .row{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap}
   .cat .count{font-family:var(--mono);font-size:24px;font-weight:500;min-width:64px;
               font-variant-numeric:tabular-nums;line-height:1.1}
   .cat .count.zero{color:var(--faint)}
   .cat .body{flex:1;min-width:260px}
   .cat .title{font-size:14.5px;font-weight:600;margin-bottom:3px}
   .cat .desc{font-size:12.5px;color:var(--muted);max-width:62ch}
-  .cat .go{align-self:center}
+  .cat .go{align-self:center;display:flex;gap:8px;flex-wrap:wrap}
   .cat.off{opacity:.45}
-  .danger{background:var(--neg)!important;color:#fff!important;border-color:var(--neg)!important}
-  .hand{border-left:3px solid var(--warn);padding-left:12px;background:var(--warn-soft);
-        border-radius:0 4px 4px 0}
+  .pill{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:10px;
+        font-family:var(--mono);white-space:nowrap}
+  .pill.paid{background:#FCE9E7;color:#9A2E24}
+  .pill.part{background:#FBF2E1;color:#8A5711}
+  .pill.open{background:#E9F2EF;color:#14614A}
+  .goes{color:var(--neg);font-size:10.5px;font-family:var(--mono)}
+  .stays{color:var(--ok);font-size:10.5px;font-family:var(--mono)}
+  .peek{margin-top:14px;border:1px solid var(--line);border-radius:4px;overflow:auto;
+        max-height:360px;display:none}
+  .peek.open{display:block}
+  .peek table{font-size:12px}
+  .peek td,.peek th{padding:6px 10px}
+  .hand{border-left:3px solid var(--warn);padding-left:14px;background:var(--warn-soft);
+        border-radius:0 4px 4px 0;margin-top:18px;padding-top:12px;padding-bottom:6px;padding-right:12px}
 </style>
 </head>
 <body>
@@ -60,6 +72,7 @@
     <div class="note bad" style="margin-bottom:20px">
       <b>Take a backup first.</b> Deleting an invoice in QuickBooks cannot be undone.
       Go to QuickBooks → Settings → Export data before using any button here.
+      Use <b>View list</b> to check exactly what will go before you press delete.
     </div>
 
     <div class="sheet">
@@ -82,90 +95,133 @@
         <h2><span class="no">02</span> What was found <span class="aside" id="foundAside"></span></h2>
 
         <div class="cat" id="cat_bothUnpaid">
-          <span class="count">0</span>
-          <span class="body">
-            <span class="title">Same order as <code>#</code> and plain — neither paid</span>
-            <span class="desc">Amounts match and no payment is attached to either. Removing one of them leaves the order intact.</span>
-          </span>
-          <span class="go">
-            <button class="mini" data-act="bothUnpaid:plain">Delete the plain ones</button>
-            <button class="mini" data-act="bothUnpaid:hash">Delete the # ones</button>
-          </span>
+          <div class="row">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Same order as <code>#</code> and plain — neither paid</span>
+              <span class="desc">Amounts match and no payment is attached to either. Removing one of them leaves the order intact.</span>
+            </span>
+            <span class="go">
+              <button class="mini" data-peek="bothUnpaid">View list</button>
+              <button class="mini" data-act="bothUnpaid:plain">Delete the plain ones</button>
+              <button class="mini" data-act="bothUnpaid:hash">Delete the # ones</button>
+            </span>
+          </div>
         </div>
 
         <div class="cat" id="cat_hashPaid">
-          <span class="count">0</span>
-          <span class="body">
-            <span class="title">Same order — the <code>#</code> one is paid</span>
-            <span class="desc">The payment sits on the <code>#</code> version, so the plain one is the spare.</span>
-          </span>
-          <span class="go"><button class="solid" data-act="hashPaid:plain">Delete the unpaid plain ones</button></span>
+          <div class="row">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Same order — the <code>#</code> one is paid</span>
+              <span class="desc">The payment sits on the <code>#</code> version, so the plain one is the spare.</span>
+            </span>
+            <span class="go">
+              <button class="mini" data-peek="hashPaid">View list</button>
+              <button class="solid" data-act="hashPaid:plain">Delete the unpaid plain ones</button>
+            </span>
+          </div>
         </div>
 
         <div class="cat" id="cat_plainPaid">
-          <span class="count">0</span>
-          <span class="body">
-            <span class="title">Same order — the plain one is paid</span>
-            <span class="desc">The payment sits on the plain version, so the <code>#</code> one is the spare.</span>
-          </span>
-          <span class="go"><button class="solid" data-act="plainPaid:hash">Delete the unpaid # ones</button></span>
+          <div class="row">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Same order — the plain one is paid</span>
+              <span class="desc">The payment sits on the plain version, so the <code>#</code> one is the spare.</span>
+            </span>
+            <span class="go">
+              <button class="mini" data-peek="plainPaid">View list</button>
+              <button class="solid" data-act="plainPaid:hash">Delete the unpaid # ones</button>
+            </span>
+          </div>
         </div>
 
         <div class="cat" id="cat_dupOnePaid">
-          <span class="count">0</span>
-          <span class="body">
-            <span class="title">Same number more than once — one copy is paid</span>
-            <span class="desc">Written the same way, but there twice or more. The paid copy stays; the unpaid extras go.</span>
-          </span>
-          <span class="go"><button class="solid" data-act="dupOnePaid:unpaid">Delete the unpaid copies</button></span>
+          <div class="row">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Same number more than once — one copy is paid</span>
+              <span class="desc">Written the same way, but there twice or more. The paid copy stays; the unpaid extras go.</span>
+            </span>
+            <span class="go">
+              <button class="mini" data-peek="dupOnePaid">View list</button>
+              <button class="solid" data-act="dupOnePaid:unpaid">Delete the unpaid copies</button>
+            </span>
+          </div>
         </div>
 
         <div class="cat" id="cat_dupAllUnpaid">
-          <span class="count">0</span>
-          <span class="body">
-            <span class="title">Same number more than once — none paid</span>
-            <span class="desc">All copies are unpaid and carry the same amount, so one is kept and the rest removed.</span>
-          </span>
-          <span class="go"><button class="mini" data-act="dupAllUnpaid:extras">Keep one, delete the rest</button></span>
+          <div class="row">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Same number more than once — none paid</span>
+              <span class="desc">All copies are unpaid, so one is kept and the rest removed.</span>
+            </span>
+            <span class="go">
+              <button class="mini" data-peek="dupAllUnpaid">View list</button>
+              <button class="mini" data-act="dupAllUnpaid:extras">Keep one, delete the rest</button>
+            </span>
+          </div>
         </div>
 
         <div class="cat" id="cat_plainOnly">
-          <span class="count">0</span>
-          <span class="body">
-            <span class="title">Plain invoices with no twin</span>
-            <span class="desc">Nothing is duplicated here. Adding the <code>#</code> lines them up with your older records. Nothing is deleted.</span>
-          </span>
-          <span class="go"><button class="solid" data-act="plainOnly:rename">Add # to all of them</button></span>
+          <div class="row">
+            <span class="count">0</span>
+            <span class="body">
+              <span class="title">Plain invoices with no twin</span>
+              <span class="desc">Nothing is duplicated here. Adding the <code>#</code> lines them up with your older records. Nothing is deleted.</span>
+            </span>
+            <span class="go">
+              <button class="mini" data-peek="plainOnly">View list</button>
+              <button class="solid" data-act="plainOnly:rename">Add # to all of them</button>
+            </span>
+          </div>
         </div>
 
-        <div class="hand" style="margin-top:18px;padding-top:14px;padding-bottom:14px">
-          <div style="font-weight:600;font-size:13.5px;margin-bottom:10px">Left for you to look at</div>
+        <div class="hand">
+          <div style="font-weight:600;font-size:13.5px;margin-bottom:6px">Left for you to look at</div>
 
-          <div class="cat" id="cat_bothPaid" style="padding-top:8px">
-            <span class="count">0</span>
-            <span class="body">
-              <span class="title">Both copies carry a payment</span>
-              <span class="desc">Deleting either one breaks a payment record. Open these in QuickBooks and decide there.</span>
-            </span>
-            <span class="go"><button class="mini" data-act="bothPaid:list">Download the list</button></span>
+          <div class="cat" id="cat_bothPaid">
+            <div class="row">
+              <span class="count">0</span>
+              <span class="body">
+                <span class="title">Both copies carry a payment</span>
+                <span class="desc">Deleting either one breaks a payment record. Open these in QuickBooks and decide there.</span>
+              </span>
+              <span class="go">
+                <button class="mini" data-peek="bothPaid">View list</button>
+                <button class="mini" data-act="bothPaid:list">Download</button>
+              </span>
+            </div>
           </div>
 
-          <div class="cat" id="cat_dupAllPaid" style="padding-top:8px">
-            <span class="count">0</span>
-            <span class="body">
-              <span class="title">Same number more than once — every copy paid</span>
-              <span class="desc">Every copy has money against it. These need a decision in QuickBooks.</span>
-            </span>
-            <span class="go"><button class="mini" data-act="dupAllPaid:list">Download the list</button></span>
+          <div class="cat" id="cat_dupAllPaid">
+            <div class="row">
+              <span class="count">0</span>
+              <span class="body">
+                <span class="title">Same number more than once — every copy paid</span>
+                <span class="desc">Every copy has money against it. These need a decision in QuickBooks.</span>
+              </span>
+              <span class="go">
+                <button class="mini" data-peek="dupAllPaid">View list</button>
+                <button class="mini" data-act="dupAllPaid:list">Download</button>
+              </span>
+            </div>
           </div>
 
-          <div class="cat" id="cat_amountDiffers" style="padding-top:8px;border-bottom:0">
-            <span class="count">0</span>
-            <span class="body">
-              <span class="title">Same number but different amounts</span>
-              <span class="desc">These are probably not the same order at all, so nothing here is touched.</span>
-            </span>
-            <span class="go"><button class="mini" data-act="amountDiffers:list">Download the list</button></span>
+          <div class="cat" id="cat_amountDiffers" style="border-bottom:0">
+            <div class="row">
+              <span class="count">0</span>
+              <span class="body">
+                <span class="title">Same number but different amounts</span>
+                <span class="desc">These are probably not the same order at all, so nothing here is touched.</span>
+              </span>
+              <span class="go">
+                <button class="mini" data-peek="amountDiffers">View list</button>
+                <button class="mini" data-act="amountDiffers:list">Download</button>
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -278,19 +334,21 @@
   $('btnScan').addEventListener('click', scan);
   $('btnRescan').addEventListener('click', scan);
 
+  var KINDS = ['bothUnpaid','hashPaid','plainPaid','dupOnePaid','dupAllUnpaid',
+               'plainOnly','bothPaid','dupAllPaid','amountDiffers'];
+
   function render(){
     var c = data.cat;
     $('resultSheet').classList.remove('hide');
 
-    var totalIssues = c.bothUnpaid.length + c.hashPaid.length + c.plainPaid.length +
-                      c.bothPaid.length + c.dupOnePaid.length + c.dupAllUnpaid.length +
-                      c.dupAllPaid.length + c.amountDiffers.length;
-    $('foundAside').textContent = totalIssues
-      ? nf(totalIssues) + ' need attention · ' + nf(c.plainOnly.length) + ' need the #'
+    var issues = c.bothUnpaid.length + c.hashPaid.length + c.plainPaid.length +
+                 c.bothPaid.length + c.dupOnePaid.length + c.dupAllUnpaid.length +
+                 c.dupAllPaid.length + c.amountDiffers.length;
+    $('foundAside').textContent = issues
+      ? nf(issues) + ' need attention · ' + nf(c.plainOnly.length) + ' need the #'
       : (c.plainOnly.length ? nf(c.plainOnly.length) + ' need the #' : 'nothing to fix');
 
-    ['bothUnpaid','hashPaid','plainPaid','bothPaid','dupOnePaid','dupAllUnpaid',
-     'dupAllPaid','amountDiffers','plainOnly'].forEach(function(k){
+    KINDS.forEach(function(k){
       var box = $('cat_' + k);
       if(!box) return;
       var n = (c[k] || []).length;
@@ -299,23 +357,131 @@
       el.classList.toggle('zero', n === 0);
       box.classList.toggle('off', n === 0);
       box.querySelectorAll('button').forEach(function(b){ b.disabled = (n === 0); });
+      var pk = box.querySelector('.peek');
+      if(pk){ pk.classList.remove('open'); pk.innerHTML = ''; }
+      var pb = box.querySelector('button[data-peek]');
+      if(pb) pb.textContent = 'View list';
     });
   }
 
-  /* ---------- picking what a button acts on ---------- */
+  /* ---------- view list ---------- */
+  function tag(inv){
+    if(inv.paid) return '<span class="pill paid">paid</span>';
+    if(inv.partial) return '<span class="pill part">part paid</span>';
+    return '<span class="pill open">unpaid</span>';
+  }
+
+  function buildPeek(kind){
+    var c = data.cat, rows = '';
+
+    if(kind === 'bothUnpaid' || kind === 'hashPaid' || kind === 'plainPaid' ||
+       kind === 'bothPaid' || kind === 'amountDiffers'){
+
+      var hashGoes  = (kind === 'plainPaid');
+      var plainGoes = (kind === 'hashPaid' || kind === 'bothUnpaid');
+      var noneGoes  = (kind === 'bothPaid' || kind === 'amountDiffers');
+
+      c[kind].forEach(function(p){
+        var sameAmt = Math.abs(Number(p.hash.total) - Number(p.plain.total)) < 0.005;
+        rows +=
+          '<tr>' +
+            '<td class="mono">' + p.hash.doc +
+              '<div style="font-size:10.5px;color:var(--faint)">Id ' + p.hash.id + ' · ' + p.hash.date + '</div>' +
+              tag(p.hash) +
+              (noneGoes ? '' : (hashGoes ? ' <span class="goes">← goes</span>' : ' <span class="stays">← stays</span>')) +
+            '</td>' +
+            '<td class="mono">' + p.plain.doc +
+              '<div style="font-size:10.5px;color:var(--faint)">Id ' + p.plain.id + ' · ' + p.plain.date + '</div>' +
+              tag(p.plain) +
+              (noneGoes ? '' : (plainGoes ? ' <span class="goes">← goes</span>' : ' <span class="stays">← stays</span>')) +
+            '</td>' +
+            '<td class="num mono">' + money(p.hash.total) + '<br>' + money(p.plain.total) +
+              '<div style="font-size:10.5px;color:' + (sameAmt ? 'var(--ok)' : 'var(--neg)') + '">' +
+              (sameAmt ? 'same' : 'different') + '</div>' +
+            '</td>' +
+          '</tr>';
+      });
+      return '<table><thead><tr><th>With #</th><th>Plain</th><th class="num">Amount</th></tr></thead><tbody>' +
+             rows + '</tbody></table>';
+    }
+
+    if(kind === 'dupOnePaid' || kind === 'dupAllUnpaid' || kind === 'dupAllPaid'){
+      c[kind].forEach(function(g){
+        rows += '<tr><td colspan="4" style="background:var(--panel-2);font-family:var(--mono);font-size:11.5px;color:var(--muted)">' +
+                g.copies.length + ' copies of ' + g.copies[0].doc + '</td></tr>';
+        g.copies.forEach(function(x, i){
+          var mark = '';
+          if(kind === 'dupOnePaid') mark = (x.paid || x.partial) ? 'stays' : 'goes';
+          else if(kind === 'dupAllUnpaid') mark = (i === 0) ? 'stays' : 'goes';
+          rows +=
+            '<tr>' +
+              '<td class="mono">' + x.doc + '</td>' +
+              '<td class="mono" style="font-size:11px;color:var(--faint)">Id ' + x.id + ' · ' + x.date + '</td>' +
+              '<td class="num mono">' + money(x.total) + '</td>' +
+              '<td>' + tag(x) +
+                (mark === 'goes'  ? ' <span class="goes">← goes</span>'  : '') +
+                (mark === 'stays' ? ' <span class="stays">← stays</span>' : '') +
+              '</td>' +
+            '</tr>';
+        });
+      });
+      return '<table><thead><tr><th>Invoice</th><th>Details</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>' +
+             rows + '</tbody></table>';
+    }
+
+    if(kind === 'plainOnly'){
+      c.plainOnly.forEach(function(x){
+        rows +=
+          '<tr>' +
+            '<td class="mono">' + x.doc + ' → <span style="color:var(--ok)">#' + x.doc + '</span></td>' +
+            '<td class="mono" style="font-size:11px;color:var(--faint)">Id ' + x.id + ' · ' + x.date + '</td>' +
+            '<td class="num mono">' + money(x.total) + '</td>' +
+            '<td>' + tag(x) + '</td>' +
+          '</tr>';
+      });
+      return '<table><thead><tr><th>Renamed to</th><th>Details</th><th class="num">Amount</th><th>Status</th></tr></thead><tbody>' +
+             rows + '</tbody></table>';
+    }
+
+    return '<div style="padding:14px;color:var(--muted);font-size:13px">Nothing to show.</div>';
+  }
+
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('button[data-peek]');
+    if(!b || b.disabled || !data) return;
+
+    var kind = b.getAttribute('data-peek');
+    var cat = $('cat_' + kind);
+    var box = cat.querySelector('.peek');
+
+    if(box && box.classList.contains('open')){
+      box.classList.remove('open');
+      b.textContent = 'View list';
+      return;
+    }
+    if(!box){
+      box = document.createElement('div');
+      box.className = 'peek';
+      cat.appendChild(box);
+    }
+    box.innerHTML = buildPeek(kind);
+    box.classList.add('open');
+    b.textContent = 'Hide list';
+  });
+
+  /* ---------- what a button acts on ---------- */
   function pickFor(act){
     var c = data.cat, out = [];
 
-    if(act === 'bothUnpaid:plain')   c.bothUnpaid.forEach(function(p){ out.push(p.plain); });
-    else if(act === 'bothUnpaid:hash') c.bothUnpaid.forEach(function(p){ out.push(p.hash); });
-    else if(act === 'hashPaid:plain')  c.hashPaid.forEach(function(p){ out.push(p.plain); });
-    else if(act === 'plainPaid:hash')  c.plainPaid.forEach(function(p){ out.push(p.hash); });
+    if(act === 'bothUnpaid:plain')      c.bothUnpaid.forEach(function(p){ out.push(p.plain); });
+    else if(act === 'bothUnpaid:hash')  c.bothUnpaid.forEach(function(p){ out.push(p.hash); });
+    else if(act === 'hashPaid:plain')   c.hashPaid.forEach(function(p){ out.push(p.plain); });
+    else if(act === 'plainPaid:hash')   c.plainPaid.forEach(function(p){ out.push(p.hash); });
     else if(act === 'dupOnePaid:unpaid'){
       c.dupOnePaid.forEach(function(g){ g.unpaidOnes.forEach(function(x){ out.push(x); }); });
     }
     else if(act === 'dupAllUnpaid:extras'){
       c.dupAllUnpaid.forEach(function(g){
-        // keep the first, remove the rest
         for(var i=1;i<g.copies.length;i++) out.push(g.copies[i]);
       });
     }
@@ -326,21 +492,20 @@
 
   function describe(act, n){
     var map = {
-      'bothUnpaid:plain':  'Delete ' + n + ' plain invoice' + (n===1?'':'s') + ', keeping the # version of each.',
-      'bothUnpaid:hash':   'Delete ' + n + ' # invoice' + (n===1?'':'s') + ', keeping the plain version of each.',
-      'hashPaid:plain':    'Delete ' + n + ' unpaid plain invoice' + (n===1?'':'s') + '. The paid # version stays.',
-      'plainPaid:hash':    'Delete ' + n + ' unpaid # invoice' + (n===1?'':'s') + '. The paid plain version stays.',
-      'dupOnePaid:unpaid': 'Delete ' + n + ' unpaid duplicate cop' + (n===1?'y':'ies') + '. Every paid copy stays.',
+      'bothUnpaid:plain':    'Delete ' + n + ' plain invoice' + (n===1?'':'s') + ', keeping the # version of each.',
+      'bothUnpaid:hash':     'Delete ' + n + ' # invoice' + (n===1?'':'s') + ', keeping the plain version of each.',
+      'hashPaid:plain':      'Delete ' + n + ' unpaid plain invoice' + (n===1?'':'s') + '. The paid # version stays.',
+      'plainPaid:hash':      'Delete ' + n + ' unpaid # invoice' + (n===1?'':'s') + '. The paid plain version stays.',
+      'dupOnePaid:unpaid':   'Delete ' + n + ' unpaid duplicate cop' + (n===1?'y':'ies') + '. Every paid copy stays.',
       'dupAllUnpaid:extras': 'Delete ' + n + ' extra cop' + (n===1?'y':'ies') + '. One copy of each number is kept.',
-      'plainOnly:rename':  'Add # to ' + n + ' invoice' + (n===1?'':'s') + '. Nothing is deleted.'
+      'plainOnly:rename':    'Add # to ' + n + ' invoice' + (n===1?'':'s') + '. Nothing is deleted.'
     };
     return map[act] || '';
   }
 
-  /* ---------- run ---------- */
   document.addEventListener('click', function(e){
     var b = e.target.closest('button[data-act]');
-    if(!b || b.disabled || busy) return;
+    if(!b || b.disabled || busy || !data) return;
     var act = b.getAttribute('data-act');
 
     if(act.indexOf(':list') > -1){ downloadList(act.split(':')[0]); return; }
@@ -424,7 +589,7 @@
     setTimeout(function(){ $('btnStop').textContent = 'Stop'; }, 2000);
   });
 
-  /* ---------- download the hands-off lists ---------- */
+  /* ---------- download ---------- */
   function downloadList(kind){
     var c = data.cat, rows = [], name = kind + '.csv';
 
@@ -506,6 +671,7 @@
   sw.addEventListener('click',function(e){ e.stopPropagation(); });
 })();
 </script>
+
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function(){
