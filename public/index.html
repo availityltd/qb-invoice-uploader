@@ -1,4 +1,4 @@
--<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -93,7 +93,7 @@
             <span class="pick">Browse</span>
           </div>
           <input type="file" id="fileQb" accept=".xlsx,.xls,.csv">
-          <p class="hint">Any export with a <code>Ref no.</code> or <code>Invoice number</code> column works. Use this when the date range holds more invoices than QuickBooks will return.</p>
+          <p class="hint">Any export with a <code>Ref no.</code> or <code>Invoice number</code> column works.</p>
         </div>
 
         <div class="stat" id="statQb"></div>
@@ -134,6 +134,11 @@
           </select>
         </div>
       </div>
+
+      <label class="chk" style="margin-top:16px">
+        <input type="checkbox" id="keepHash" checked><span>Keep the <code>#</code> in front of invoice numbers</span></label>
+      <p class="hint">QuickBooks treats <code>#91306999</code> and <code>91306999</code> as two different invoices. Keep this ticked so new invoices match the ones already in QuickBooks.</p>
+
       <div class="g3" style="margin-top:16px">
         <div>
           <label for="rowCap">Rows per file</label>
@@ -700,6 +705,7 @@
     var dfmt=$('dfmt').value, termDays=parseInt($('terms').value,10);
     var gTpl=$('gname').value.trim()||"Shopify Sale";
     var skipVoid=$('skipVoided').checked, skipUnf=$('skipUnfulfilled').checked;
+    var keepHash=$('keepHash').checked;
     var ROW_CAP=Math.max(1,parseInt($('rowCap').value,10)||1000);
     var INV_CAP=parseInt($('invCap').value,10); if(!(INV_CAP>0)) INV_CAP=0;
     var termS=termDays===0?"Due on receipt":"Net "+termDays;
@@ -780,7 +786,9 @@
       var addr="";
       for(i=0;i<6;i++) if(ap[i]) addr=addr?addr+", "+ap[i]:ap[i];
       var memo=buyer+(addr?" — "+addr:"")+" — order "+grp2.k;
-      var invNo=grp2.k.charCodeAt(0)===35?grp2.k.slice(1):grp2.k;
+
+      var invNo=grp2.k;
+      if(!keepHash && invNo.charCodeAt(0)===35) invNo=invNo.slice(1);
 
       var block=[], objLines=[];
       function push(item,qty,rate,amount){
