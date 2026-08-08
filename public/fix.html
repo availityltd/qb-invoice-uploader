@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fix duplicates · Shopify orders to QuickBooks</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div class="topbar"><div class="in">
+  <a class="mark" href="/">
+    <img src="/logo.svg" alt="">
+    <span style="display:block">
+      <b>Shopify orders to QuickBooks</b>
+      <span>Invoice pipeline</span>
+    </span>
+  </a>
+  <nav>
+    <a href="/">Convert</a>
+    <a href="/upload.html">Upload</a>
+    <a href="/fix.html" class="on">Fix duplicates</a>
+  </nav>
+  <div class="conn" id="connBox"><span class="dot" id="dot"></span><span id="connText">Checking…</span><span class="caret">▼</span>
+    <div class="switcher" id="switcher"></div></div>
+</div></div>
+
+<div class="shell">
+
+  <div id="gate" class="gate hide">
+    <img src="/logo.svg" alt="">
+    <h2>Connect your QuickBooks company</h2>
+    <p>This page reads your invoices so you can review them. Nothing is changed until you press a button on a row.</p>
+    <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+  </div>
+
+  <div id="main" class="hide">
+
+    <div class="note bad" style="margin-bottom:20px">
+      <b>Take a backup first.</b> Deleting an invoice in QuickBooks cannot be undone.
+      Go to QuickBooks → Settings → Export data before using the delete buttons on this page.
+      Try one row, check the result in QuickBooks, and only then carry on.
+    </div>
+
+    <div class="sheet">
+      <div class="sec">
+        <h2><span class="no">01</span> Which period <span class="aside" id="scanAside"></span></h2>
+        <div class="g3">
+          <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
+          <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="solid" id="btnScan" style="width:100%">Scan QuickBooks</button>
+          </div>
+        </div>
+        <p class="hint">QuickBooks treats <code>#91306999</code> and <code>91306999</code> as two separate invoices. This finds where both exist for the same order.</p>
+        <div class="stat" id="statScan"></div>
+      </div>
+    </div>
+
+    <div class="sheet hide" id="pairSheet">
+      <div class="sec">
+        <h2><span class="no">02</span> Same order twice <span class="aside" id="pairAside"></span></h2>
+        <p class="hint" style="margin:0 0 14px">Both a <code>#</code> version and a plain version exist. Check the amounts match, then remove whichever one you do not want. The <code>#</code> version matches your older records, so that is usually the one to keep.</p>
+        <div class="tbl" style="max-height:460px">
+          <table>
+            <thead><tr>
+              <th>Order</th>
+              <th>With #</th>
+              <th>Plain</th>
+              <th class="num">Amounts</th>
+              <th style="min-width:200px">Action</th>
+            </tr></thead>
+            <tbody id="pairBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="sheet hide" id="plainSheet">
+      <div class="sec">
+        <h2><span class="no">03</span> Plain only — no duplicate <span class="aside" id="plainAside"></span></h2>
+        <p class="hint" style="margin:0 0 14px">These have no <code>#</code> twin, so nothing is duplicated. Add the <code>#</code> so they line up with the rest of your records. Nothing is deleted here.</p>
+        <div class="acts">
+          <button class="solid" id="btnAddAllHash">Add # to all of them</button>
+          <span class="mono" id="addAllStat" style="font-size:12px;align-self:center;color:var(--muted)"></span>
+        </div>
+        <div class="tbl" style="max-height:460px">
+          <table>
+            <thead><tr>
+              <th>Invoice</th><th>Date</th><th class="num">Amount</th><th style="min-width:170px">Action</th>
+            </tr></thead>
+            <tbody id="plainBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="sheet hide" id="logSheet">
+      <div class="sec">
+        <h2><span class="no">04</span> What was changed</h2>
+        <div class="log" id="log" style="height:220px"></div>
+        <div class="acts" style="margin-top:12px;margin-bottom:0">
+          <button class="mini" id="btnCopyLog">Copy log</button>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <p><b>One row at a time.</b> Every button on this page acts on a single invoice, so there is no way to remove a batch by accident. The amount column is there to confirm the two really are the same order before you delete anything.</p>
+    </footer>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var logLines = [];
+
+  fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
+    if(s.connected){
+      $('dot').classList.add('on');
+      $('connText').textContent = s.companyName || s.realmId;
+      $('main').classList.remove('hide');
+    } else {
+      $('connText').textContent = 'Not connected';
+      $('gate').classList.remove('hide');
+    }
+  });
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function money(n){
+    if(n === null || n === undefined || n === '') return '—';
+    var v = Number(n);
+    if(isNaN(v)) return String(n);
+    var p = v.toFixed(2).split('.');
+    return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function setStat(el, cls, html){ el.className = 'stat ' + cls; el.innerHTML = html; }
+  function isoD(d){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+
+  function log(msg, cls){
+    $('logSheet').classList.remove('hide');
+    var line = new Date().toLocaleTimeString() + '  ' + msg;
+    logLines.push(line);
+    var d = document.createElement('div');
+    if(cls) d.className = cls;
+    d.textContent = line;
+    $('log').appendChild(d);
+    $('log').scrollTop = $('log').scrollHeight;
+  }
+
+  var t = new Date();
+  $('dTo').value = isoD(t);
+  $('dFrom').value = isoD(new Date(t.getFullYear(), t.getMonth(), 1));
+
+  /* ---------- scan ---------- */
+  $('btnScan').addEventListener('click', function(){
+    var from = $('dFrom').value, to = $('dTo').value;
+    if(!from || !to){ setStat($('statScan'),'bad','Choose both dates first.'); return; }
+
+    setStat($('statScan'),'busy','Reading invoices from QuickBooks…');
+    $('btnScan').disabled = true;
+    $('pairSheet').classList.add('hide');
+    $('plainSheet').classList.add('hide');
+
+    fetch('/api/qb-invoice-details?from='+from+'&to='+to)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        $('btnScan').disabled = false;
+        if(d.error){ setStat($('statScan'),'bad', d.error); return; }
+
+        setStat($('statScan'),'ok',
+          '<b>'+nf(d.total)+' invoices read</b><i>'+
+          nf(d.pairCount)+' order'+(d.pairCount===1?'':'s')+' exist twice · '+
+          nf(d.plainOnlyCount)+' plain invoice'+(d.plainOnlyCount===1?'':'s')+' with no # twin</i>');
+
+        $('scanAside').textContent = from + ' to ' + to;
+        buildPairs(d.pairs || []);
+        buildPlain(d.plainOnly || []);
+      })
+      .catch(function(e){
+        $('btnScan').disabled = false;
+        setStat($('statScan'),'bad','Could not reach QuickBooks: '+e.message);
+      });
+  });
+
+  /* ---------- pairs ---------- */
+  function buildPairs(pairs){
+    if(!pairs.length){ $('pairSheet').classList.add('hide'); return; }
+    $('pairSheet').classList.remove('hide');
+    $('pairAside').textContent = nf(pairs.length) + ' order' + (pairs.length===1?'':'s');
+
+    var body = $('pairBody');
+    body.innerHTML = '';
+    var frag = document.createDocumentFragment();
+
+    pairs.forEach(function(p){
+      var h = p.withHash[0], q = p.plain[0];
+      var tr = document.createElement('tr');
+
+      var td0 = document.createElement('td');
+      td0.className = 'mono';
+      td0.textContent = p.digits;
+
+      var td1 = document.createElement('td');
+      td1.className = 'mono';
+      td1.innerHTML = h.doc + '<br><span style="color:var(--faint);font-size:11px">Id ' + h.id + ' · ' + h.date + '</span>';
+
+      var td2 = document.createElement('td');
+      td2.className = 'mono';
+      td2.innerHTML = q.doc + '<br><span style="color:var(--faint);font-size:11px">Id ' + q.id + ' · ' + q.date + '</span>';
+
+      var same = Number(h.total) === Number(q.total);
+      var td3 = document.createElement('td');
+      td3.className = 'num mono';
+      td3.innerHTML = money(h.total) + '<br>' + money(q.total) +
+        '<br><span style="font-size:11px;color:' + (same ? 'var(--ok)' : 'var(--neg)') + '">' +
+        (same ? 'same ✓' : 'different ✕') + '</span>';
+
+      var td4 = document.createElement('td');
+
+      var bPlain = document.createElement('button');
+      bPlain.className = 'mini';
+      bPlain.textContent = 'Delete plain';
+      bPlain.style.marginRight = '6px';
+      bPlain.addEventListener('click', function(){
+        confirmDelete(q, 'plain', bPlain, tr, same);
+      });
+
+      var bHash = document.createElement('button');
+      bHash.className = 'mini';
+      bHash.textContent = 'Delete #';
+      bHash.addEventListener('click', function(){
+        confirmDelete(h, 'hash', bHash, tr, same);
+      });
+
+      td4.appendChild(bPlain);
+      td4.appendChild(bHash);
+
+      if(!same){
+        var warn = document.createElement('div');
+        warn.style.cssText = 'font-size:11px;color:var(--neg);margin-top:5px';
+        warn.textContent = 'Amounts differ — check in QuickBooks first';
+        td4.appendChild(warn);
+      }
+
+      tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2);
+      tr.appendChild(td3); tr.appendChild(td4);
+      frag.appendChild(tr);
+    });
+
+    body.appendChild(frag);
+  }
+
+  function confirmDelete(inv, which, btn, tr, same){
+    var msg = 'Delete invoice ' + inv.doc + ' (QuickBooks Id ' + inv.id + ', ' + money(inv.total) + ')?\n\n' +
+      (same ? '' : 'WARNING: the two amounts do not match, so these may not be the same order.\n\n') +
+      'This cannot be undone.';
+    if(!confirm(msg)) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Deleting…';
+
+    fetch('/api/invoice-delete', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: inv.id })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.error){
+        btn.disabled = false;
+        btn.textContent = which === 'plain' ? 'Delete plain' : 'Delete #';
+        log('Could not delete ' + inv.doc + ': ' + d.error, 'err');
+        return;
+      }
+      log('Deleted ' + inv.doc + ' (Id ' + inv.id + ')', 'ok');
+      tr.style.opacity = '0.4';
+      tr.querySelectorAll('button').forEach(function(b){ b.disabled = true; });
+      btn.textContent = 'Deleted';
+    })
+    .catch(function(e){
+      btn.disabled = false;
+      btn.textContent = which === 'plain' ? 'Delete plain' : 'Delete #';
+      log('Could not delete ' + inv.doc + ': ' + e.message, 'err');
+    });
+  }
+
+  /* ---------- plain only ---------- */
+  var plainRows = [];
+
+  function buildPlain(list){
+    plainRows = [];
+    if(!list.length){ $('plainSheet').classList.add('hide'); return; }
+    $('plainSheet').classList.remove('hide');
+    $('plainAside').textContent = nf(list.length) + ' invoice' + (list.length===1?'':'s');
+
+    var body = $('plainBody');
+    body.innerHTML = '';
+    var frag = document.createDocumentFragment();
+
+    list.forEach(function(inv){
+      var tr = document.createElement('tr');
+
+      var td0 = document.createElement('td');
+      td0.className = 'mono';
+      td0.innerHTML = inv.doc + '<br><span style="color:var(--faint);font-size:11px">Id ' + inv.id + '</span>';
+
+      var td1 = document.createElement('td');
+      td1.className = 'mono';
+      td1.textContent = inv.date;
+
+      var td2 = document.createElement('td');
+      td2.className = 'num mono';
+      td2.textContent = money(inv.total);
+
+      var td3 = document.createElement('td');
+      var b = document.createElement('button');
+      b.className = 'mini';
+      b.textContent = 'Add # → #' + inv.doc;
+      b.addEventListener('click', function(){ addHash(inv, b, tr); });
+      td3.appendChild(b);
+
+      tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+      frag.appendChild(tr);
+
+      plainRows.push({ inv: inv, btn: b, tr: tr });
+    });
+
+    body.appendChild(frag);
+  }
+
+  function addHash(inv, btn, tr){
+    btn.disabled = true;
+    btn.textContent = 'Renaming…';
+
+    return fetch('/api/invoice-rename', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: inv.id, newDoc: '#' + inv.doc })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.error){
+        btn.disabled = false;
+        btn.textContent = 'Add # → #' + inv.doc;
+        log('Could not rename ' + inv.doc + ': ' + d.error, 'err');
+        return false;
+      }
+      log('Renamed ' + inv.doc + ' → #' + inv.doc, 'ok');
+      tr.style.opacity = '0.4';
+      btn.textContent = 'Done';
+      return true;
+    })
+    .catch(function(e){
+      btn.disabled = false;
+      btn.textContent = 'Add # → #' + inv.doc;
+      log('Could not rename ' + inv.doc + ': ' + e.message, 'err');
+      return false;
+    });
+  }
+
+  $('btnAddAllHash').addEventListener('click', async function(){
+    var todo = plainRows.filter(function(r){ return !r.btn.disabled; });
+    if(!todo.length) return;
+    if(!confirm('Add # to ' + todo.length + ' invoice' + (todo.length===1?'':'s') +
+                '?\n\nNothing is deleted — only the invoice number changes.')) return;
+
+    $('btnAddAllHash').disabled = true;
+    var ok = 0, bad = 0;
+
+    for(var i=0;i<todo.length;i++){
+      $('addAllStat').textContent = (i+1) + ' of ' + todo.length + '…';
+      var good = await addHash(todo[i].inv, todo[i].btn, todo[i].tr);
+      if(good) ok++; else bad++;
+      await new Promise(function(r){ setTimeout(r, 700); });
+    }
+
+    $('btnAddAllHash').disabled = false;
+    $('addAllStat').textContent = ok + ' renamed' + (bad ? ', ' + bad + ' failed' : '');
+    log('--- Finished: ' + ok + ' renamed, ' + bad + ' failed ---', bad ? 'warn' : 'ok');
+  });
+
+  $('btnCopyLog').addEventListener('click', function(){
+    var ta = document.createElement('textarea');
+    ta.value = logLines.join('\n');
+    ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); $('btnCopyLog').textContent = 'Copied'; }
+    catch(e){ $('btnCopyLog').textContent = 'Copy failed'; }
+    document.body.removeChild(ta);
+    setTimeout(function(){ $('btnCopyLog').textContent = 'Copy log'; }, 2000);
+  });
+})();
+</script>
+
+<script>
+(function(){
+  var box=document.getElementById('connBox');
+  var sw=document.getElementById('switcher');
+  if(!box||!sw) return;
+
+  box.addEventListener('click',function(e){
+    e.stopPropagation();
+    if(sw.classList.contains('open')){ sw.classList.remove('open'); return; }
+    sw.innerHTML='<div class="head">Loading…</div>';
+    sw.classList.add('open');
+    fetch('/auth/companies').then(function(r){return r.json();}).then(function(d){
+      sw.innerHTML='<div class="head">QuickBooks companies</div>';
+      (d.companies||[]).forEach(function(c){
+        var b=document.createElement('button');
+        b.textContent=c.name;
+        if(c.realmId===d.current) b.className='cur';
+        b.addEventListener('click',function(ev){
+          ev.stopPropagation();
+          if(c.realmId===d.current){ sw.classList.remove('open'); return; }
+          fetch('/auth/switch',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({realmId:c.realmId})})
+            .then(function(){ location.reload(); });
+        });
+        sw.appendChild(b);
+      });
+      var add=document.createElement('button');
+      add.className='add'; add.textContent='+ Connect another company';
+      add.addEventListener('click',function(ev){ ev.stopPropagation(); location.href='/auth/connect'; });
+      sw.appendChild(add);
+      if(d.current){
+        var out=document.createElement('button');
+        out.className='out'; out.textContent='Disconnect this session';
+        out.addEventListener('click',function(ev){
+          ev.stopPropagation();
+          fetch('/auth/disconnect',{method:'POST'}).then(function(){ location.reload(); });
+        });
+        sw.appendChild(out);
+      }
+    }).catch(function(){ sw.innerHTML='<div class="head">Could not load companies</div>'; });
+  });
+
+  document.addEventListener('click',function(){ sw.classList.remove('open'); });
+  sw.addEventListener('click',function(e){ e.stopPropagation(); });
+})();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw.js').catch(function(){});
+  });
+}
+</script>
+</body>
+</html>
