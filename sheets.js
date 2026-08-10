@@ -16,28 +16,59 @@ function auth() {
   return new google.auth.JWT({ email, key, scopes: SCOPES });
 }
 
-// every spreadsheet inside a Drive folder
-export async function listSheets(folderId) {
-  const drive = google.drive({ version: 'v3', auth: auth() });
-  const files = [];
-  let pageToken = null;
+const SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+const XLSX_MIME  = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
+async function childrenOf(drive, folderId) {
+  const out = [];
+  let pageToken = null;
   do {
     const r = await drive.files.list({
-      q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`,
-      fields: 'nextPageToken, files(id, name, modifiedTime)',
-      orderBy: 'modifiedTime desc',
-      pageSize: 200,
+      q: `'${folderId}' in parents and trashed=false`,
+      fields: 'nextPageToken, files(id, name, mimeType, modifiedTime)',
+      orderBy: 'name',
+      pageSize: 500,
       pageToken,
       supportsAllDrives: true,
       includeItemsFromAllDrives: true
     });
-    (r.data.files || []).forEach(f => files.push({
-      id: f.id, name: f.name, modified: f.modifiedTime
-    }));
+    (r.data.files || []).forEach(f => out.push(f));
     pageToken = r.data.nextPageToken;
   } while (pageToken);
+  return out;
+}
 
+// every spreadsheet inside a folder, including the ones in sub-folders
+export async function listSheets(folderId) {
+  const drive = google.drive({ version: 'v3', auth: auth() });
+  const files = [];
+  const seen = new Set();
+
+  async function walk(id, trail, depth) {
+    if (depth > 6 || seen.has(id)) return;
+    seen.add(id);
+
+    const kids = await childrenOf(drive, id);
+
+    for (const f of kids) {
+      if (f.mimeType === FOLDER_MIME) {
+        await walk(f.id, trail.concat(f.name), depth + 1);
+      } else if (f.mimeType === SHEET_MIME || f.mimeType === XLSX_MIME) {
+        files.push({
+          id: f.id,
+          name: f.name,
+          path: trail.join(' / '),
+          excel: f.mimeType === XLSX_MIME,
+          modified: f.modifiedTime
+        });
+      }
+    }
+  }
+
+  await walk(folderId, [], 0);
+
+  files.sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
   return files;
 }
 
