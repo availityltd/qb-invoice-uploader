@@ -12,7 +12,8 @@
     "multer": "^1.4.5-lts.1",
     "xlsx": "^0.18.5",
     "cookie-parser": "^1.4.6",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0"
   },
   "engines": {
     "node": ">=20"
