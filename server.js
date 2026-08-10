@@ -9,6 +9,7 @@ import {
   getNegativeItems, setNegativeItems
 } from './db.js';
 import { initMappings, getMappings, saveMapping } from './mappings.js';
+import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
   initUsers, upsertUser, getUser, linkCompany, userOwns, companiesForUser
 } from './users.js';
@@ -746,7 +747,78 @@ app.post('/api/invoice-delete', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ==================== Google Sheets ====================
+app.get('/api/sheets/test', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const user = await testConnection();
+    res.json({ ok: true, account: user.emailAddress || user.displayName });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
+app.get('/api/sheets/list', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const folderId = req.query.folderId;
+  if (!folderId) return res.status(400).json({ error: 'folderId required' });
+
+  try {
+    const files = await listSheets(folderId);
+    res.json({ count: files.length, files });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/sheets/tabs', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const sheetId = req.query.sheetId;
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.json({ tabs: await listTabs(sheetId) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/sheets/read', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab } = req.query;
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+
+  try {
+    const rows = await readTab(sheetId, tab);
+    res.json({ rowCount: rows.length, rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/sheets/paint', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tabId, colours, width } = req.body;
+  if (!sheetId || tabId === undefined || !Array.isArray(colours)) {
+    return res.status(400).json({ error: 'sheetId, tabId and colours required' });
+  }
+
+  try {
+    await paintRows(sheetId, tabId, colours, width);
+    res.json({ ok: true, painted: colours.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // ==================== Upload ====================
 function buildPayload(inv, customerId, itemMap, termMap, negSet) {
   const lines = [];
