@@ -1,0 +1,146 @@
+(function(){
+  "use strict";
+
+  var ITEMS = [
+    { group: null, items: [
+      { href:'/',              label:'Dashboard',        icon:'grid' }
+    ]},
+    { group: 'Import invoices', items: [
+      { href:'/convert.html',  label:'Convert',          icon:'shuffle' },
+      { href:'/upload.html',   label:'Upload',           icon:'up' }
+    ]},
+    { group: 'Payments', items: [
+      { href:'/payments.html', label:'Receive payments', icon:'cash' },
+      { href:'/couriers.html', label:'Couriers',         icon:'truck' }
+    ]},
+    { group: 'Maintenance', items: [
+      { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
+      { href:'/void.html',     label:'Void invoices',    icon:'ban' }
+    ]}
+  ];
+
+  var ICONS = {
+    grid:   '<path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>',
+    shuffle:'<path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>',
+    up:     '<path d="M12 19V5M5 12l7-7 7 7"/>',
+    cash:   '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/>',
+    truck:  '<path d="M3 16V6h11v10M14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+    copy:   '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/>',
+    ban:    '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'
+  };
+
+  function svg(name){
+    return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+           'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+           (ICONS[name] || '') + '</svg>';
+  }
+
+  var path = location.pathname.replace(/index\.html$/, '') || '/';
+
+  var html =
+    '<a class="brand" href="/">' +
+      '<img src="/logo.svg" alt="">' +
+      '<span><b>Shopify → QuickBooks</b><span>Invoice pipeline</span></span>' +
+    '</a><nav>';
+
+  ITEMS.forEach(function(sec){
+    if(sec.group) html += '<div class="group">' + sec.group + '</div>';
+    sec.items.forEach(function(it){
+      var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0);
+      html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') + '>' +
+              svg(it.icon) + it.label + '</a>';
+    });
+  });
+
+  html += '</nav>' +
+    '<div class="foot">' +
+      '<div class="conn" id="connBox">' +
+        '<span class="dot" id="dot"></span>' +
+        '<span class="who" id="connText">Checking…</span>' +
+        '<span class="caret">▼</span>' +
+        '<div class="switcher" id="switcher"></div>' +
+      '</div>' +
+    '</div>';
+
+  var rail = document.querySelector('.rail');
+  if(rail) rail.innerHTML = html;
+
+  /* ---------- connection state ---------- */
+  window.APP = window.APP || {};
+  window.APP.ready = fetch('/auth/status')
+    .then(function(r){ return r.json(); })
+    .then(function(s){
+      var dot = document.getElementById('dot');
+      var txt = document.getElementById('connText');
+      if(s.connected){
+        if(dot) dot.classList.add('on');
+        if(txt) txt.textContent = s.companyName || s.realmId;
+      } else {
+        if(txt) txt.textContent = 'Not connected';
+      }
+      return s;
+    })
+    .catch(function(){ return { connected:false }; });
+
+  /* ---------- company switcher ---------- */
+  var box = document.getElementById('connBox');
+  var sw  = document.getElementById('switcher');
+
+  if(box && sw){
+    box.addEventListener('click', function(e){
+      e.stopPropagation();
+      if(sw.classList.contains('open')){ sw.classList.remove('open'); return; }
+      sw.innerHTML = '<div class="head">Loading…</div>';
+      sw.classList.add('open');
+
+      fetch('/auth/companies').then(function(r){ return r.json(); }).then(function(d){
+        sw.innerHTML = '<div class="head">QuickBooks companies</div>';
+        (d.companies || []).forEach(function(c){
+          var b = document.createElement('button');
+          b.textContent = c.name;
+          if(c.realmId === d.current) b.className = 'cur';
+          b.addEventListener('click', function(ev){
+            ev.stopPropagation();
+            if(c.realmId === d.current){ sw.classList.remove('open'); return; }
+            fetch('/auth/switch', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ realmId: c.realmId })
+            }).then(function(){ location.reload(); });
+          });
+          sw.appendChild(b);
+        });
+
+        var add = document.createElement('button');
+        add.className = 'add';
+        add.textContent = '+ Connect another company';
+        add.addEventListener('click', function(ev){
+          ev.stopPropagation(); location.href = '/auth/connect';
+        });
+        sw.appendChild(add);
+
+        if(d.current){
+          var out = document.createElement('button');
+          out.className = 'out';
+          out.textContent = 'Disconnect this session';
+          out.addEventListener('click', function(ev){
+            ev.stopPropagation();
+            fetch('/auth/disconnect', { method:'POST' }).then(function(){ location.reload(); });
+          });
+          sw.appendChild(out);
+        }
+      }).catch(function(){
+        sw.innerHTML = '<div class="head">Could not load companies</div>';
+      });
+    });
+
+    document.addEventListener('click', function(){ sw.classList.remove('open'); });
+    sw.addEventListener('click', function(e){ e.stopPropagation(); });
+  }
+
+  /* ---------- service worker ---------- */
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('/sw.js').catch(function(){});
+    });
+  }
+})();
