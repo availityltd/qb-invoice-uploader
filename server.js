@@ -747,6 +747,99 @@ app.post('/api/invoice-delete', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ==================== Dashboard ====================
+app.get('/api/dashboard', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  function shift(iso, n) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = today.slice(0, 8) + '01';
+  const last30 = shift(today, -29);
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    // this month's invoices, in weekly windows so the row cap is never hit
+    const invoices = [];
+    let cursor = monthStart, windows = 0;
+    while (cursor <= today && windows < 60) {
+      let end = shift(cursor, 6);
+      if (end > today) end = today;
+
+      let start = 1;
+      while (true) {
+        const q = await qbQuery(realmId, token,
+          `SELECT DocNumber, TxnDate, TotalAmt, Balance FROM Invoice ` +
+          `WHERE TxnDate >= '${cursor}' AND TxnDate <= '${end}' ` +
+          `STARTPOSITION ${start} MAXRESULTS 1000`);
+        const arr = q.Invoice || [];
+        arr.forEach(i => invoices.push({
+          doc: i.DocNumber || '',
+          date: i.TxnDate,
+          total: Number(i.TotalAmt || 0),
+          balance: Number(i.Balance === undefined ? i.TotalAmt : i.Balance)
+        }));
+        if (arr.length < 1000) break;
+        start += 1000;
+        if (start > 9000) break;
+      }
+      cursor = shift(end, 1);
+      windows++;
+    }
+
+    let invoiced = 0, outstanding = 0, paidCount = 0, plainCount = 0;
+    invoices.forEach(i => {
+      invoiced += i.total;
+      outstanding += i.balance;
+      if (i.balance <= 0.005 && i.total > 0) paidCount++;
+      if (i.doc && i.doc.charAt(0) !== '#') plainCount++;
+    });
+
+    // payments received in the last 30 days
+    let received = 0, paymentCount = 0;
+    try {
+      let s = 1;
+      while (true) {
+        const q = await qbQuery(realmId, token,
+          `SELECT TotalAmt, TxnDate FROM Payment ` +
+          `WHERE TxnDate >= '${last30}' AND TxnDate <= '${today}' ` +
+          `STARTPOSITION ${s} MAXRESULTS 1000`);
+        const arr = q.Payment || [];
+        arr.forEach(p => { received += Number(p.TotalAmt || 0); paymentCount++; });
+        if (arr.length < 1000) break;
+        s += 1000;
+        if (s > 9000) break;
+      }
+    } catch (e) { /* payments are optional on the dashboard */ }
+
+    let runs = [];
+    try { runs = await listRuns(realmId, 8); } catch (e) {}
+
+    let couriers = [];
+    try { couriers = await runsSummary(realmId); } catch (e) {}
+
+    res.json({
+      period: { from: monthStart, to: today },
+      invoiceCount: invoices.length,
+      invoiced,
+      outstanding,
+      paidCount,
+      plainCount,
+      received,
+      paymentCount,
+      runs,
+      couriers
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // ==================== Google Sheets ====================
 app.get('/api/sheets/test', async (req, res) => {
   const realmId = await requireCompany(req, res);
