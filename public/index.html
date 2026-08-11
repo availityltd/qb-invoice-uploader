@@ -67,6 +67,7 @@
   .dateBox.hide{display:none}
   .dateBox input[type=date]{width:auto;min-width:140px}
   .dateBox .dash{color:var(--faint);font-family:var(--mono);font-size:12px}
+  .dateBox button{white-space:nowrap}
 </style>
 </head>
 <body>
@@ -93,6 +94,8 @@
           <input type="date" id="dFrom">
           <span class="dash">→</span>
           <input type="date" id="dTo">
+          <button class="mini" id="btnApply">Apply</button>
+          <button class="mini" id="btnCancel">Cancel</button>
         </div>
 
         <span class="mono" id="ageTag" style="font-size:11.5px;color:var(--faint)"></span>
@@ -247,6 +250,7 @@
   var $ = function(id){ return document.getElementById(id); };
 
   var lastRange = null;
+  var prevKind  = 'month';
 
   function pad(n){ return String(n).padStart(2, '0'); }
   function isoOf(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
@@ -313,16 +317,28 @@
     var custom = this.value === 'custom';
     $('customBox').classList.toggle('hide', !custom);
 
-    if(custom && (!$('dFrom').value || !$('dTo').value)){
-      var t = new Date();
-      $('dFrom').value = isoOf(new Date(t.getFullYear(), t.getMonth(), 1));
-      $('dTo').value   = isoOf(t);
+    if(custom){
+      // sirf calendar dikhayein — Apply tak kuch load nahi hoga
+      if(!$('dFrom').value || !$('dTo').value){
+        var t = new Date();
+        $('dFrom').value = isoOf(new Date(t.getFullYear(), t.getMonth(), 1));
+        $('dTo').value   = isoOf(t);
+      }
+      return;
     }
+
+    prevKind = this.value;
     load(false);
   });
 
-  $('dFrom').addEventListener('change', function(){ load(false); });
-  $('dTo').addEventListener('change', function(){ load(false); });
+  $('btnApply').addEventListener('click', function(){ load(false); });
+
+  $('btnCancel').addEventListener('click', function(){
+    $('customBox').classList.add('hide');
+    $('rangePick').value = prevKind;
+    $('statBox').className = 'stat';
+    $('statBox').textContent = '';
+  });
 
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
@@ -334,7 +350,11 @@
   function load(fresh){
     var r = rangeFor($('rangePick').value);
 
-    if(!r.from || !r.to) return;
+    if(!r.from || !r.to){
+      $('statBox').className = 'stat bad';
+      $('statBox').innerHTML = '<b>Pick both dates first.</b>';
+      return;
+    }
 
     if(r.from > r.to){
       $('main').classList.remove('hide');
