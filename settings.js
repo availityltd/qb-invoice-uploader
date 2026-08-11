@@ -10,7 +10,6 @@ export async function initSettings() {
       PRIMARY KEY (realm_id, key)
     );
   `);
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cpr_runs (
       id            SERIAL PRIMARY KEY,
