@@ -62,6 +62,10 @@
   .quick .t{font-size:14.5px;font-weight:600;margin-bottom:3px}
   .quick .d{font-size:12.5px;color:var(--muted)}
   .quick .arw{float:right;color:var(--faint)}
+
+  .dateBox{display:flex;align-items:center;gap:6px}
+  .dateBox input[type=date]{width:auto;min-width:140px}
+  .dateBox .dash{color:var(--faint);font-family:var(--mono);font-size:12px}
 </style>
 </head>
 <body>
@@ -81,7 +85,15 @@
           <option value="last">Last month</option>
           <option value="q">Last 3 months</option>
           <option value="year">This year</option>
+          <option value="custom">Custom range…</option>
         </select>
+
+        <div class="dateBox hide" id="customBox">
+          <input type="date" id="dFrom">
+          <span class="dash">→</span>
+          <input type="date" id="dTo">
+        </div>
+
         <span class="mono" id="ageTag" style="font-size:11.5px;color:var(--faint)"></span>
         <button class="mini" id="btnRefresh">Refresh</button>
       </div>
@@ -233,6 +245,11 @@
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
 
+  var lastRange = null;
+
+  function pad(n){ return String(n).padStart(2, '0'); }
+  function isoOf(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+
   function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function money(n){
     var v = Number(n || 0);
@@ -264,36 +281,68 @@
     box.appendChild(d);
   }
 
-  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
-  $('btnRefresh').addEventListener('click', function(){ load(true); });
-  $('rangePick').addEventListener('change', function(){ load(false); });
+  /* ---------- date range ---------- */
 
-  window.APP.ready.then(function(s){
-   if(!s.connected){ $('gate').classList.remove('hide'); return; }
-    load(false);
-  });
-var lastRange = null;
   function rangeFor(kind){
     var t = new Date();
-    function iso(d){
-      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+
+    if(kind === 'custom'){
+      return { from: $('dFrom').value, to: $('dTo').value };
     }
     if(kind === 'last'){
       var a = new Date(t.getFullYear(), t.getMonth()-1, 1);
       var b = new Date(t.getFullYear(), t.getMonth(), 0);
-      return { from: iso(a), to: iso(b) };
+      return { from: isoOf(a), to: isoOf(b) };
     }
     if(kind === 'q'){
-      return { from: iso(new Date(t.getFullYear(), t.getMonth()-2, 1)), to: iso(t) };
+      return { from: isoOf(new Date(t.getFullYear(), t.getMonth()-2, 1)), to: isoOf(t) };
     }
     if(kind === 'year'){
-      return { from: t.getFullYear() + '-01-01', to: iso(t) };
+      return { from: t.getFullYear() + '-01-01', to: isoOf(t) };
     }
-    return { from: iso(new Date(t.getFullYear(), t.getMonth(), 1)), to: iso(t) };
+    return { from: isoOf(new Date(t.getFullYear(), t.getMonth(), 1)), to: isoOf(t) };
   }
 
-function load(fresh){
+  /* ---------- events ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('btnRefresh').addEventListener('click', function(){ load(true); });
+
+  $('rangePick').addEventListener('change', function(){
+    var custom = this.value === 'custom';
+    $('customBox').classList.toggle('hide', !custom);
+
+    if(custom && (!$('dFrom').value || !$('dTo').value)){
+      var t = new Date();
+      $('dFrom').value = isoOf(new Date(t.getFullYear(), t.getMonth(), 1));
+      $('dTo').value   = isoOf(t);
+    }
+    load(false);
+  });
+
+  $('dFrom').addEventListener('change', function(){ load(false); });
+  $('dTo').addEventListener('change', function(){ load(false); });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    load(false);
+  });
+
+  /* ---------- load ---------- */
+
+  function load(fresh){
     var r = rangeFor($('rangePick').value);
+
+    if(!r.from || !r.to) return;
+
+    if(r.from > r.to){
+      $('main').classList.remove('hide');
+      $('loading').classList.add('hide');
+      $('statBox').className = 'stat bad';
+      $('statBox').innerHTML = '<b>Start date is after the end date.</b>';
+      return;
+    }
+
     lastRange = r;
     $('main').classList.add('hide');
     $('loading').classList.remove('hide');
@@ -301,7 +350,7 @@ function load(fresh){
     $('statBox').textContent = '';
     $('btnRefresh').disabled = true;
 
-fetch('/api/dashboard?from=' + r.from + '&to=' + r.to + (fresh ? '&fresh=1' : ''))
+    fetch('/api/dashboard?from=' + r.from + '&to=' + r.to + (fresh ? '&fresh=1' : ''))
       .then(function(x){ return x.json(); })
       .then(function(d){
         $('btnRefresh').disabled = false;
@@ -323,6 +372,8 @@ fetch('/api/dashboard?from=' + r.from + '&to=' + r.to + (fresh ? '&fresh=1' : ''
       });
   }
 
+  /* ---------- render ---------- */
+
   function render(d){
     if(d.cached){
       var m = Math.round((d.ageSeconds || 0) / 60);
@@ -330,7 +381,8 @@ fetch('/api/dashboard?from=' + r.from + '&to=' + r.to + (fresh ? '&fresh=1' : ''
     } else {
       $('ageTag').textContent = 'just now';
     }
-   var from = d.from || (lastRange && lastRange.from);
+
+    var from = d.from || (lastRange && lastRange.from);
     var to   = d.to   || (lastRange && lastRange.to);
     var span = (from && to) ? (pretty(from) + ' → ' + pretty(to)) : '';
 
