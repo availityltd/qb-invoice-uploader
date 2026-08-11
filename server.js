@@ -752,25 +752,19 @@ app.get('/api/dashboard', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  function shift(iso, n) {
-    const d = new Date(iso + 'T00:00:00Z');
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-  }
-
   const today = new Date().toISOString().slice(0, 10);
-  const monthStart = today.slice(0, 8) + '01';
-  const last30 = shift(today, -29);
+  const from = req.query.from || (today.slice(0, 8) + '01');
+  const to   = req.query.to   || today;
+  const last30 = shiftDays(to, -29);
 
   try {
     const token = await getAccessToken(realmId);
 
-    // this month's invoices, in weekly windows so the row cap is never hit
     const invoices = [];
-    let cursor = monthStart, windows = 0;
-    while (cursor <= today && windows < 60) {
-      let end = shift(cursor, 6);
-      if (end > today) end = today;
+    let cursor = from, windows = 0;
+    while (cursor <= to && windows < 80) {
+      let end = shiftDays(cursor, 6);
+      if (end > to) end = to;
 
       let start = 1;
       while (true) {
@@ -789,26 +783,38 @@ app.get('/api/dashboard', async (req, res) => {
         start += 1000;
         if (start > 9000) break;
       }
-      cursor = shift(end, 1);
+      cursor = shiftDays(end, 1);
       windows++;
     }
 
     let invoiced = 0, outstanding = 0, paidCount = 0, plainCount = 0;
+    const byDay = new Map();
+
     invoices.forEach(i => {
       invoiced += i.total;
       outstanding += i.balance;
       if (i.balance <= 0.005 && i.total > 0) paidCount++;
       if (i.doc && i.doc.charAt(0) !== '#') plainCount++;
+      if (i.date) byDay.set(i.date, (byDay.get(i.date) || 0) + i.total);
     });
 
-    // payments received in the last 30 days
+    // a full run of days so the chart has no gaps
+    const daily = [];
+    let d = from;
+    let guard = 0;
+    while (d <= to && guard < 400) {
+      daily.push({ date: d, amount: Math.round((byDay.get(d) || 0) * 100) / 100 });
+      d = shiftDays(d, 1);
+      guard++;
+    }
+
     let received = 0, paymentCount = 0;
     try {
       let s = 1;
       while (true) {
         const q = await qbQuery(realmId, token,
           `SELECT TotalAmt, TxnDate FROM Payment ` +
-          `WHERE TxnDate >= '${last30}' AND TxnDate <= '${today}' ` +
+          `WHERE TxnDate >= '${last30}' AND TxnDate <= '${to}' ` +
           `STARTPOSITION ${s} MAXRESULTS 1000`);
         const arr = q.Payment || [];
         arr.forEach(p => { received += Number(p.TotalAmt || 0); paymentCount++; });
@@ -816,7 +822,7 @@ app.get('/api/dashboard', async (req, res) => {
         s += 1000;
         if (s > 9000) break;
       }
-    } catch (e) { /* payments are optional on the dashboard */ }
+    } catch (e) { /* payments are optional here */ }
 
     let runs = [];
     try { runs = await listRuns(realmId, 8); } catch (e) {}
@@ -825,16 +831,11 @@ app.get('/api/dashboard', async (req, res) => {
     try { couriers = await runsSummary(realmId); } catch (e) {}
 
     res.json({
-      period: { from: monthStart, to: today },
+      period: { from, to },
       invoiceCount: invoices.length,
-      invoiced,
-      outstanding,
-      paidCount,
-      plainCount,
-      received,
-      paymentCount,
-      runs,
-      couriers
+      invoiced, outstanding, paidCount, plainCount,
+      received, paymentCount,
+      daily, runs, couriers
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
