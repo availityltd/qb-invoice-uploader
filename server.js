@@ -756,18 +756,43 @@ app.get('/api/dashboard', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   const from = req.query.from || (today.slice(0, 8) + '01');
   const to   = req.query.to   || today;
+  const fresh = req.query.fresh === '1';
+  const cacheKey = `dash:${from}:${to}`;
+
+  // served straight from the last snapshot unless a refresh was asked for
+  if (!fresh) {
+    try {
+      const hit = await getCache(realmId, cacheKey, 900);
+      if (hit) {
+        return res.json(Object.assign({}, hit.value, {
+          cached: true,
+          ageSeconds: hit.ageSeconds
+        }));
+      }
+    } catch (e) { /* fall through and rebuild */ }
+  }
+
   const last30 = shiftDays(to, -29);
 
   try {
     const token = await getAccessToken(realmId);
 
+    // one window per month keeps the round trips down
+    function monthEnd(iso) {
+      const d = new Date(iso + 'T00:00:00Z');
+      const e = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+      return e.toISOString().slice(0, 10);
+    }
+
     const invoices = [];
     let cursor = from, windows = 0;
-    while (cursor <= to && windows < 80) {
-      let end = shiftDays(cursor, 6);
+
+    while (cursor <= to && windows < 40) {
+      let end = monthEnd(cursor);
       if (end > to) end = to;
 
       let start = 1;
+      let hitCap = false;
       while (true) {
         const q = await qbQuery(realmId, token,
           `SELECT DocNumber, TxnDate, TotalAmt, Balance FROM Invoice ` +
@@ -782,16 +807,54 @@ app.get('/api/dashboard', async (req, res) => {
         }));
         if (arr.length < 1000) break;
         start += 1000;
-        if (start > 9000) break;
+        if (start > 9000) { hitCap = true; break; }
       }
+
+      // that month was too busy — walk it a week at a time instead
+      if (hitCap) {
+        let sub = cursor;
+        while (sub <= end) {
+          let subEnd = shiftDays(sub, 6);
+          if (subEnd > end) subEnd = end;
+          let s = 1;
+          while (true) {
+            const q = await qbQuery(realmId, token,
+              `SELECT DocNumber, TxnDate, TotalAmt, Balance FROM Invoice ` +
+              `WHERE TxnDate >= '${sub}' AND TxnDate <= '${subEnd}' ` +
+              `STARTPOSITION ${s} MAXRESULTS 1000`);
+            const arr = q.Invoice || [];
+            arr.forEach(i => invoices.push({
+              doc: i.DocNumber || '',
+              date: i.TxnDate,
+              total: Number(i.TotalAmt || 0),
+              balance: Number(i.Balance === undefined ? i.TotalAmt : i.Balance)
+            }));
+            if (arr.length < 1000) break;
+            s += 1000;
+            if (s > 9000) break;
+          }
+          sub = shiftDays(subEnd, 1);
+        }
+      }
+
       cursor = shiftDays(end, 1);
       windows++;
     }
 
+    // drop anything the month walk picked up twice
+    const seen = new Set();
+    const clean = [];
+    invoices.forEach(i => {
+      const k = i.doc + '|' + i.date + '|' + i.total;
+      if (seen.has(k)) return;
+      seen.add(k);
+      clean.push(i);
+    });
+
     let invoiced = 0, outstanding = 0, paidCount = 0, plainCount = 0;
     const byDay = new Map();
 
-    invoices.forEach(i => {
+    clean.forEach(i => {
       invoiced += i.total;
       outstanding += i.balance;
       if (i.balance <= 0.005 && i.total > 0) paidCount++;
@@ -799,10 +862,8 @@ app.get('/api/dashboard', async (req, res) => {
       if (i.date) byDay.set(i.date, (byDay.get(i.date) || 0) + i.total);
     });
 
-    // a full run of days so the chart has no gaps
     const daily = [];
-    let d = from;
-    let guard = 0;
+    let d = from, guard = 0;
     while (d <= to && guard < 400) {
       daily.push({ date: d, amount: Math.round((byDay.get(d) || 0) * 100) / 100 });
       d = shiftDays(d, 1);
@@ -831,13 +892,17 @@ app.get('/api/dashboard', async (req, res) => {
     let couriers = [];
     try { couriers = await runsSummary(realmId); } catch (e) {}
 
-    res.json({
+    const payload = {
       period: { from, to },
-      invoiceCount: invoices.length,
+      invoiceCount: clean.length,
       invoiced, outstanding, paidCount, plainCount,
       received, paymentCount,
       daily, runs, couriers
-    });
+    };
+
+    try { await setCache(realmId, cacheKey, payload); } catch (e) {}
+
+    res.json(Object.assign({}, payload, { cached: false, ageSeconds: 0 }));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
