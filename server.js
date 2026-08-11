@@ -17,7 +17,8 @@ import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
   getOrCreateCustomer, postInvoice, qbQuery
 } from './qb.js';
-
+import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
+         initCache, getCache, setCache } from './settings.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -1097,3 +1098,5 @@ initDb()
     console.error('DB init failed:', err);
     process.exit(1);
   });
+.then(() => initSettings())
+  .then(() => initCache())
