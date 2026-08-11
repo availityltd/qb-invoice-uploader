@@ -14,116 +14,114 @@
 </head>
 <body>
 
-<div class="topbar"><div class="in">
-  <a class="mark" href="/">
-    <img src="/logo.svg" alt="">
-    <span style="display:block">
-      <b>Shopify orders to QuickBooks</b>
-      <span>Invoice pipeline</span>
-    </span>
-  </a>
-  <nav>
-    <a href="/">Convert</a>
-    <a href="/upload.html" class="on">Upload</a>
-    <a href="/fix.html">Fix duplicates</a>
-  </nav>
-  <div class="conn" id="connBox"><span class="dot" id="dot"></span><span id="connText">Checking…</span><span class="caret">▼</span>
-    <div class="switcher" id="switcher"></div></div>
-</div></div>
+<div class="layout">
+  <aside class="rail"></aside>
 
-<div class="shell">
-
-  <div id="gate" class="gate hide">
-    <img src="/logo.svg" alt="">
-    <h2>Connect your QuickBooks company</h2>
-    <p>Invoices are created directly in your company. Nothing is written until you press Start.</p>
-    <button class="solid" id="btnConnect">Connect to QuickBooks</button>
-  </div>
-
-  <div id="main" class="hide">
-
-    <div class="sheet">
-      <div class="sec">
-        <h2><span class="no">01</span> Invoices to create <span class="aside" id="srcAside"></span></h2>
-
-        <div id="fromConvert" class="note ok hide" style="margin-bottom:14px"></div>
-        <div id="resumeNote" class="note warn hide" style="margin-bottom:14px"></div>
-
-        <div id="fileArea">
-          <div class="zone" id="zoneFile" tabindex="0" role="button">
-            <span><b>QuickBooks import file</b><span>.xlsx or .csv in QuickBooks invoice format</span></span>
-            <span class="pick">Browse</span>
-          </div>
-          <input type="file" id="file" accept=".xlsx,.xls,.csv">
-          <p class="hint">Or build one on the Convert page and press Send to Upload — no file needed.</p>
-        </div>
-
-        <div class="stat" id="statFile"></div>
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Upload</h1>
+        <div class="sub">Create the invoices in QuickBooks, one at a time</div>
       </div>
-
-      <div class="sec hide" id="negSec">
-        <h2><span class="no">02</span> Negative amounts
-          <span class="aside" id="negAside"></span></h2>
-        <p class="hint" style="margin:0 0 12px">Tick any product whose amount should be sent to QuickBooks as a negative figure — discounts, refunds, credits. Your choices are remembered for this company.</p>
-        <div class="acts">
-          <button class="mini" id="negNone">Clear all</button>
-          <button class="mini" id="negSave">Save choices</button>
-          <span class="mono" id="negSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
-        </div>
-        <input type="text" id="negSearch" placeholder="Search products…"
-               style="margin-bottom:10px;font-family:var(--sans);font-size:14px">
-        <div class="tbl" style="max-height:300px">
-          <table>
-            <thead><tr><th style="width:60px">Negative</th><th>Product / service</th><th class="num">Lines</th></tr></thead>
-            <tbody id="negBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="sec hide" id="runSec">
-        <h2><span class="no">03</span> Run <span class="aside" id="batchAside"></span></h2>
-        <div class="g3">
-          <div>
-            <label for="delay">Delay between invoices (seconds)</label>
-            <input type="number" id="delay" value="1" step="0.5" min="0.5">
-            <p class="hint">Raise this if QuickBooks reports inventory lock errors.</p>
-          </div>
-          <div></div>
-          <div></div>
-        </div>
-        <div style="margin-top:16px">
-          <button class="run" id="btnStart">Start upload</button>
-          <button class="run" id="btnStop" style="display:none;background:var(--neg)">Stop upload</button>
-        </div>
-        <div class="prog"><i id="bar"></i></div>
-        <div class="runhint" id="stat">Ready</div>
-        <div class="log" id="log"></div>
-        <div class="acts" style="margin-top:12px;margin-bottom:0">
-          <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
-          <button class="mini" id="btnCopyLog">Copy log</button>
-          <button class="mini" id="btnClear">Clear saved progress</button>
-        </div>
-      </div>
-
-      <div class="sec hide" id="resultSec">
-        <h2><span class="no">04</span> Download lists <span class="aside" id="resAside"></span></h2>
-        <div class="acts" style="margin-bottom:0">
-          <button class="mini" id="dlDone">Uploaded invoices</button>
-          <button class="mini" id="dlFailed">Failed invoices</button>
-          <button class="mini" id="dlRemaining">Not yet uploaded</button>
-          <button class="solid" id="dlRemainingFile">Download remaining as import file</button>
-        </div>
-      </div>
+      <div class="right"><span class="mono" id="srcAside" style="font-size:12px;color:var(--muted)"></span></div>
     </div>
 
-    <footer>
-      <p><b>It keeps going on its own:</b> the hosting connection is cut after about fifteen minutes. When that happens the app reconnects by itself within a few seconds and carries on from the exact invoice where it stopped. Nothing is skipped and nothing is uploaded twice.</p>
-      <p><b>Failures are retried:</b> anything that fails is tried again automatically, up to three more rounds, with a growing pause between them — QuickBooks asks for a few minutes after these errors.</p>
-      <p><b>Safe to close:</b> progress is saved as it goes. If you close the app the button becomes Resume and picks up where it stopped.</p>
-    </footer>
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Invoices are created directly in your company. Nothing is written until you press Start.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="main" class="hide">
+
+        <div class="sheet">
+          <div class="sec">
+            <h2><span class="no">01</span> Invoices to create</h2>
+
+            <div id="fromConvert" class="note ok hide" style="margin-bottom:14px"></div>
+            <div id="resumeNote" class="note warn hide" style="margin-bottom:14px"></div>
+
+            <div id="fileArea">
+              <div class="zone" id="zoneFile" tabindex="0" role="button">
+                <span><b>QuickBooks import file</b><span>.xlsx or .csv in QuickBooks invoice format</span></span>
+                <span class="pick">Browse</span>
+              </div>
+              <input type="file" id="file" accept=".xlsx,.xls,.csv">
+              <p class="hint">Or build one on the Convert page and press Send to Upload — no file needed.</p>
+            </div>
+
+            <div class="stat" id="statFile"></div>
+          </div>
+
+          <div class="sec hide" id="negSec">
+            <h2><span class="no">02</span> Negative amounts
+              <span class="aside" id="negAside"></span></h2>
+            <p class="hint" style="margin:0 0 12px">Tick any product whose amount should be sent to QuickBooks as a negative figure — discounts, refunds, credits. Your choices are remembered for this company.</p>
+            <div class="acts">
+              <button class="mini" id="negNone">Clear all</button>
+              <button class="mini" id="negSave">Save choices</button>
+              <span class="mono" id="negSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
+            </div>
+            <input type="text" id="negSearch" placeholder="Search products…"
+                   style="margin-bottom:10px;font-family:var(--sans);font-size:14px">
+            <div class="tbl" style="max-height:300px">
+              <table>
+                <thead><tr><th style="width:60px">Negative</th><th>Product / service</th><th class="num">Lines</th></tr></thead>
+                <tbody id="negBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="sec hide" id="runSec">
+            <h2><span class="no">03</span> Run <span class="aside" id="batchAside"></span></h2>
+            <div class="g3">
+              <div>
+                <label for="delay">Delay between invoices (seconds)</label>
+                <input type="number" id="delay" value="1" step="0.5" min="0.5">
+                <p class="hint">Raise this if QuickBooks reports inventory lock errors.</p>
+              </div>
+              <div></div>
+              <div></div>
+            </div>
+            <div style="margin-top:16px">
+              <button class="run" id="btnStart">Start upload</button>
+              <button class="run" id="btnStop" style="display:none;background:var(--neg)">Stop upload</button>
+            </div>
+            <div class="prog"><i id="bar"></i></div>
+            <div class="runhint" id="stat">Ready</div>
+            <div class="log" id="log"></div>
+            <div class="acts" style="margin-top:12px;margin-bottom:0">
+              <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
+              <button class="mini" id="btnCopyLog">Copy log</button>
+              <button class="mini" id="btnClear">Clear saved progress</button>
+            </div>
+          </div>
+
+          <div class="sec hide" id="resultSec">
+            <h2><span class="no">04</span> Download lists <span class="aside" id="resAside"></span></h2>
+            <div class="acts" style="margin-bottom:0">
+              <button class="mini" id="dlDone">Uploaded invoices</button>
+              <button class="mini" id="dlFailed">Failed invoices</button>
+              <button class="mini" id="dlRemaining">Not yet uploaded</button>
+              <button class="solid" id="dlRemainingFile">Download remaining as import file</button>
+            </div>
+          </div>
+        </div>
+
+        <footer>
+          <p><b>It keeps going on its own:</b> the hosting connection is cut after about fifteen minutes. When that happens the app reconnects by itself within a few seconds and carries on from the exact invoice where it stopped. Nothing is skipped and nothing is uploaded twice.</p>
+          <p><b>Failures are retried:</b> anything that fails is tried again automatically, up to three more rounds, with a growing pause between them.</p>
+          <p><b>Safe to close:</b> progress is saved as it goes. If you close the app the button becomes Resume and picks up where it stopped.</p>
+        </footer>
+      </div>
+    </div>
   </div>
 </div>
 
+<script src="/nav.js"></script>
 <script>
 (function(){
   "use strict";
@@ -136,14 +134,11 @@
   var segStart = 0, autoTimer = null, pendingRetry = null;
   var STORE = 'sqbo_upload_progress';
 
-  fetch('/auth/status').then(function(r){ return r.json(); }).then(function(s){
+  window.APP.ready.then(function(s){
     if(s.connected){
-      $('dot').classList.add('on');
-      $('connText').textContent = s.companyName || s.realmId;
       $('main').classList.remove('hide');
       loadNegatives(function(){ checkIncoming(); });
     } else {
-      $('connText').textContent = 'Not connected';
       $('gate').classList.remove('hide');
     }
   });
@@ -185,7 +180,6 @@
   }
   function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
-  /* ---------- saved progress ---------- */
   function saveProgress(){
     try{
       localStorage.setItem(STORE, JSON.stringify({
@@ -222,7 +216,6 @@
     log('Saved progress cleared.', 'warn');
   });
 
-  /* ---------- negatives ---------- */
   function loadNegatives(done){
     fetch('/api/negative-items')
       .then(function(r){ return r.json(); })
@@ -406,7 +399,6 @@
     return Object.keys(negSet).filter(function(k){ return negSet[k]; });
   }
 
-  /* ---------- one connection ---------- */
   function sendSegment(list){
     return new Promise(function(resolve){
       var outcome = { ok:false, broke:false, cancelled:false, moved:0 };
@@ -437,7 +429,6 @@
         var lastBeat = Date.now();
         var settled = false;
 
-        // the server pings every 10s — if nothing arrives for 90s the link is dead
         var watchdog = setInterval(function(){
           if(Date.now() - lastBeat > 90000 && !settled){
             settled = true;
@@ -471,7 +462,6 @@
       })
       .catch(function(e){
         outcome.broke = true;
-        outcome.reason = e.message;
         resolve(outcome);
       });
     });
@@ -518,7 +508,6 @@
       Math.max(0, invoices.length - cursor) + ' remaining';
   }
 
-  /* ---------- the whole run, reconnecting as needed ---------- */
   async function runAll(list, isRetry){
     if(running) return;
     running = true; stopRequested = false; retryMode = !!isRetry;
@@ -543,10 +532,8 @@
       var out = await sendSegment(list.slice(at));
 
       if(out.cancelled || stopRequested){ log('Stopped.', 'warn'); break; }
-
       if(out.ok){ at = total; if(!isRetry) cursor = total; break; }
 
-      // connection ended early — carry on from wherever it got to
       var moved = out.moved || 0;
       at += moved;
       if(!isRetry) cursor = at;
@@ -602,8 +589,7 @@
 
       if(list2.length){
         log('Retry round ' + autoRound + ' of ' + MAX_AUTO_ROUNDS + ' — ' + list2.length +
-            ' failed invoice' + (list2.length===1?'':'s') + ', starting in ' + pause + ' seconds. ' +
-            'QuickBooks asks for a few minutes after these errors.', 'warn');
+            ' failed invoice' + (list2.length===1?'':'s') + ', starting in ' + pause + ' seconds.', 'warn');
 
         pendingRetry = list2;
         var left = pause;
@@ -743,61 +729,6 @@
     setTimeout(function(){ $('btnCopyLog').textContent = 'Copy log'; }, 2000);
   });
 })();
-</script>
-
-<script>
-(function(){
-  var box=document.getElementById('connBox');
-  var sw=document.getElementById('switcher');
-  if(!box||!sw) return;
-
-  box.addEventListener('click',function(e){
-    e.stopPropagation();
-    if(sw.classList.contains('open')){ sw.classList.remove('open'); return; }
-    sw.innerHTML='<div class="head">Loading…</div>';
-    sw.classList.add('open');
-    fetch('/auth/companies').then(function(r){return r.json();}).then(function(d){
-      sw.innerHTML='<div class="head">QuickBooks companies</div>';
-      (d.companies||[]).forEach(function(c){
-        var b=document.createElement('button');
-        b.textContent=c.name;
-        if(c.realmId===d.current) b.className='cur';
-        b.addEventListener('click',function(ev){
-          ev.stopPropagation();
-          if(c.realmId===d.current){ sw.classList.remove('open'); return; }
-          fetch('/auth/switch',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({realmId:c.realmId})})
-            .then(function(){ location.reload(); });
-        });
-        sw.appendChild(b);
-      });
-      var add=document.createElement('button');
-      add.className='add'; add.textContent='+ Connect another company';
-      add.addEventListener('click',function(ev){ ev.stopPropagation(); location.href='/auth/connect'; });
-      sw.appendChild(add);
-      if(d.current){
-        var out=document.createElement('button');
-        out.className='out'; out.textContent='Disconnect this session';
-        out.addEventListener('click',function(ev){
-          ev.stopPropagation();
-          fetch('/auth/disconnect',{method:'POST'}).then(function(){ location.reload(); });
-        });
-        sw.appendChild(out);
-      }
-    }).catch(function(){ sw.innerHTML='<div class="head">Could not load companies</div>'; });
-  });
-
-  document.addEventListener('click',function(){ sw.classList.remove('open'); });
-  sw.addEventListener('click',function(e){ e.stopPropagation(); });
-})();
-</script>
-
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('/sw.js').catch(function(){});
-  });
-}
 </script>
 </body>
 </html>
