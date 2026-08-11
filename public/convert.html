@@ -14,239 +14,237 @@
 </head>
 <body>
 
-<div class="topbar"><div class="in">
-  <a class="mark" href="/">
-    <img src="/logo.svg" alt="">
-    <span style="display:block">
-      <b>Shopify orders to QuickBooks</b>
-      <span>Invoice pipeline</span>
-    </span>
-  </a>
-  <nav>
-    <a href="/" class="on">Convert</a>
-    <a href="/upload.html">Upload</a>
-    <a href="/fix.html">Fix duplicates</a>
-  </nav>
-  <div class="conn" id="connBox"><span class="dot" id="dot"></span><span id="connText">Checking…</span><span class="caret">▼</span>
-    <div class="switcher" id="switcher"></div></div>
-</div></div>
+<div class="layout">
+  <aside class="rail"></aside>
 
-<div class="shell">
-
-  <div id="gate" class="gate hide">
-    <img src="/logo.svg" alt="">
-    <h2>Connect your QuickBooks company</h2>
-    <p>Products are read from QuickBooks so you can map anything that does not match.</p>
-    <button class="solid" id="btnConnect">Connect to QuickBooks</button>
-  </div>
-
-  <div id="main" class="hide">
-
-  <div class="sheet">
-    <div class="sec">
-      <h2><span class="no">01</span> Source files <span class="aside" id="prodAside"></span></h2>
-      <div class="two">
-        <div>
-          <div class="zone" id="zoneShop" tabindex="0" role="button">
-            <span><b>Shopify orders</b><span>Orders → Export → CSV</span></span>
-            <span class="pick">Browse</span>
-          </div>
-          <input type="file" id="fileShop" accept=".csv,text/csv">
-          <div class="stat" id="statShop"></div>
-        </div>
-        <div>
-          <div class="zone" id="zoneCat" tabindex="0" role="button">
-            <span><b>QuickBooks product list</b><span>SKU + Product/Service Name</span></span>
-            <span class="pick">Browse</span>
-          </div>
-          <input type="file" id="fileCat" accept=".csv,text/csv">
-          <div class="stat" id="statCat"></div>
-        </div>
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Convert</h1>
+        <div class="sub">Turn a Shopify orders export into QuickBooks invoices</div>
       </div>
+      <div class="right"><span class="mono" id="prodAside" style="font-size:12px;color:var(--muted)"></span></div>
     </div>
 
-    <div class="sec">
-      <h2><span class="no">02</span> Which orders</h2>
-      <label class="chk" style="margin-top:0">
-        <input type="radio" name="scope" value="all" checked><span>All orders in the file</span></label>
-      <label class="chk" style="margin-left:22px">
-        <input type="radio" name="scope" value="gap"><span>Only orders not yet in QuickBooks</span></label>
+    <div class="shell">
 
-      <div id="gapBox" class="hide" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
-        <label class="chk" style="margin-top:0">
-          <input type="radio" name="qbsrc" value="api" checked><span>Read the invoice list from QuickBooks</span></label>
-        <label class="chk" style="margin-left:22px">
-          <input type="radio" name="qbsrc" value="file"><span>Upload an invoice list exported from QuickBooks</span></label>
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Products are read from QuickBooks so you can map anything that does not match.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
 
-        <div id="qbApiBox" style="margin-top:14px">
-          <div class="g3">
-            <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
-            <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
-            <div style="display:flex;align-items:flex-end">
-              <button class="solid" id="btnFetch" style="width:100%">Fetch from QuickBooks</button>
+      <div id="main" class="hide">
+
+      <div class="sheet">
+        <div class="sec">
+          <h2><span class="no">01</span> Source files</h2>
+          <div class="two">
+            <div>
+              <div class="zone" id="zoneShop" tabindex="0" role="button">
+                <span><b>Shopify orders</b><span>Orders → Export → CSV</span></span>
+                <span class="pick">Browse</span>
+              </div>
+              <input type="file" id="fileShop" accept=".csv,text/csv">
+              <div class="stat" id="statShop"></div>
+            </div>
+            <div>
+              <div class="zone" id="zoneCat" tabindex="0" role="button">
+                <span><b>QuickBooks product list</b><span>SKU + Product/Service Name</span></span>
+                <span class="pick">Browse</span>
+              </div>
+              <input type="file" id="fileCat" accept=".csv,text/csv">
+              <div class="stat" id="statCat"></div>
             </div>
           </div>
         </div>
 
-        <div id="qbFileBox" class="hide" style="margin-top:14px">
-          <div class="zone" id="zoneQbFile" tabindex="0" role="button">
-            <span><b>QuickBooks invoice list</b><span>Reports → Invoice List by Date → Export</span></span>
-            <span class="pick">Browse</span>
+        <div class="sec">
+          <h2><span class="no">02</span> Which orders</h2>
+          <label class="chk" style="margin-top:0">
+            <input type="radio" name="scope" value="all" checked><span>All orders in the file</span></label>
+          <label class="chk" style="margin-left:22px">
+            <input type="radio" name="scope" value="gap"><span>Only orders not yet in QuickBooks</span></label>
+
+          <div id="gapBox" class="hide" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
+            <label class="chk" style="margin-top:0">
+              <input type="radio" name="qbsrc" value="api" checked><span>Read the invoice list from QuickBooks</span></label>
+            <label class="chk" style="margin-left:22px">
+              <input type="radio" name="qbsrc" value="file"><span>Upload an invoice list exported from QuickBooks</span></label>
+
+            <div id="qbApiBox" style="margin-top:14px">
+              <div class="g3">
+                <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
+                <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
+                <div style="display:flex;align-items:flex-end">
+                  <button class="solid" id="btnFetch" style="width:100%">Fetch from QuickBooks</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="qbFileBox" class="hide" style="margin-top:14px">
+              <div class="zone" id="zoneQbFile" tabindex="0" role="button">
+                <span><b>QuickBooks invoice list</b><span>Reports → Invoice List by Date → Export</span></span>
+                <span class="pick">Browse</span>
+              </div>
+              <input type="file" id="fileQb" accept=".xlsx,.xls,.csv">
+              <p class="hint">Any export with a <code>Ref no.</code> or <code>Invoice number</code> column works.</p>
+            </div>
+
+            <div class="stat" id="statQb"></div>
           </div>
-          <input type="file" id="fileQb" accept=".xlsx,.xls,.csv">
-          <p class="hint">Any export with a <code>Ref no.</code> or <code>Invoice number</code> column works.</p>
+
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
+            <label class="chk" style="margin-top:0">
+              <input type="checkbox" id="skipVoided" checked><span>Skip voided orders</span></label>
+            <label class="chk" style="margin-left:22px">
+              <input type="checkbox" id="skipUnfulfilled" checked><span>Skip unfulfilled orders</span></label>
+            <p class="hint">Skipped orders are listed separately with the reason.</p>
+          </div>
         </div>
 
-        <div class="stat" id="statQb"></div>
+        <div class="sec">
+          <h2><span class="no">03</span> Invoice settings</h2>
+          <div class="g3">
+            <div>
+              <label for="gname">Customer name on all invoices</label>
+              <input type="text" id="gname" value="Shopify Sale - {mon}{yy}">
+              <p class="hint"><code>{mon}</code> Oct · <code>{yy}</code> 26 · <code>{month}</code> · <code>{yyyy}</code></p>
+            </div>
+            <div>
+              <label for="terms">Terms</label>
+              <select id="terms">
+                <option value="0" selected>Due on receipt</option>
+                <option value="15">Net 15</option>
+                <option value="30">Net 30</option>
+                <option value="60">Net 60</option>
+              </select>
+            </div>
+            <div>
+              <label for="dfmt">Date format</label>
+              <select id="dfmt">
+                <option value="dmy" selected>dd/mm/yyyy</option>
+                <option value="mdy">mm/dd/yyyy</option>
+                <option value="iso">yyyy-mm-dd</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="chk" style="margin-top:16px">
+            <input type="checkbox" id="keepHash" checked><span>Keep the <code>#</code> in front of invoice numbers</span></label>
+          <p class="hint">QuickBooks treats <code>#91306999</code> and <code>91306999</code> as two different invoices. Keep this ticked so new invoices match the ones already there.</p>
+
+          <div class="g3" style="margin-top:16px">
+            <div>
+              <label for="rowCap">Rows per file</label>
+              <input type="text" id="rowCap" value="1000" inputmode="numeric">
+              <p class="hint">An invoice is never split across two files.</p>
+            </div>
+            <div>
+              <label for="invCap">Invoices per file</label>
+              <input type="text" id="invCap" value="" placeholder="no limit" inputmode="numeric">
+            </div>
+            <div></div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <button class="run" id="btnScan" disabled>Check products</button>
+          <p class="runhint" id="runHint">Add both files to begin</p>
+        </div>
       </div>
 
-      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
-        <label class="chk" style="margin-top:0">
-          <input type="checkbox" id="skipVoided" checked><span>Skip voided orders</span></label>
-        <label class="chk" style="margin-left:22px">
-          <input type="checkbox" id="skipUnfulfilled" checked><span>Skip unfulfilled orders</span></label>
-        <p class="hint">Skipped orders are listed separately with the reason.</p>
+      <div class="sheet hide" id="mapSheet">
+        <div class="sec">
+          <h2><span class="no">04</span> Products that need a decision
+            <span class="aside" id="mapAside"></span></h2>
+          <p class="hint" style="margin:0 0 14px">These Shopify products did not match. Pick the QuickBooks product each should become, or skip it. Choices are saved and reused next time.</p>
+          <div class="acts">
+            <button class="mini" id="mapSave">Save choices</button>
+            <span class="mono" id="mapSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
+          </div>
+          <div class="tbl" style="max-height:420px">
+            <table>
+              <thead><tr>
+                <th>SKU</th><th>Shopify product</th><th class="num">Lines</th><th style="min-width:280px">Becomes</th>
+              </tr></thead>
+              <tbody id="mapBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="sec">
+          <button class="run" id="btnConvert">Convert</button>
+          <p class="runhint" id="convHint"></p>
+        </div>
+      </div>
+
+      <div id="results" class="hide">
+        <div class="sheet">
+          <div class="sec" style="padding-bottom:0;border-bottom:0">
+            <h2><span class="no">05</span> Result <span class="aside" id="timing"></span></h2>
+          </div>
+          <div class="figs">
+            <div><span>Invoices</span><b id="sInv">0</b></div>
+            <div><span>Lines</span><b id="sLines">0</b></div>
+            <div><span>Files</span><b id="sFiles">0</b></div>
+            <div><span>Total</span><b id="sTotal">0.00</b></div>
+          </div>
+          <div class="sec">
+            <h2 style="margin-bottom:8px">Match breakdown <span class="aside"><b id="kTot">0</b> lines</span></h2>
+            <div class="bar">
+              <i id="barSku" style="width:0%;background:var(--ok)"></i>
+              <i id="barName" style="width:0%;background:var(--accent)"></i>
+              <i id="barMap" style="width:0%;background:var(--shop)"></i>
+              <i id="barMiss" style="width:0%;background:var(--warn)"></i>
+            </div>
+            <div class="keys">
+              <div><em style="background:var(--ok)"></em> Matched on SKU <b id="kSku">0</b></div>
+              <div><em style="background:var(--accent)"></em> Matched on name <b id="kName">0</b></div>
+              <div><em style="background:var(--shop)"></em> Your mapping <b id="kMap">0</b></div>
+              <div><em style="background:var(--warn)"></em> Unresolved <b id="kMiss">0</b></div>
+            </div>
+          </div>
+          <div class="sec" id="notes"></div>
+        </div>
+
+        <div class="sheet hide" id="excludedSheet">
+          <div class="sec">
+            <h2><span class="no">06</span> Orders not uploaded <span class="aside" id="exAside"></span></h2>
+            <div class="acts">
+              <button class="mini" id="dlExcluded">Download this list</button>
+            </div>
+            <div class="tbl" style="max-height:320px">
+              <table>
+                <thead><tr><th>Order</th><th>Reason</th><th>Financial status</th><th>Fulfillment status</th><th class="num">Total</th></tr></thead>
+                <tbody id="exBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="sheet">
+          <div class="sec">
+            <h2><span class="no">07</span> Next step <span class="aside" id="capNote"></span></h2>
+            <div class="acts">
+              <button class="solid" id="btnSend">Send to Upload</button>
+              <button class="mini" id="dlall">Download all files</button>
+            </div>
+            <div id="partList"></div>
+          </div>
+        </div>
+      </div>
+
+      <footer>
+        <p><b>Matching order:</b> your saved mapping, then the SKU in your QuickBooks product list, then the SKU found inside a product name, then the product name itself. Anything left appears in step 04.</p>
+      </footer>
+
       </div>
     </div>
-
-    <div class="sec">
-      <h2><span class="no">03</span> Invoice settings</h2>
-      <div class="g3">
-        <div>
-          <label for="gname">Customer name on all invoices</label>
-          <input type="text" id="gname" value="Shopify Sale - {mon}{yy}">
-          <p class="hint"><code>{mon}</code> Oct · <code>{yy}</code> 26 · <code>{month}</code> · <code>{yyyy}</code></p>
-        </div>
-        <div>
-          <label for="terms">Terms</label>
-          <select id="terms">
-            <option value="0" selected>Due on receipt</option>
-            <option value="15">Net 15</option>
-            <option value="30">Net 30</option>
-            <option value="60">Net 60</option>
-          </select>
-        </div>
-        <div>
-          <label for="dfmt">Date format</label>
-          <select id="dfmt">
-            <option value="dmy" selected>dd/mm/yyyy</option>
-            <option value="mdy">mm/dd/yyyy</option>
-            <option value="iso">yyyy-mm-dd</option>
-          </select>
-        </div>
-      </div>
-
-      <label class="chk" style="margin-top:16px">
-        <input type="checkbox" id="keepHash" checked><span>Keep the <code>#</code> in front of invoice numbers</span></label>
-      <p class="hint">QuickBooks treats <code>#91306999</code> and <code>91306999</code> as two different invoices. Keep this ticked so new invoices match the ones already in QuickBooks.</p>
-
-      <div class="g3" style="margin-top:16px">
-        <div>
-          <label for="rowCap">Rows per file</label>
-          <input type="text" id="rowCap" value="1000" inputmode="numeric">
-          <p class="hint">An invoice is never split across two files.</p>
-        </div>
-        <div>
-          <label for="invCap">Invoices per file</label>
-          <input type="text" id="invCap" value="" placeholder="no limit" inputmode="numeric">
-        </div>
-        <div></div>
-      </div>
-    </div>
-
-    <div class="sec">
-      <button class="run" id="btnScan" disabled>Check products</button>
-      <p class="runhint" id="runHint">Add both files to begin</p>
-    </div>
-  </div>
-
-  <div class="sheet hide" id="mapSheet">
-    <div class="sec">
-      <h2><span class="no">04</span> Products that need a decision
-        <span class="aside" id="mapAside"></span></h2>
-      <p class="hint" style="margin:0 0 14px">These Shopify products did not match. Pick the QuickBooks product each should become, or skip it. Choices are saved and reused next time.</p>
-      <div class="acts">
-        <button class="mini" id="mapSave">Save choices</button>
-        <span class="mono" id="mapSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
-      </div>
-      <div class="tbl" style="max-height:420px">
-        <table>
-          <thead><tr>
-            <th>SKU</th><th>Shopify product</th><th class="num">Lines</th><th style="min-width:280px">Becomes</th>
-          </tr></thead>
-          <tbody id="mapBody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="sec">
-      <button class="run" id="btnConvert">Convert</button>
-      <p class="runhint" id="convHint"></p>
-    </div>
-  </div>
-
-  <div id="results" class="hide">
-    <div class="sheet">
-      <div class="sec" style="padding-bottom:0;border-bottom:0">
-        <h2><span class="no">05</span> Result <span class="aside" id="timing"></span></h2>
-      </div>
-      <div class="figs">
-        <div><span>Invoices</span><b id="sInv">0</b></div>
-        <div><span>Lines</span><b id="sLines">0</b></div>
-        <div><span>Files</span><b id="sFiles">0</b></div>
-        <div><span>Total</span><b id="sTotal">0.00</b></div>
-      </div>
-      <div class="sec">
-        <h2 style="margin-bottom:8px">Match breakdown <span class="aside"><b id="kTot">0</b> lines</span></h2>
-        <div class="bar">
-          <i id="barSku" style="width:0%;background:var(--ok)"></i>
-          <i id="barName" style="width:0%;background:var(--accent)"></i>
-          <i id="barMap" style="width:0%;background:var(--shop)"></i>
-          <i id="barMiss" style="width:0%;background:var(--warn)"></i>
-        </div>
-        <div class="keys">
-          <div><em style="background:var(--ok)"></em> Matched on SKU <b id="kSku">0</b></div>
-          <div><em style="background:var(--accent)"></em> Matched on name <b id="kName">0</b></div>
-          <div><em style="background:var(--shop)"></em> Your mapping <b id="kMap">0</b></div>
-          <div><em style="background:var(--warn)"></em> Unresolved <b id="kMiss">0</b></div>
-        </div>
-      </div>
-      <div class="sec" id="notes"></div>
-    </div>
-
-    <div class="sheet hide" id="excludedSheet">
-      <div class="sec">
-        <h2><span class="no">06</span> Orders not uploaded <span class="aside" id="exAside"></span></h2>
-        <div class="acts">
-          <button class="mini" id="dlExcluded">Download this list</button>
-        </div>
-        <div class="tbl" style="max-height:320px">
-          <table>
-            <thead><tr><th>Order</th><th>Reason</th><th>Financial status</th><th>Fulfillment status</th><th class="num">Total</th></tr></thead>
-            <tbody id="exBody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div class="sheet">
-      <div class="sec">
-        <h2><span class="no">07</span> Next step <span class="aside" id="capNote"></span></h2>
-        <div class="acts">
-          <button class="solid" id="btnSend">Send to Upload</button>
-          <button class="mini" id="dlall">Download all files</button>
-        </div>
-        <div id="partList"></div>
-      </div>
-    </div>
-  </div>
-
-  <footer>
-    <p><b>Matching order:</b> your saved mapping, then the SKU in your QuickBooks product list, then the SKU found inside a product name, then the product name itself. Anything left appears in step 04.</p>
-  </footer>
-
   </div>
 </div>
 
+<script src="/nav.js"></script>
 <script>
 (function(){
   "use strict";
@@ -359,14 +357,11 @@
     setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
   }
 
-  fetch('/auth/status').then(function(r){return r.json();}).then(function(s){
+  window.APP.ready.then(function(s){
     if(s.connected){
-      $('dot').classList.add('on');
-      $('connText').textContent = s.companyName || s.realmId;
       $('main').classList.remove('hide');
       loadProducts(); loadMappings();
     } else {
-      $('connText').textContent = 'Not connected';
       $('gate').classList.remove('hide');
     }
   });
@@ -383,7 +378,7 @@
   });
 
   function loadProducts(){
-    $('prodAside').textContent='loading QuickBooks products…';
+    $('prodAside').textContent='loading products…';
     fetch('/api/qb-products').then(function(r){return r.json();}).then(function(d){
       if(d.error){ $('prodAside').textContent='product load failed'; return; }
       qbProducts=d.products;
@@ -565,8 +560,7 @@
         $('btnFetch').disabled=false;
         if(d.error){ setStat($('statQb'),"bad",d.error); qbNumbers=null; ready(); return; }
         qbNumbers=d.numbers;
-        setStat($('statQb'),"ok","<b>"+nf(d.count)+" invoices already in QuickBooks</b><i>"+from+" to "+to+
-          (d.windows?(" · "+d.windows+" windows"):"")+"</i>");
+        setStat($('statQb'),"ok","<b>"+nf(d.count)+" invoices already in QuickBooks</b><i>"+from+" to "+to+"</i>");
         ready();
       })
       .catch(function(e){
@@ -945,61 +939,6 @@
 
   ready();
 })();
-</script>
-
-<script>
-(function(){
-  var box=document.getElementById('connBox');
-  var sw=document.getElementById('switcher');
-  if(!box||!sw) return;
-
-  box.addEventListener('click',function(e){
-    e.stopPropagation();
-    if(sw.classList.contains('open')){ sw.classList.remove('open'); return; }
-    sw.innerHTML='<div class="head">Loading…</div>';
-    sw.classList.add('open');
-    fetch('/auth/companies').then(function(r){return r.json();}).then(function(d){
-      sw.innerHTML='<div class="head">QuickBooks companies</div>';
-      (d.companies||[]).forEach(function(c){
-        var b=document.createElement('button');
-        b.textContent=c.name;
-        if(c.realmId===d.current) b.className='cur';
-        b.addEventListener('click',function(ev){
-          ev.stopPropagation();
-          if(c.realmId===d.current){ sw.classList.remove('open'); return; }
-          fetch('/auth/switch',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({realmId:c.realmId})})
-            .then(function(){ location.reload(); });
-        });
-        sw.appendChild(b);
-      });
-      var add=document.createElement('button');
-      add.className='add'; add.textContent='+ Connect another company';
-      add.addEventListener('click',function(ev){ ev.stopPropagation(); location.href='/auth/connect'; });
-      sw.appendChild(add);
-      if(d.current){
-        var out=document.createElement('button');
-        out.className='out'; out.textContent='Disconnect this session';
-        out.addEventListener('click',function(ev){
-          ev.stopPropagation();
-          fetch('/auth/disconnect',{method:'POST'}).then(function(){ location.reload(); });
-        });
-        sw.appendChild(out);
-      }
-    }).catch(function(){ sw.innerHTML='<div class="head">Could not load companies</div>'; });
-  });
-
-  document.addEventListener('click',function(){ sw.classList.remove('open'); });
-  sw.addEventListener('click',function(e){ e.stopPropagation(); });
-})();
-</script>
-
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('/sw.js').catch(function(){});
-  });
-}
 </script>
 </body>
 </html>
