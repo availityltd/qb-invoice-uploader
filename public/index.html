@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Convert · Shopify orders to QuickBooks</title>
+<title>Dashboard · Shopify orders to QuickBooks</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0F2E24">
@@ -14,992 +14,248 @@
 </head>
 <body>
 
-<div class="topbar"><div class="in">
-  <a class="mark" href="/">
-    <img src="/logo.svg" alt="">
-    <span style="display:block">
-      <b>Shopify orders to QuickBooks</b>
-      <span>Invoice pipeline</span>
-    </span>
-  </a>
-  <nav>
-    <a href="/" class="on">Convert</a>
-    <a href="/upload.html">Upload</a>
-    <a href="/fix.html">Fix duplicates</a>
-  </nav>
-  <div class="conn" id="connBox"><span class="dot" id="dot"></span><span id="connText">Checking…</span><span class="caret">▼</span>
-    <div class="switcher" id="switcher"></div></div>
-</div></div>
+<div class="layout">
+  <aside class="rail"></aside>
 
-<div class="shell">
-
-  <div id="gate" class="gate hide">
-    <img src="/logo.svg" alt="">
-    <h2>Connect your QuickBooks company</h2>
-    <p>Products are read from QuickBooks so you can map anything that does not match.</p>
-    <button class="solid" id="btnConnect">Connect to QuickBooks</button>
-  </div>
-
-  <div id="main" class="hide">
-
-  <div class="sheet">
-    <div class="sec">
-      <h2><span class="no">01</span> Source files <span class="aside" id="prodAside"></span></h2>
-      <div class="two">
-        <div>
-          <div class="zone" id="zoneShop" tabindex="0" role="button">
-            <span><b>Shopify orders</b><span>Orders → Export → CSV</span></span>
-            <span class="pick">Browse</span>
-          </div>
-          <input type="file" id="fileShop" accept=".csv,text/csv">
-          <div class="stat" id="statShop"></div>
-        </div>
-        <div>
-          <div class="zone" id="zoneCat" tabindex="0" role="button">
-            <span><b>QuickBooks product list</b><span>SKU + Product/Service Name</span></span>
-            <span class="pick">Browse</span>
-          </div>
-          <input type="file" id="fileCat" accept=".csv,text/csv">
-          <div class="stat" id="statCat"></div>
-        </div>
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Dashboard</h1>
+        <div class="sub" id="periodSub">This month</div>
+      </div>
+      <div class="right">
+        <button class="mini" id="btnRefresh">Refresh</button>
       </div>
     </div>
 
-    <div class="sec">
-      <h2><span class="no">02</span> Which orders</h2>
-      <label class="chk" style="margin-top:0">
-        <input type="radio" name="scope" value="all" checked><span>All orders in the file</span></label>
-      <label class="chk" style="margin-left:22px">
-        <input type="radio" name="scope" value="gap"><span>Only orders not yet in QuickBooks</span></label>
+    <div class="shell">
 
-      <div id="gapBox" class="hide" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
-        <label class="chk" style="margin-top:0">
-          <input type="radio" name="qbsrc" value="api" checked><span>Read the invoice list from QuickBooks</span></label>
-        <label class="chk" style="margin-left:22px">
-          <input type="radio" name="qbsrc" value="file"><span>Upload an invoice list exported from QuickBooks</span></label>
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Everything on this page comes straight from your company file.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
 
-        <div id="qbApiBox" style="margin-top:14px">
-          <div class="g3">
-            <div><label for="dFrom">From date</label><input type="date" id="dFrom"></div>
-            <div><label for="dTo">To date</label><input type="date" id="dTo"></div>
-            <div style="display:flex;align-items:flex-end">
-              <button class="solid" id="btnFetch" style="width:100%">Fetch from QuickBooks</button>
+      <div id="main" class="hide">
+
+        <div class="tiles" style="margin-bottom:22px">
+          <div class="tile">
+            <div class="lbl">Invoiced this month</div>
+            <div class="val" id="tInvoiced">—</div>
+            <div class="sub" id="tInvoicedSub">&nbsp;</div>
+          </div>
+          <div class="tile">
+            <div class="lbl">Still outstanding</div>
+            <div class="val" id="tOutstanding">—</div>
+            <div class="sub" id="tOutstandingSub">&nbsp;</div>
+          </div>
+          <div class="tile">
+            <div class="lbl">Received · last 30 days</div>
+            <div class="val" id="tReceived">—</div>
+            <div class="sub" id="tReceivedSub">&nbsp;</div>
+          </div>
+          <div class="tile">
+            <div class="lbl">Invoices this month</div>
+            <div class="val" id="tCount">—</div>
+            <div class="sub" id="tCountSub">&nbsp;</div>
+          </div>
+        </div>
+
+        <div id="alerts"></div>
+
+        <div class="sheet" style="margin-top:20px">
+          <div class="sec">
+            <h2>Jump straight in</h2>
+            <div class="tiles">
+              <a class="tile link" href="/convert.html">
+                <span class="arrow">›</span>
+                <div class="lbl">Import invoices</div>
+                <div style="font-size:15px;font-weight:600;margin-top:4px">Convert a Shopify export</div>
+                <div class="sub">Turn an orders export into QuickBooks invoices, skipping anything already there.</div>
+              </a>
+              <a class="tile link" href="/payments.html">
+                <span class="arrow">›</span>
+                <div class="lbl">Payments</div>
+                <div style="font-size:15px;font-weight:600;margin-top:4px">Receive a CPR</div>
+                <div class="sub">Match a courier settlement against QuickBooks and record the payment.</div>
+              </a>
+              <a class="tile link" href="/fix.html">
+                <span class="arrow">›</span>
+                <div class="lbl">Maintenance</div>
+                <div style="font-size:15px;font-weight:600;margin-top:4px">Fix duplicates</div>
+                <div class="sub">Find invoices that exist twice and tidy them up safely.</div>
+              </a>
             </div>
           </div>
         </div>
 
-        <div id="qbFileBox" class="hide" style="margin-top:14px">
-          <div class="zone" id="zoneQbFile" tabindex="0" role="button">
-            <span><b>QuickBooks invoice list</b><span>Reports → Invoice List by Date → Export</span></span>
-            <span class="pick">Browse</span>
+        <div class="sheet hide" id="courierSheet">
+          <div class="sec">
+            <h2>Couriers <span class="aside" id="courierAside"></span></h2>
+            <div class="tbl" style="max-height:300px">
+              <table>
+                <thead><tr>
+                  <th>Courier</th><th class="num">Runs</th><th class="num">Invoices</th>
+                  <th class="num">Amount</th><th>Last received</th>
+                </tr></thead>
+                <tbody id="courierBody"></tbody>
+              </table>
+            </div>
           </div>
-          <input type="file" id="fileQb" accept=".xlsx,.xls,.csv">
-          <p class="hint">Any export with a <code>Ref no.</code> or <code>Invoice number</code> column works.</p>
         </div>
 
-        <div class="stat" id="statQb"></div>
-      </div>
+        <div class="sheet hide" id="runSheet">
+          <div class="sec">
+            <h2>Recent CPR runs</h2>
+            <div class="tbl" style="max-height:320px">
+              <table>
+                <thead><tr>
+                  <th>When</th><th>Courier</th><th>CPR</th>
+                  <th class="num">Matched</th><th class="num">Unmatched</th><th class="num">Amount</th>
+                </tr></thead>
+                <tbody id="runBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
-      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
-        <label class="chk" style="margin-top:0">
-          <input type="checkbox" id="skipVoided" checked><span>Skip voided orders</span></label>
-        <label class="chk" style="margin-left:22px">
-          <input type="checkbox" id="skipUnfulfilled" checked><span>Skip unfulfilled orders</span></label>
-        <p class="hint">Skipped orders are listed separately with the reason.</p>
-      </div>
-    </div>
-
-    <div class="sec">
-      <h2><span class="no">03</span> Invoice settings</h2>
-      <div class="g3">
-        <div>
-          <label for="gname">Customer name on all invoices</label>
-          <input type="text" id="gname" value="Shopify Sale - {mon}{yy}">
-          <p class="hint"><code>{mon}</code> Oct · <code>{yy}</code> 26 · <code>{month}</code> · <code>{yyyy}</code></p>
-        </div>
-        <div>
-          <label for="terms">Terms</label>
-          <select id="terms">
-            <option value="0" selected>Due on receipt</option>
-            <option value="15">Net 15</option>
-            <option value="30">Net 30</option>
-            <option value="60">Net 60</option>
-          </select>
-        </div>
-        <div>
-          <label for="dfmt">Date format</label>
-          <select id="dfmt">
-            <option value="dmy" selected>dd/mm/yyyy</option>
-            <option value="mdy">mm/dd/yyyy</option>
-            <option value="iso">yyyy-mm-dd</option>
-          </select>
-        </div>
-      </div>
-
-      <label class="chk" style="margin-top:16px">
-        <input type="checkbox" id="keepHash" checked><span>Keep the <code>#</code> in front of invoice numbers</span></label>
-      <p class="hint">QuickBooks treats <code>#91306999</code> and <code>91306999</code> as two different invoices. Keep this ticked so new invoices match the ones already in QuickBooks.</p>
-
-      <div class="g3" style="margin-top:16px">
-        <div>
-          <label for="rowCap">Rows per file</label>
-          <input type="text" id="rowCap" value="1000" inputmode="numeric">
-          <p class="hint">An invoice is never split across two files.</p>
-        </div>
-        <div>
-          <label for="invCap">Invoices per file</label>
-          <input type="text" id="invCap" value="" placeholder="no limit" inputmode="numeric">
-        </div>
-        <div></div>
+        <div class="stat" id="statBox" style="margin-top:18px"></div>
       </div>
     </div>
-
-    <div class="sec">
-      <button class="run" id="btnScan" disabled>Check products</button>
-      <p class="runhint" id="runHint">Add both files to begin</p>
-    </div>
-  </div>
-
-  <div class="sheet hide" id="mapSheet">
-    <div class="sec">
-      <h2><span class="no">04</span> Products that need a decision
-        <span class="aside" id="mapAside"></span></h2>
-      <p class="hint" style="margin:0 0 14px">These Shopify products did not match. Pick the QuickBooks product each should become, or skip it. Choices are saved and reused next time.</p>
-      <div class="acts">
-        <button class="mini" id="mapSave">Save choices</button>
-        <span class="mono" id="mapSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
-      </div>
-      <div class="tbl" style="max-height:420px">
-        <table>
-          <thead><tr>
-            <th>SKU</th><th>Shopify product</th><th class="num">Lines</th><th style="min-width:280px">Becomes</th>
-          </tr></thead>
-          <tbody id="mapBody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="sec">
-      <button class="run" id="btnConvert">Convert</button>
-      <p class="runhint" id="convHint"></p>
-    </div>
-  </div>
-
-  <div id="results" class="hide">
-    <div class="sheet">
-      <div class="sec" style="padding-bottom:0;border-bottom:0">
-        <h2><span class="no">05</span> Result <span class="aside" id="timing"></span></h2>
-      </div>
-      <div class="figs">
-        <div><span>Invoices</span><b id="sInv">0</b></div>
-        <div><span>Lines</span><b id="sLines">0</b></div>
-        <div><span>Files</span><b id="sFiles">0</b></div>
-        <div><span>Total</span><b id="sTotal">0.00</b></div>
-      </div>
-      <div class="sec">
-        <h2 style="margin-bottom:8px">Match breakdown <span class="aside"><b id="kTot">0</b> lines</span></h2>
-        <div class="bar">
-          <i id="barSku" style="width:0%;background:var(--ok)"></i>
-          <i id="barName" style="width:0%;background:var(--accent)"></i>
-          <i id="barMap" style="width:0%;background:var(--shop)"></i>
-          <i id="barMiss" style="width:0%;background:var(--warn)"></i>
-        </div>
-        <div class="keys">
-          <div><em style="background:var(--ok)"></em> Matched on SKU <b id="kSku">0</b></div>
-          <div><em style="background:var(--accent)"></em> Matched on name <b id="kName">0</b></div>
-          <div><em style="background:var(--shop)"></em> Your mapping <b id="kMap">0</b></div>
-          <div><em style="background:var(--warn)"></em> Unresolved <b id="kMiss">0</b></div>
-        </div>
-      </div>
-      <div class="sec" id="notes"></div>
-    </div>
-
-    <div class="sheet hide" id="excludedSheet">
-      <div class="sec">
-        <h2><span class="no">06</span> Orders not uploaded <span class="aside" id="exAside"></span></h2>
-        <div class="acts">
-          <button class="mini" id="dlExcluded">Download this list</button>
-        </div>
-        <div class="tbl" style="max-height:320px">
-          <table>
-            <thead><tr><th>Order</th><th>Reason</th><th>Financial status</th><th>Fulfillment status</th><th class="num">Total</th></tr></thead>
-            <tbody id="exBody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div class="sheet">
-      <div class="sec">
-        <h2><span class="no">07</span> Next step <span class="aside" id="capNote"></span></h2>
-        <div class="acts">
-          <button class="solid" id="btnSend">Send to Upload</button>
-          <button class="mini" id="dlall">Download all files</button>
-        </div>
-        <div id="partList"></div>
-      </div>
-    </div>
-  </div>
-
-  <footer>
-    <p><b>Matching order:</b> your saved mapping, then the SKU in your QuickBooks product list, then the SKU found inside a product name, then the product name itself. Anything left appears in step 04.</p>
-  </footer>
-
   </div>
 </div>
 
+<script src="/nav.js"></script>
 <script>
 (function(){
   "use strict";
-  var shop=null, qbProducts=null, qbByName={}, qbByLoose={}, qbSkuIndex=[],
-      catBySku={}, catLoaded=false,
-      qbNumbers=null, mappings={}, pending=[], result=null;
-  function $(id){ return document.getElementById(id); }
+  var $ = function(id){ return document.getElementById(id); };
 
-  function key(s){
-    if(!s) return "";
-    s=String(s);
-    if(/[\u200B-\u200D\uFEFF\u00A0]/.test(s)) s=s.replace(/[\u200B-\u200D\uFEFF]/g,"").replace(/\u00A0/g," ");
-    return s.trim().toLowerCase().replace(/\s+/g," ");
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
   }
-  function loose(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,""); }
-  function num(v){ var f=parseFloat(String(v==null?"":v).replace(/[^0-9.\-]/g,"")); return isNaN(f)?0:f; }
-  function money(n){ return (Math.round(n*100)/100).toFixed(2); }
-  function grp(n){ var p=money(n).split("."); return p[0].replace(/\B(?=(\d{3})+(?!\d))/g,",")+"."+p[1]; }
-  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
-  function pad(n){ return n<10?"0"+n:""+n; }
-  function isoD(d){
-    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  function short(n){
+    var v = Number(n || 0);
+    if(Math.abs(v) >= 1000000) return (v/1000000).toFixed(2) + 'M';
+    if(Math.abs(v) >= 1000)    return (v/1000).toFixed(1) + 'k';
+    return money(v);
   }
-  function normInv(v){
-    var s=String(v==null?"":v).replace(/\u00a0/g,' ').replace(/[\u200b-\u200d\ufeff]/g,'').trim();
-    if(!s) return '';
-    s=s.replace(/(\d),(\d)/g,'$1$2').replace(/^(\d+)\.0+$/,'$1');
-    s=s.replace(/^[#\s]+/,'').replace(/\s+/g,' ').toLowerCase();
-    return s.replace(/^0+(?=[0-9])/,'').replace(/([^0-9])0+([0-9])/g,'$1$2');
+  function when(iso){
+    if(!iso) return '—';
+    var d = new Date(iso);
+    if(isNaN(d)) return String(iso).slice(0, 10);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   }
-  function digitsOf(v){ return String(v==null?"":v).replace(/[^0-9]/g,'').replace(/^0+(?=[0-9])/,''); }
-  function parseDate(s){
-    if(!s) return null;
-    s=String(s);
-    var m=s.match(/^\s*(\d{4})-(\d{2})-(\d{2})/);
-    if(m) return new Date(+m[1],+m[2]-1,+m[3]);
-    m=s.match(/^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if(m) return new Date(+m[3],+m[2]-1,+m[1]);
-    var d=new Date(s.trim());
-    return isNaN(d.getTime())?null:new Date(d.getFullYear(),d.getMonth(),d.getDate());
-  }
-  function fmtDate(d,mode){
-    if(!d) return "";
-    var D=pad(d.getDate()),M=pad(d.getMonth()+1),Y=d.getFullYear();
-    if(mode==="mdy") return M+"/"+D+"/"+Y;
-    if(mode==="iso") return Y+"-"+M+"-"+D;
-    return D+"/"+M+"/"+Y;
-  }
-  function addDays(d,n){ var x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
-  function paint(fn){ requestAnimationFrame(function(){ setTimeout(fn,0); }); }
-  function setStat(el,cls,html){ el.className="stat "+cls; el.innerHTML=html; }
-  function decodeBytes(buf){
-    try{ return {text:new TextDecoder("utf-8",{fatal:true}).decode(buf),enc:"UTF-8"}; }
-    catch(e){
-      try{ return {text:new TextDecoder("windows-1252").decode(buf),enc:"Windows-1252"}; }
-      catch(e2){ return {text:new TextDecoder("utf-8").decode(buf),enc:"UTF-8"}; }
-    }
-  }
-  function mb(b){ return (b>0)?((b/1048576).toFixed(1)+" MB"):""; }
-
-  var MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  var MONTH=["January","February","March","April","May","June","July","August","September","October","November","December"];
-
-  function parseCSV(text){
-    var rows=[], row=[], i=0, n=text.length, nonEmpty=false;
-    if(text.charCodeAt(0)===0xFEFF) i=1;
-    function endRow(){ if(nonEmpty) rows.push(row); row=[]; nonEmpty=false; }
-    while(i<n){
-      var ch=text.charCodeAt(i), val;
-      if(ch===34){
-        var j=i+1, buf=null, seg;
-        for(;;){
-          var q=text.indexOf('"',j);
-          if(q<0){ seg=text.slice(j); j=n; buf=buf===null?seg:buf+seg; break; }
-          if(text.charCodeAt(q+1)===34){ seg=text.slice(j,q+1); buf=buf===null?seg:buf+seg; j=q+2; }
-          else { seg=text.slice(j,q); buf=buf===null?seg:buf+seg; j=q+1; break; }
-        }
-        val=buf===null?"":buf; i=j;
-      }else{
-        var k=i;
-        while(k<n){ var c=text.charCodeAt(k); if(c===44||c===13||c===10) break; k++; }
-        val=text.slice(i,k); i=k;
-      }
-      row.push(val);
-      if(val!=="") nonEmpty=true;
-      if(i<n){
-        var dd=text.charCodeAt(i);
-        if(dd===44){ i++; }
-        else{ if(dd===13&&text.charCodeAt(i+1)===10) i++; i++; endRow(); }
-      }
-    }
-    if(row.length) endRow();
-    return rows;
-  }
-  function esc(v){ v=(v==null)?"":String(v); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
-  function buildCSV(head,rows){
-    var out=new Array(rows.length+1);
-    out[0]=head.join(",");
-    for(var i=0;i<rows.length;i++){
-      var r=rows[i], line=new Array(r.length);
-      for(var j=0;j<r.length;j++) line[j]=esc(r[j]);
-      out[i+1]=line.join(",");
-    }
-    return out.join("\r\n")+"\r\n";
-  }
-  function download(name,csv){
-    var b=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
-    var a=document.createElement("a"); a.href=URL.createObjectURL(b); a.download=name;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
+  function note(box, cls, text){
+    var d = document.createElement('div');
+    d.className = 'note ' + cls;
+    d.textContent = text;
+    box.appendChild(d);
   }
 
-  fetch('/auth/status').then(function(r){return r.json();}).then(function(s){
-    if(s.connected){
-      $('dot').classList.add('on');
-      $('connText').textContent = s.companyName || s.realmId;
-      $('main').classList.remove('hide');
-      loadProducts(); loadMappings();
-    } else {
-      $('connText').textContent = 'Not connected';
-      $('gate').classList.remove('hide');
-    }
-  });
-  $('btnConnect').addEventListener('click', function(){ location.href='/auth/connect'; });
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('btnRefresh').addEventListener('click', load);
 
-  var t=new Date();
-  $('dTo').value=isoD(t);
-  $('dFrom').value=isoD(new Date(t.getFullYear(), t.getMonth(), 1));
-
-  Array.prototype.forEach.call(document.getElementsByName('scope'), function(r){
-    r.addEventListener('change', function(){
-      $('gapBox').classList.toggle('hide', this.value!=='gap'); ready();
-    });
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('main').classList.remove('hide');
+    load();
   });
 
-  function loadProducts(){
-    $('prodAside').textContent='loading QuickBooks products…';
-    fetch('/api/qb-products').then(function(r){return r.json();}).then(function(d){
-      if(d.error){ $('prodAside').textContent='product load failed'; return; }
-      qbProducts=d.products;
-      qbByName={}; qbByLoose={}; qbSkuIndex=[];
-      var clash={};
-      qbProducts.forEach(function(p){
-        var kn=key(p.name); if(qbByName[kn]===undefined) qbByName[kn]=p.name;
-        var lk=loose(p.name);
-        if(qbByLoose[lk]!==undefined && qbByLoose[lk]!==p.name) clash[lk]=1; else qbByLoose[lk]=p.name;
-        qbSkuIndex.push({name:p.name, hay:loose(p.name)});
-      });
-      for(var c in clash) delete qbByLoose[c];
-      qbSkuIndex.sort(function(a,b){ return a.hay.length-b.hay.length; });
-      $('prodAside').textContent=nf(d.count)+' products in QuickBooks';
-      ready();
-    }).catch(function(){ $('prodAside').textContent='product load failed'; });
-  }
+  function load(){
+    $('statBox').className = 'stat busy';
+    $('statBox').textContent = 'Reading QuickBooks…';
+    $('btnRefresh').disabled = true;
 
-  function loadMappings(){
-    fetch('/api/mappings').then(function(r){return r.json();}).then(function(d){
-      mappings=d.mappings||{};
-    }).catch(function(){});
-  }
-
-  var NEED=[
-    {k:"order",  g:["name","order name","order number","order id","order"]},
-    {k:"date",   g:["created at","paid at","processed at","date"]},
-    {k:"item",   g:["lineitem name","line item name","product title","item name","title"]},
-    {k:"qty",    g:["lineitem quantity","line item quantity","quantity","qty"]},
-    {k:"rate",   g:["lineitem price","line item price","price"]},
-    {k:"sku",    g:["lineitem sku","line item sku","variant sku","sku"]},
-    {k:"ship",   g:["shipping","shipping price"]},
-    {k:"tax",    g:["taxes","total tax","tax"]},
-    {k:"disc",   g:["discount amount","total discount","discount"]},
-    {k:"status", g:["financial status","payment status"]},
-    {k:"fulfil", g:["fulfillment status","fulfilment status"]},
-    {k:"total",  g:["total"]},
-    {k:"cust",   g:["billing name","customer name","shipping name"]},
-    {k:"email",  g:["email","contact email"]},
-    {k:"a1",     g:["billing address1","billing street","address1"]},
-    {k:"a2",     g:["billing address2","address2"]},
-    {k:"city",   g:["billing city","city"]},
-    {k:"prov",   g:["billing province name","billing province","province","state"]},
-    {k:"zip",    g:["billing zip","zip","postal code"]},
-    {k:"country",g:["billing country","country"]}
-  ];
-  function detect(headers){
-    var low=headers.map(key), map={};
-    NEED.forEach(function(f){
-      var idx=-1,i,g;
-      for(g=0;g<f.g.length&&idx<0;g++) idx=low.indexOf(f.g[g]);
-      for(g=0;g<f.g.length&&idx<0;g++) for(i=0;i<low.length&&idx<0;i++) if(low[i].indexOf(f.g[g])>-1) idx=i;
-      map[f.k]=idx;
-    });
-    return map;
-  }
-
-  function wireZone(zoneId,inputId,handler){
-    var z=$(zoneId), inp=$(inputId);
-    if(!z||!inp) return;
-    z.addEventListener("click",function(){ inp.click(); });
-    z.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click();} });
-    ["dragenter","dragover"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.add("hot");}); });
-    ["dragleave","drop"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.remove("hot");}); });
-    z.addEventListener("drop",function(e){ if(e.dataTransfer.files[0]) handler(e.dataTransfer.files[0]); });
-    inp.addEventListener("change",function(){ if(inp.files[0]) handler(inp.files[0]); });
-  }
-  wireZone("zoneShop","fileShop",readShop);
-  wireZone("zoneCat","fileCat",readCat);
-  wireZone("zoneQbFile","fileQb",readQbFile);
-
-  function readShop(file){
-    var s=$('statShop');
-    if(/\.xlsx?$/i.test(file.name)){
-      setStat(s,"bad","Excel workbooks are not supported. Use File → Save As → CSV.");
-      shop=null; ready(); return;
-    }
-    setStat(s,"busy","Reading "+file.name+" ("+mb(file.size)+")…");
-    var r=new FileReader();
-    r.onerror=function(){ setStat(s,"bad","The file could not be read."); shop=null; ready(); };
-    r.onload=function(){
-      paint(function(){
-        var d=decodeBytes(r.result);
-        var rows=parseCSV(d.text);
-        if(rows.length<2){ setStat(s,"bad","No data rows found."); shop=null; ready(); return; }
-        var headers=rows[0].map(function(h){return String(h).trim();});
-        var map=detect(headers);
-        var need=["order","date","item","qty","rate"].filter(function(k){ return map[k]<0; });
-        if(need.length){
-          setStat(s,"bad","Not a Shopify orders export. Missing: "+need.join(", "));
-          shop=null; ready(); return;
-        }
-        shop={name:file.name,rows:rows.slice(1),map:map};
-        setStat(s,d.text.indexOf("\uFFFD")>-1?"bad":"ok",
-          "<b>"+file.name+"</b><i>"+nf(shop.rows.length)+" rows · "+d.enc+
-          (map.sku<0?" · no SKU column":"")+(map.fulfil<0?" · no fulfillment column":"")+"</i>");
-        ready();
-      });
-    };
-    r.readAsArrayBuffer(file);
-  }
-
-  function readCat(file){
-    var s=$('statCat');
-    if(/\.xlsx?$/i.test(file.name)){
-      setStat(s,"bad","Save the list as CSV from Excel first.");
-      catLoaded=false; ready(); return;
-    }
-    setStat(s,"busy","Reading "+file.name+"…");
-    var r=new FileReader();
-    r.onerror=function(){ setStat(s,"bad","Could not read the file."); catLoaded=false; ready(); };
-    r.onload=function(){
-      paint(function(){
-        var d=decodeBytes(r.result);
-        var rows=parseCSV(d.text);
-        if(rows.length<2){ setStat(s,"bad","No products found."); catLoaded=false; ready(); return; }
-        var head=rows[0].map(key), si=-1, ni=-1, i;
-        for(i=0;i<head.length;i++){
-          if(si<0 && head[i].indexOf("sku")>-1) si=i;
-          if(ni<0 && (head[i].indexOf("product")>-1||head[i].indexOf("service")>-1||head[i].indexOf("name")>-1)) ni=i;
-        }
-        if(si<0||ni<0||si===ni){
-          setStat(s,"bad","Could not find the SKU and Product/Service Name columns.");
-          catLoaded=false; ready(); return;
-        }
-        catBySku={};
-        var n=0;
-        for(i=1;i<rows.length;i++){
-          var sku=rows[i][si]==null?"":String(rows[i][si]).trim();
-          var nm=rows[i][ni]==null?"":String(rows[i][ni]).trim();
-          if(!sku||!nm) continue;
-          var ks=key(sku);
-          if(catBySku[ks]===undefined){ catBySku[ks]=nm; n++; }
-        }
-        catLoaded=n>0;
-        setStat(s,catLoaded?"ok":"bad","<b>"+file.name+"</b><i>"+nf(n)+" products with a SKU · "+d.enc+"</i>");
-        ready();
-      });
-    };
-    r.readAsArrayBuffer(file);
-  }
-
-  Array.prototype.forEach.call(document.getElementsByName('qbsrc'), function(r){
-    r.addEventListener('change', function(){
-      var useFile = this.value === 'file';
-      $('qbApiBox').classList.toggle('hide', useFile);
-      $('qbFileBox').classList.toggle('hide', !useFile);
-      qbNumbers = null;
-      $('statQb').innerHTML = '';
-      $('statQb').className = 'stat';
-      ready();
-    });
-  });
-
-  function readQbFile(file){
-    var s=$('statQb');
-    setStat(s,"busy","Reading "+file.name+"…");
-    var fd=new FormData();
-    fd.append('file', file);
-    fetch('/api/qb-invoice-file',{method:'POST',body:fd})
-      .then(function(r){return r.json();})
+    fetch('/api/dashboard')
+      .then(function(r){ return r.json(); })
       .then(function(d){
-        if(d.error){ setStat(s,"bad",d.error); qbNumbers=null; ready(); return; }
-        qbNumbers=d.numbers;
-        setStat(s,"ok","<b>"+nf(d.count)+" invoice numbers read</b><i>"+file.name+"</i>");
-        ready();
-      })
-      .catch(function(e){ setStat(s,"bad","Could not read the file: "+e.message); qbNumbers=null; ready(); });
-  }
-
-  $('btnFetch').addEventListener("click",function(){
-    var from=$('dFrom').value, to=$('dTo').value;
-    if(!from||!to){ setStat($('statQb'),"bad","Choose both dates first."); return; }
-    setStat($('statQb'),"busy","Reading invoices from QuickBooks…");
-    $('btnFetch').disabled=true;
-    fetch('/api/qb-invoices?from='+from+'&to='+to)
-      .then(function(r){return r.json();})
-      .then(function(d){
-        $('btnFetch').disabled=false;
-        if(d.error){ setStat($('statQb'),"bad",d.error); qbNumbers=null; ready(); return; }
-        qbNumbers=d.numbers;
-        setStat($('statQb'),"ok","<b>"+nf(d.count)+" invoices already in QuickBooks</b><i>"+from+" to "+to+
-          (d.windows?(" · "+d.windows+" windows"):"")+"</i>");
-        ready();
+        $('btnRefresh').disabled = false;
+        if(d.error){
+          $('statBox').className = 'stat bad';
+          $('statBox').innerHTML = '<b>' + d.error + '</b>';
+          return;
+        }
+        $('statBox').className = 'stat';
+        $('statBox').textContent = '';
+        render(d);
       })
       .catch(function(e){
-        $('btnFetch').disabled=false;
-        setStat($('statQb'),"bad","Could not reach QuickBooks: "+e.message);
+        $('btnRefresh').disabled = false;
+        $('statBox').className = 'stat bad';
+        $('statBox').innerHTML = '<b>Could not reach QuickBooks: ' + e.message + '</b>';
       });
-  });
-
-  function scopeVal(){
-    var r=document.querySelector('input[name=scope]:checked');
-    return r?r.value:'all';
-  }
-  function ready(){
-    var gap=scopeVal()==='gap';
-    var ok=!!(shop && catLoaded && qbProducts) && (!gap || !!qbNumbers);
-    $('btnScan').disabled=!ok;
-    var need=[];
-    if(!shop) need.push("Shopify orders CSV");
-    if(!catLoaded) need.push("QuickBooks product list CSV");
-    if(!qbProducts) need.push("QuickBooks products");
-    if(gap && !qbNumbers) need.push("QuickBooks invoice list");
-    $('runHint').textContent = ok ? "" : ("Still required: "+need.join(", "));
   }
 
-  function srcKey(sku,name){ return (key(sku)||'')+'\u0000'+(key(name)||''); }
+  function render(d){
+    $('periodSub').textContent = d.period.from + ' to ' + d.period.to;
 
-  function findBySku(sku){
-    if(!sku) return null;
-    var hit=catBySku[key(sku)];
-    if(hit) return hit;
-    var needle=loose(sku);
-    if(needle.length<3) return null;
-    for(var i=0;i<qbSkuIndex.length;i++){
-      if(qbSkuIndex[i].hay.indexOf(needle)>-1) return qbSkuIndex[i].name;
+    $('tInvoiced').textContent = short(d.invoiced);
+    $('tInvoicedSub').textContent = money(d.invoiced);
+
+    $('tOutstanding').textContent = short(d.outstanding);
+    var pct = d.invoiced ? Math.round(d.outstanding / d.invoiced * 100) : 0;
+    $('tOutstandingSub').textContent = pct + '% of what was invoiced';
+
+    $('tReceived').textContent = short(d.received);
+    $('tReceivedSub').textContent = nf(d.paymentCount) + ' payment' + (d.paymentCount===1?'':'s') + ' recorded';
+
+    $('tCount').textContent = nf(d.invoiceCount);
+    $('tCountSub').textContent = nf(d.paidCount) + ' fully paid';
+
+    var al = $('alerts');
+    al.innerHTML = '';
+    if(d.plainCount){
+      note(al, 'warn', nf(d.plainCount) + ' invoice' + (d.plainCount===1?'':'s') +
+        ' this month have no # in front of the number. Fix duplicates can add it back.');
     }
-    return null;
-  }
-
-  function resolve(sku,name){
-    var mk=srcKey(sku,name), m=mappings[mk];
-    if(m){
-      if(m.skip) return {skip:true, via:'map'};
-      if(m.qbItem) return {name:m.qbItem, via:'map'};
+    if(!d.invoiceCount){
+      note(al, 'info', 'No invoices dated this month yet.');
     }
-    var h=findBySku(sku);
-    if(h) return {name:h, via:'sku'};
-    var h2=qbByName[key(name)];
-    if(h2) return {name:h2, via:'name'};
-    var h3=qbByLoose[loose(name)];
-    if(h3) return {name:h3, via:'name'};
-    return {unmatched:true, key:mk, sku:sku, name:name};
-  }
 
-  $('btnScan').addEventListener("click",function(){
-    var m=shop.map, rows=shop.rows;
-    function cell(r,i){ return (i>=0&&i<r.length&&r[i]!=null)?String(r[i]).trim():""; }
-    var seen={}, list=[];
-    for(var i=0;i<rows.length;i++){
-      var sku=cell(rows[i],m.sku), name=cell(rows[i],m.item);
-      if(!name) continue;
-      var res=resolve(sku,name);
-      if(!res.unmatched) continue;
-      var k=res.key;
-      if(seen[k]){ seen[k].count++; continue; }
-      seen[k]={sku:sku,name:name,count:1,key:k};
-      list.push(seen[k]);
-    }
-    pending=list;
-    if(!list.length){ $('mapSheet').classList.add('hide'); doConvert(); return; }
-    buildMapTable();
-    $('mapSheet').classList.remove('hide');
-    $('mapSheet').scrollIntoView({behavior:'smooth',block:'start'});
-  });
-
-  function buildMapTable(){
-    $('mapAside').textContent=pending.length+" product"+(pending.length===1?"":"s");
-    var body=$('mapBody'); body.innerHTML='';
-    var frag=document.createDocumentFragment();
-    pending.forEach(function(p){
-      var tr=document.createElement('tr');
-      var td1=document.createElement('td');
-      td1.className='mono'; td1.textContent=p.sku||'—';
-      if(!p.sku) td1.style.color='var(--neg)';
-      var td2=document.createElement('td'); td2.textContent=p.name;
-      var td3=document.createElement('td'); td3.className='num'; td3.textContent=p.count;
-      var td4=document.createElement('td');
-      var sel=document.createElement('select'); sel.style.fontSize='13px';
-      var o0=document.createElement('option'); o0.value=''; o0.textContent='— choose a QuickBooks product —'; sel.appendChild(o0);
-      var oS=document.createElement('option'); oS.value='__skip__'; oS.textContent='Skip this product entirely'; sel.appendChild(oS);
-      qbProducts.forEach(function(q){
-        var o=document.createElement('option'); o.value=q.name; o.textContent=q.name; sel.appendChild(o);
+    var cs = d.couriers || [];
+    $('courierSheet').classList.toggle('hide', !cs.length);
+    if(cs.length){
+      $('courierAside').textContent = cs.length + ' active';
+      var cb = $('courierBody');
+      cb.innerHTML = '';
+      cs.forEach(function(c){
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + (c.courier || '—') + '</td>' +
+          '<td class="num">' + nf(c.runs) + '</td>' +
+          '<td class="num">' + nf(c.invoices || 0) + '</td>' +
+          '<td class="num mono">' + money(c.amount) + '</td>' +
+          '<td class="mono" style="font-size:11.5px;color:var(--muted)">' + when(c.last_run) + '</td>';
+        cb.appendChild(tr);
       });
-      var ex=mappings[p.key];
-      if(ex){ if(ex.skip) sel.value='__skip__'; else if(ex.qbItem) sel.value=ex.qbItem; }
-      sel.addEventListener('change',function(){ p.choice=this.value; });
-      p.choice=sel.value;
-      td4.appendChild(sel);
-      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4);
-      frag.appendChild(tr);
-    });
-    body.appendChild(frag);
+    }
+
+    var rs = d.runs || [];
+    $('runSheet').classList.toggle('hide', !rs.length);
+    if(rs.length){
+      var rb = $('runBody');
+      rb.innerHTML = '';
+      rs.forEach(function(r){
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td class="mono" style="font-size:11.5px">' + when(r.created_at) + '</td>' +
+          '<td>' + (r.courier || '—') + '</td>' +
+          '<td class="mono">' + (r.cpr_number || '—') +
+            '<div style="font-size:10.5px;color:var(--faint)">' + (r.cpr_date || '') + '</div></td>' +
+          '<td class="num">' + nf(r.matched) + '</td>' +
+          '<td class="num" style="color:' + (r.unmatched ? 'var(--warn)' : 'inherit') + '">' +
+            nf(r.unmatched) + '</td>' +
+          '<td class="num mono">' + money(r.amount) + '</td>';
+        rb.appendChild(tr);
+      });
+    }
   }
-
-  $('mapSave').addEventListener('click',function(){
-    var list=pending.filter(function(p){ return p.choice; }).map(function(p){
-      return {key:p.key, sku:p.sku, name:p.name,
-        qbItem:p.choice==='__skip__'?null:p.choice, skip:p.choice==='__skip__'};
-    });
-    if(!list.length){ $('mapSaved').textContent='Nothing chosen yet'; return; }
-    fetch('/api/mappings',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mappings:list})})
-      .then(function(r){return r.json();}).then(function(){
-        list.forEach(function(mm){ mappings[mm.key]={qbItem:mm.qbItem,skip:mm.skip}; });
-        $('mapSaved').textContent='Saved '+list.length;
-        setTimeout(function(){ $('mapSaved').textContent=''; },2500);
-      }).catch(function(){ $('mapSaved').textContent='Save failed'; });
-  });
-
-  $('btnConvert').addEventListener('click',function(){
-    var undone=pending.filter(function(p){ return !p.choice; });
-    $('convHint').textContent = undone.length
-      ? undone.length+' product'+(undone.length===1?'':'s')+' still have no choice — those lines will be rejected by QuickBooks.'
-      : '';
-    pending.forEach(function(p){
-      if(!p.choice) return;
-      mappings[p.key]= p.choice==='__skip__'?{skip:true}:{qbItem:p.choice,skip:false};
-    });
-    doConvert();
-  });
-
-  var HEADER=["*InvoiceNo","*Customer","*InvoiceDate","*DueDate","Terms","Location","Memo",
-    "Item(Product/Service)","ItemDescription","ItemQuantity","ItemRate","*ItemAmount","Service Date"];
-
-  function doConvert(){
-    var t0=performance.now();
-    var m=shop.map, rows=shop.rows, R=rows.length;
-    var dfmt=$('dfmt').value, termDays=parseInt($('terms').value,10);
-    var gTpl=$('gname').value.trim()||"Shopify Sale";
-    var skipVoid=$('skipVoided').checked, skipUnf=$('skipUnfulfilled').checked;
-    var keepHash=$('keepHash').checked;
-    var ROW_CAP=Math.max(1,parseInt($('rowCap').value,10)||1000);
-    var INV_CAP=parseInt($('invCap').value,10); if(!(INV_CAP>0)) INV_CAP=0;
-    var termS=termDays===0?"Due on receipt":"Net "+termDays;
-
-    var shipName=catBySku[key('Shipping')]||qbByName[key('Default Shipping Product')]||'Shipping';
-    var discName=catBySku[key('DiscountItem')]||qbByName[key('Discount Product')]||'Discount';
-
-    var gapMode=scopeVal()==='gap', qbSet=null, qbDig=null;
-    if(gapMode && qbNumbers){
-      qbSet={}; qbDig={};
-      for(var qi=0;qi<qbNumbers.length;qi++){
-        var kk=normInv(qbNumbers[qi]); if(kk) qbSet[kk]=1;
-        var dd2=digitsOf(qbNumbers[qi]); if(dd2) qbDig[dd2]=1;
-      }
-    }
-
-    var iOrder=m.order,iDate=m.date,iItem=m.item,iQty=m.qty,iRate=m.rate,iSku=m.sku,
-        iShip=m.ship,iTax=m.tax,iDisc=m.disc,iStat=m.status,iFul=m.fulfil,iTot=m.total,
-        iCust=m.cust,iMail=m.email,iA1=m.a1,iA2=m.a2,iCity=m.city,iProv=m.prov,iZip=m.zip,iCtry=m.country;
-    function cell(r,i){ return (i>=0&&i<r.length&&r[i]!=null)?String(r[i]).trim():""; }
-
-    var groups=[], index={}, last=null, i;
-    for(i=0;i<R;i++){
-      var r=rows[i], k=cell(r,iOrder);
-      if(k) last=k; else k=last;
-      if(!k) continue;
-      var g=index[k];
-      if(g===undefined){ g=index[k]={head:r,lines:[],statusRow:null}; groups.push(g); g.k=k; }
-      if(cell(r,iItem)) g.lines.push(r);
-      if(!g.statusRow && (cell(r,iStat)||cell(r,iFul))) g.statusRow=r;
-    }
-
-    var parts=[], cur=[], curInv=[], flatCount=0, allInvoices=[], excluded=[],
-        noLines=0, alreadyInQb=0, grand=0,
-        bySku=0, byName=0, byMap=0, skippedLines=0, unresolved=0,
-        dateCache={}, gnameCache={};
-
-    function gname(iso,d){
-      var v=gnameCache[iso];
-      if(v!==undefined) return v;
-      var mo=d.getMonth();
-      v=gTpl.replace(/\{mon\}/g,MON[mo]).replace(/\{month\}/g,MONTH[mo])
-            .replace(/\{yyyy\}/g,d.getFullYear()).replace(/\{yy\}/g,String(d.getFullYear()).slice(-2));
-      gnameCache[iso]=v; return v;
-    }
-
-    for(var gi=0;gi<groups.length;gi++){
-      var grp2=groups[gi], sRow=grp2.statusRow||grp2.head, head=grp2.head, lines=grp2.lines;
-      var fin=cell(sRow,iStat).toLowerCase();
-      var ful=cell(sRow,iFul).toLowerCase();
-      var tot=cell(sRow,iTot)||cell(head,iTot);
-
-      var reason=null;
-      if(skipVoid && fin==='voided') reason='Voided';
-      else if(skipUnf && (ful==='unfulfilled'||ful==='')) reason='Unfulfilled';
-
-      if(reason){
-        excluded.push([grp2.k, reason, fin||'—', ful||'—', tot||'']);
-        continue;
-      }
-
-      if(!lines.length){ noLines++; continue; }
-
-      if(gapMode && qbSet){
-        var nk=normInv(grp2.k), nd=digitsOf(grp2.k);
-        if(qbSet[nk] || (nd && qbDig[nd])){ alreadyInQb++; continue; }
-      }
-
-      var rawDate=cell(head,iDate), dc=dateCache[rawDate];
-      if(dc===undefined){
-        var d0=parseDate(rawDate)||new Date();
-        dc=dateCache[rawDate]={d:d0,s:fmtDate(d0,dfmt),due:fmtDate(addDays(d0,termDays),dfmt),
-          isoDate:isoD(d0), isoDue:isoD(addDays(d0,termDays)), iso:d0.getFullYear()+"-"+d0.getMonth()};
-      }
-      var custName=gname(dc.iso,dc.d);
-      var buyer=cell(head,iCust)||cell(head,iMail)||"Unknown";
-      var ap=[cell(head,iA1),cell(head,iA2),cell(head,iCity),cell(head,iProv),cell(head,iZip),cell(head,iCtry)];
-      var addr="";
-      for(i=0;i<6;i++) if(ap[i]) addr=addr?addr+", "+ap[i]:ap[i];
-      var memo=buyer+(addr?" — "+addr:"")+" — order "+grp2.k;
-
-      var invNo=grp2.k;
-      if(!keepHash && invNo.charCodeAt(0)===35) invNo=invNo.slice(1);
-
-      var block=[], objLines=[];
-      function push(item,qty,rate,amount){
-        block.push([invNo,custName,dc.s,dc.due,termS,"",memo,item,"",
-                    qty.toFixed(2),money(rate),money(amount),dc.s]);
-        objLines.push({item:item,desc:"",qty:qty,rate:Math.round(rate*100)/100,
-                       amt:Math.round(amount*100)/100,svc:dc.isoDate});
-        grand+=amount;
-      }
-
-      for(i=0;i<lines.length;i++){
-        var line=lines[i];
-        var sku=cell(line,iSku), raw=cell(line,iItem);
-        var qty=num(cell(line,iQty))||1, rate=num(cell(line,iRate));
-        var res=resolve(sku,raw);
-        if(res.skip){ skippedLines++; continue; }
-        var itemName;
-        if(res.name){
-          itemName=res.name;
-          if(res.via==='sku') bySku++; else if(res.via==='name') byName++; else byMap++;
-        } else { itemName=raw; unresolved++; }
-        push(itemName,qty,rate,qty*rate);
-      }
-
-      if(!block.length){ noLines++; continue; }
-
-      var sh=num(cell(head,iShip));
-      if(sh!==0) push(shipName,1,sh,sh);
-      var ds=num(cell(head,iDisc));
-      if(ds>0) push(discName,1,ds,ds);
-      var tx=num(cell(head,iTax));
-      if(tx!==0) push("Sales Tax",1,tx,tx);
-
-      allInvoices.push({docNumber:invNo,customer:custName,txnDate:dc.isoDate,
-                        dueDate:dc.isoDue,terms:termS,memo:memo,lines:objLines});
-
-      if(cur.length&&(cur.length+block.length>ROW_CAP||(INV_CAP&&curInv.length>=INV_CAP))){
-        parts.push({rows:cur,invs:curInv}); cur=[]; curInv=[];
-      }
-      for(i=0;i<block.length;i++) cur.push(block[i]);
-      curInv.push(invNo);
-      flatCount+=block.length;
-    }
-    if(cur.length) parts.push({rows:cur,invs:curInv});
-
-    result={parts:parts,lines:flatCount,invoices:allInvoices.length,total:grand,
-      bySku:bySku,byName:byName,byMap:byMap,skippedLines:skippedLines,unresolved:unresolved,
-      noLines:noLines,alreadyInQb:alreadyInQb,rowCap:ROW_CAP,excluded:excluded,
-      allInvoices:allInvoices,ms:Math.round(performance.now()-t0)};
-    render();
-  }
-
-  function note(box,cls,text){
-    var d=document.createElement("div"); d.className="note "+cls; d.textContent=text; box.appendChild(d);
-  }
-
-  function render(){
-    var r=result;
-    $('results').classList.remove("hide");
-    var nb=$('notes'); nb.innerHTML="";
-
-    $('sInv').textContent=nf(r.invoices);
-    $('sLines').textContent=nf(r.lines);
-    $('sFiles').textContent=r.parts.length;
-    $('sTotal').textContent=grp(r.total);
-
-    var tot=r.bySku+r.byName+r.byMap+r.unresolved||1;
-    $('barSku').style.width=(r.bySku/tot*100)+"%";
-    $('barName').style.width=(r.byName/tot*100)+"%";
-    $('barMap').style.width=(r.byMap/tot*100)+"%";
-    $('barMiss').style.width=(r.unresolved/tot*100)+"%";
-    $('kSku').textContent=nf(r.bySku);
-    $('kName').textContent=nf(r.byName);
-    $('kMap').textContent=nf(r.byMap);
-    $('kMiss').textContent=nf(r.unresolved);
-    $('kTot').textContent=nf(tot);
-    $('timing').textContent=r.ms+" ms";
-
-    if(r.excluded.length){
-      var v=0,u=0;
-      r.excluded.forEach(function(e){ if(e[1]==='Voided') v++; else u++; });
-      note(nb,"warn",nf(r.excluded.length)+" order"+(r.excluded.length===1?"":"s")+
-        " were not uploaded — "+nf(v)+" voided, "+nf(u)+" unfulfilled. See the list below.");
-    }
-    if(r.alreadyInQb) note(nb,"ok",nf(r.alreadyInQb)+" order"+(r.alreadyInQb===1?"":"s")+" skipped — already in QuickBooks.");
-    if(r.skippedLines) note(nb,"info",nf(r.skippedLines)+" line"+(r.skippedLines===1?"":"s")+" removed by your skip choices.");
-    if(r.unresolved) note(nb,"warn",nf(r.unresolved)+" line"+(r.unresolved===1?"":"s")+" have no QuickBooks product — QuickBooks will reject them.");
-    if(r.byMap) note(nb,"info",nf(r.byMap)+" line"+(r.byMap===1?"":"s")+" used your saved mapping.");
-    if(r.byName) note(nb,"info",nf(r.byName)+" line"+(r.byName===1?"":"s")+" matched on product name.");
-    if(r.noLines) note(nb,"info",nf(r.noLines)+" order"+(r.noLines===1?"":"s")+" had no usable line items.");
-    if(!r.lines){ note(nb,"warn","No invoices were produced."); }
-    else if(!r.unresolved) note(nb,"ok","Every line has a QuickBooks product. Ready to upload.");
-
-    $('excludedSheet').classList.toggle('hide', !r.excluded.length);
-    if(r.excluded.length){
-      $('exAside').textContent=nf(r.excluded.length)+" orders";
-      var eb=$('exBody'); eb.innerHTML='';
-      var ef=document.createDocumentFragment();
-      for(var i=0;i<r.excluded.length && i<400;i++){
-        var e=r.excluded[i], tr=document.createElement('tr');
-        for(var ci=0;ci<5;ci++){
-          var td=document.createElement('td');
-          td.textContent=e[ci];
-          if(ci===0) td.className='mono';
-          if(ci===4) td.className='num mono';
-          tr.appendChild(td);
-        }
-        ef.appendChild(tr);
-      }
-      eb.appendChild(ef);
-    }
-
-    if(!r.lines) return;
-
-    $('capNote').textContent=r.parts.length===1
-      ? nf(r.lines)+" rows in one file"
-      : r.parts.length+" files · limit "+nf(r.rowCap)+" rows";
-
-    var pl=$('partList'); pl.innerHTML="";
-    var pf=document.createDocumentFragment();
-    r.parts.forEach(function(p,i){
-      var d=document.createElement("div"); d.className="frow";
-      var meta=document.createElement("div");
-      meta.innerHTML="<b>quickbooks-invoices-part-"+(i+1)+".csv</b><i>"+p.rows.length+" rows · "+
-        p.invs.length+" invoices · "+p.invs[0]+"–"+p.invs[p.invs.length-1]+"</i>";
-      var b=document.createElement("button"); b.className="mini"; b.textContent="Download";
-      b.addEventListener("click",function(){ download("quickbooks-invoices-part-"+(i+1)+".csv",buildCSV(HEADER,p.rows)); });
-      d.appendChild(meta); d.appendChild(b); pf.appendChild(d);
-    });
-    pl.appendChild(pf);
-    $('results').scrollIntoView({behavior:"smooth",block:"start"});
-  }
-
-  $('dlExcluded').addEventListener('click',function(){
-    if(!result||!result.excluded.length) return;
-    download("orders-not-uploaded.csv",
-      buildCSV(["Order","Reason","Financial status","Fulfillment status","Total"],result.excluded));
-  });
-
-  $('btnSend').addEventListener("click",function(){
-    if(!result||!result.allInvoices.length) return;
-    try{
-      sessionStorage.setItem('pendingInvoices',JSON.stringify(result.allInvoices));
-      location.href='/upload.html?from=convert';
-    }catch(e){ alert('Could not pass the data across: '+e.message); }
-  });
-  $('dlall').addEventListener("click",function(){
-    if(!result) return;
-    result.parts.forEach(function(p,i){
-      setTimeout(function(){ download("quickbooks-invoices-part-"+(i+1)+".csv",buildCSV(HEADER,p.rows)); },i*350);
-    });
-  });
-
-  ready();
 })();
-</script>
-
-<script>
-(function(){
-  var box=document.getElementById('connBox');
-  var sw=document.getElementById('switcher');
-  if(!box||!sw) return;
-
-  box.addEventListener('click',function(e){
-    e.stopPropagation();
-    if(sw.classList.contains('open')){ sw.classList.remove('open'); return; }
-    sw.innerHTML='<div class="head">Loading…</div>';
-    sw.classList.add('open');
-    fetch('/auth/companies').then(function(r){return r.json();}).then(function(d){
-      sw.innerHTML='<div class="head">QuickBooks companies</div>';
-      (d.companies||[]).forEach(function(c){
-        var b=document.createElement('button');
-        b.textContent=c.name;
-        if(c.realmId===d.current) b.className='cur';
-        b.addEventListener('click',function(ev){
-          ev.stopPropagation();
-          if(c.realmId===d.current){ sw.classList.remove('open'); return; }
-          fetch('/auth/switch',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({realmId:c.realmId})})
-            .then(function(){ location.reload(); });
-        });
-        sw.appendChild(b);
-      });
-      var add=document.createElement('button');
-      add.className='add'; add.textContent='+ Connect another company';
-      add.addEventListener('click',function(ev){ ev.stopPropagation(); location.href='/auth/connect'; });
-      sw.appendChild(add);
-      if(d.current){
-        var out=document.createElement('button');
-        out.className='out'; out.textContent='Disconnect this session';
-        out.addEventListener('click',function(ev){
-          ev.stopPropagation();
-          fetch('/auth/disconnect',{method:'POST'}).then(function(){ location.reload(); });
-        });
-        sw.appendChild(out);
-      }
-    }).catch(function(){ sw.innerHTML='<div class="head">Could not load companies</div>'; });
-  });
-
-  document.addEventListener('click',function(){ sw.classList.remove('open'); });
-  sw.addEventListener('click',function(e){ e.stopPropagation(); });
-})();
-</script>
-
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('/sw.js').catch(function(){});
-  });
-}
 </script>
 </body>
 </html>
