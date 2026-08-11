@@ -272,7 +272,7 @@
    if(!s.connected){ $('gate').classList.remove('hide'); return; }
     load(false);
   });
-
+var lastRange = null;
   function rangeFor(kind){
     var t = new Date();
     function iso(d){
@@ -294,6 +294,7 @@
 
 function load(fresh){
     var r = rangeFor($('rangePick').value);
+    lastRange = r;
     $('main').classList.add('hide');
     $('loading').classList.remove('hide');
     $('statBox').className = 'stat';
@@ -329,6 +330,10 @@ fetch('/api/dashboard?from=' + r.from + '&to=' + r.to + (fresh ? '&fresh=1' : ''
     } else {
       $('ageTag').textContent = 'just now';
     }
+   var from = d.from || (lastRange && lastRange.from);
+    var to   = d.to   || (lastRange && lastRange.to);
+    var span = (from && to) ? (pretty(from) + ' → ' + pretty(to)) : '';
+
     $('periodSub').textContent = span;
     $('cardWhen').textContent = span;
     $('cardWhen2').textContent = span;
