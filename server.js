@@ -23,6 +23,8 @@ import {
   listFolders, listSheetsIn, loadSheet, groupByCpr, isDelivered,
   findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits
 } from './cpr.js';
+import { inspectExcel, writeStatusSheet, writeStatusExcel } from './sheets.js';
+import { clean as cprClean } from './cpr.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -1043,6 +1045,15 @@ app.get('/api/cpr/folder', async (req, res) => {
   }
 });
 
+// where the QB Status column sits - reuse it if the sheet already has one
+const QB_STATUS_HEADER = 'QB Status';
+
+function statusColumnOf(header) {
+  const low = (header || []).map(h => cprClean(h).toLowerCase());
+  const i = low.indexOf(QB_STATUS_HEADER.toLowerCase());
+  return i >= 0 ? i : (header || []).length;
+}
+
 // open a sheet: work out the columns, list the CPRs inside it
 app.get('/api/cpr/open', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -1063,6 +1074,13 @@ app.get('/api/cpr/open', async (req, res) => {
     const hasStatus = data.cols.status >= 0;
     const groups = groupByCpr(data.rows, hasStatus);
 
+    // only Excel files are at risk - Google Sheets are edited cell by cell
+    let inspect = { hasMacros: false, risks: [] };
+    if (excel) {
+      try { inspect = await inspectExcel(sheetId); }
+      catch (e) { inspect = { hasMacros: false, risks: [], note: e.message }; }
+    }
+
     res.json({
       tabs, tab,
       header: data.header,
@@ -1070,6 +1088,11 @@ app.get('/api/cpr/open', async (req, res) => {
       hasStatus,
       remembered: !!saved,
       rowCount: data.rows.length,
+      headerRow: data.headerRow,
+      statusCol: statusColumnOf(data.header),
+      statusExists: statusColumnOf(data.header) < data.header.length,
+      excel,
+      inspect,
       groups: groups.map(g => ({
         cprNumber: g.cprNumber,
         cprDate: g.cprDate,
@@ -1078,39 +1101,6 @@ app.get('/api/cpr/open', async (req, res) => {
         amount: Math.round(g.amount * 100) / 100
       }))
     });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// remember this courier's column choices
-app.post('/api/cpr/columns', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-
-  const { courier, cols } = req.body;
-  if (!courier || !cols) return res.status(400).json({ error: 'courier and cols required' });
-
-  try {
-    await setSetting(realmId, `cpr:cols:${courier}`, cols);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// QB dropdowns
-app.get('/api/cpr/qb-options', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-  try {
-    const token = await getAccessToken(realmId);
-    const [accounts, methods] = await Promise.all([
-      listAccounts(realmId, token),
-      listPaymentMethods(realmId, token)
-    ]);
-    const prefs = await getSetting(realmId, 'cpr:prefs', {}) || {};
-    res.json({ accounts, methods, prefs });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1164,7 +1154,7 @@ app.get('/api/cpr/match', async (req, res) => {
       matched.push(entry);
     });
 
-    // one payment per customer — QB will not mix two customers in one
+    // one payment per customer - QB will not mix two customers in one
     const byCustomer = new Map();
     matched.forEach(m => {
       const k = m.customerId || 'none';
@@ -1196,21 +1186,24 @@ app.get('/api/cpr/match', async (req, res) => {
         amount: Math.round(g.amount * 100) / 100
       })),
       matched, amountOff, notInQb, alreadyPaid,
-      width: data.width
+      width: data.width,
+      headerRow: data.headerRow,
+      statusCol: statusColumnOf(data.header)
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// post the payments
+// post the payments, then optionally stamp the sheet
 app.post('/api/cpr/receive', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
   const {
     courier, cprNumber, cprDate, accountId, accountName, methodId,
-    matched = [], sheetId, tabId, width, paint = true
+    matched = [], sheetId, tab, excel = false,
+    headerRow, statusCol, writeStatus = true
   } = req.body;
 
   if (!accountId) return res.status(400).json({ error: 'Deposit account required' });
@@ -1227,9 +1220,10 @@ app.post('/api/cpr/receive', async (req, res) => {
       byCustomer.get(k).push(m);
     });
 
-    const ref = [cprNumber, cprDate].filter(Boolean).join(' · ').slice(0, 21);
+    const ref = [cprNumber, cprDate].filter(Boolean).join(' - ').slice(0, 21);
     const results = [];
-    const paintedRows = [];
+    const paidRows = [];
+    const paidInvoices = [];
     let posted = 0, totalAmount = 0;
 
     for (const [custId, lines] of byCustomer) {
@@ -1259,7 +1253,15 @@ app.post('/api/cpr/receive', async (req, res) => {
       if (r.ok) {
         posted++;
         totalAmount += amount;
-        lines.forEach(m => { if (m.sheetRow) paintedRows.push({ row: m.sheetRow, colour: 'green' }); });
+        lines.forEach(m => {
+          if (m.sheetRow) paidRows.push(m.sheetRow);
+          paidInvoices.push({
+            invoice: m.invoice,
+            qbDoc: m.qbDoc,
+            customer: m.customerName || '',
+            amount: Math.round((m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance) * 100) / 100
+          });
+        });
         results.push({
           ok: true, customer: lines[0].customerName || custId,
           count: lines.length, amount: Math.round(amount * 100) / 100, paymentId: r.id
@@ -1269,9 +1271,20 @@ app.post('/api/cpr/receive', async (req, res) => {
       }
     }
 
-    if (paint && sheetId && tabId !== undefined && paintedRows.length) {
-      try { await paintRows(sheetId, Number(tabId), paintedRows, width || 40); }
-      catch (e) { results.push({ ok: false, msg: 'Payments went through, colouring the sheet failed: ' + e.message }); }
+    // stamp the sheet only if the payments actually landed
+    let stamped = 0;
+    if (writeStatus && paidRows.length && sheetId && tab && headerRow !== undefined && statusCol !== undefined) {
+      try {
+        if (excel) {
+          stamped = await writeStatusExcel(sheetId, tab, Number(headerRow), Number(statusCol),
+                                           paidRows, QB_STATUS_HEADER, 'Received');
+        } else {
+          stamped = await writeStatusSheet(sheetId, tab, Number(headerRow), Number(statusCol),
+                                           paidRows, QB_STATUS_HEADER, 'Received');
+        }
+      } catch (e) {
+        results.push({ ok: false, msg: 'Payments went through, writing the sheet failed: ' + e.message });
+      }
     }
 
     try {
@@ -1292,7 +1305,7 @@ app.post('/api/cpr/receive', async (req, res) => {
       } catch (e) {}
     }
 
-    res.json({ ok: posted > 0, posted, results, painted: paintedRows.length });
+    res.json({ ok: posted > 0, posted, results, stamped, paidInvoices });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
