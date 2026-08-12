@@ -1182,7 +1182,8 @@ app.get('/api/cpr/match', async (req, res) => {
       };
 
       if (inv.balance <= 0.005) { alreadyPaid.push(entry); return; }
-      if (r.amount > 0 && Math.abs(r.amount - inv.balance) > 0.5) { amountOff.push(entry); return; }
+     // a difference of 10 either way is not worth chasing
+      if (r.amount > 0 && Math.abs(r.amount - inv.balance) > 10) { amountOff.push(entry); return; }
       matched.push(entry);
     });
 
@@ -1195,7 +1196,7 @@ app.get('/api/cpr/match', async (req, res) => {
       }
       const g = byCustomer.get(k);
       g.lines.push(m);
-      g.amount += (m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance);
+      g.amount += m.qbBalance;
     });
 
     const first = rows[0] || {};
@@ -1209,7 +1210,7 @@ app.get('/api/cpr/match', async (req, res) => {
         amountOff: amountOff.length,
         notInQb: notInQb.length,
         alreadyPaid: alreadyPaid.length,
-        amount: Math.round(matched.reduce((s, m) => s + (m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance), 0) * 100) / 100
+        amount: Math.round(matched.reduce((s, m) => s + m.qbBalance, 0) * 100) / 100
       },
       payments: Array.from(byCustomer.values()).map(g => ({
         customerId: g.customerId,
@@ -1264,14 +1265,14 @@ app.post('/api/cpr/receive', async (req, res) => {
         continue;
       }
 
-      const amount = lines.reduce((s, m) => s + (m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance), 0);
+     const amount = lines.reduce((s, m) => s + m.qbBalance, 0);
 
       const payload = {
         CustomerRef: { value: String(custId) },
         TotalAmt: Math.round(amount * 100) / 100,
         DepositToAccountRef: { value: String(accountId) },
         Line: lines.map(m => ({
-          Amount: Math.round((m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance) * 100) / 100,
+          Amount: Math.round(m.qbBalance * 100) / 100,
           LinkedTxn: [{ TxnId: String(m.qbId), TxnType: 'Invoice' }]
         }))
       };
@@ -1291,7 +1292,7 @@ app.post('/api/cpr/receive', async (req, res) => {
             invoice: m.invoice,
             qbDoc: m.qbDoc,
             customer: m.customerName || '',
-            amount: Math.round((m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance) * 100) / 100
+           amount: Math.round(m.qbBalance * 100) / 100
           });
         });
         results.push({
