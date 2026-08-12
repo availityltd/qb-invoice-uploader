@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import XLSX from 'xlsx';
+import { Readable } from 'stream';
 
 const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
@@ -16,7 +17,19 @@ function auth() {
 
 const SHEET_MIME  = 'application/vnd.google-apps.spreadsheet';
 const XLSX_MIME   = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const XLSM_MIME   = 'application/vnd.ms-excel.sheet.macroEnabled.12';
+const XLS_MIME    = 'application/vnd.ms-excel';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
+
+function isSheetFile(f) {
+  if (f.mimeType === SHEET_MIME) return true;
+  if (f.mimeType === XLSX_MIME || f.mimeType === XLSM_MIME || f.mimeType === XLS_MIME) return true;
+  return /\.(xlsx|xlsm|xls)$/i.test(f.name || '');
+}
+
+function isExcel(f) {
+  return f.mimeType !== SHEET_MIME;
+}
 
 async function childrenOf(drive, folderId) {
   const out = [];
@@ -39,7 +52,6 @@ async function childrenOf(drive, folderId) {
 
 /* ---------- browsing ---------- */
 
-// only the folders sitting directly inside this one
 export async function listFolders(folderId) {
   const drive = google.drive({ version: 'v3', auth: auth() });
   const kids = await childrenOf(drive, folderId);
@@ -48,22 +60,20 @@ export async function listFolders(folderId) {
     .map(f => ({ id: f.id, name: f.name, modified: f.modifiedTime }));
 }
 
-// only the spreadsheets sitting directly inside this one
 export async function listSheetsIn(folderId) {
   const drive = google.drive({ version: 'v3', auth: auth() });
   const kids = await childrenOf(drive, folderId);
   return kids
-    .filter(f => f.mimeType === SHEET_MIME || f.mimeType === XLSX_MIME)
+    .filter(isSheetFile)
     .map(f => ({
       id: f.id,
       name: f.name,
-      excel: f.mimeType === XLSX_MIME,
+      excel: isExcel(f),
       modified: f.modifiedTime
     }))
     .sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
 }
 
-// every spreadsheet inside a folder, including the ones in sub-folders
 export async function listSheets(folderId) {
   const drive = google.drive({ version: 'v3', auth: auth() });
   const files = [];
@@ -76,12 +86,12 @@ export async function listSheets(folderId) {
     for (const f of kids) {
       if (f.mimeType === FOLDER_MIME) {
         await walk(f.id, trail.concat(f.name), depth + 1);
-      } else if (f.mimeType === SHEET_MIME || f.mimeType === XLSX_MIME) {
+      } else if (isSheetFile(f)) {
         files.push({
           id: f.id,
           name: f.name,
           path: trail.join(' / '),
-          excel: f.mimeType === XLSX_MIME,
+          excel: isExcel(f),
           modified: f.modifiedTime
         });
       }
@@ -93,18 +103,54 @@ export async function listSheets(folderId) {
   return files;
 }
 
-/* ---------- reading ---------- */
+/* ---------- raw file in and out ---------- */
 
-async function downloadExcel(fileId) {
+export async function fileInfo(fileId) {
+  const drive = google.drive({ version: 'v3', auth: auth() });
+  const r = await drive.files.get({
+    fileId,
+    fields: 'id, name, mimeType, size',
+    supportsAllDrives: true
+  });
+  return r.data;
+}
+
+export async function downloadBytes(fileId) {
   const drive = google.drive({ version: 'v3', auth: auth() });
   const r = await drive.files.get(
     { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'arraybuffer' }
   );
-  return XLSX.read(Buffer.from(r.data), { type: 'buffer', raw: false, cellDates: false });
+  return Buffer.from(r.data);
 }
 
-// the tabs inside one spreadsheet
+// overwrite the same file - name, folder and link all stay put
+export async function uploadBytes(fileId, buffer, mimeType) {
+  const drive = google.drive({ version: 'v3', auth: auth() });
+  await drive.files.update({
+    fileId,
+    supportsAllDrives: true,
+    media: { mimeType, body: Readable.from(buffer) }
+  });
+  return true;
+}
+
+/* ---------- reading ---------- */
+
+function openWorkbook(buf, withStyles) {
+  return XLSX.read(buf, {
+    type: 'buffer',
+    raw: false,
+    cellDates: false,
+    bookVBA: true,
+    cellStyles: !!withStyles
+  });
+}
+
+async function downloadExcel(fileId) {
+  return openWorkbook(await downloadBytes(fileId), false);
+}
+
 export async function listTabs(sheetId, excel) {
   if (excel) {
     const wb = await downloadExcel(sheetId);
@@ -119,7 +165,6 @@ export async function listTabs(sheetId, excel) {
   }));
 }
 
-// all the values of one tab
 export async function readTab(sheetId, tabTitle, excel) {
   if (excel) {
     const wb = await downloadExcel(sheetId);
@@ -137,9 +182,174 @@ export async function readTab(sheetId, tabTitle, excel) {
   return r.data.values || [];
 }
 
-/* ---------- painting ---------- */
+/* ---------- what would we break in an Excel file ---------- */
 
-// colours is [{row: 5, colour: 'green'|'yellow'|'clear'}, ...], rows are 1-based
+const RISK_LABELS = {
+  fills:        'Cell colours / shading',
+  widths:       'Custom column widths',
+  merged:       'Merged cells',
+  conditional:  'Conditional formatting',
+  charts:       'Charts',
+  pivot:        'Pivot tables',
+  filters:      'Saved filters',
+  freeze:       'Frozen rows or columns',
+  images:       'Images or shapes',
+  validation:   'Dropdown lists / data validation'
+};
+
+function zipText(wb, path) {
+  try {
+    const f = (wb.files || {})[path];
+    if (!f) return '';
+    const c = f.content !== undefined ? f.content : f;
+    return Buffer.from(c).toString('utf8');
+  } catch (e) {
+    return '';
+  }
+}
+
+// look inside the xlsx/xlsm and report anything a rewrite could drop
+export async function inspectExcel(fileId) {
+  const buf = await downloadBytes(fileId);
+
+  let wb;
+  try {
+    wb = XLSX.read(buf, {
+      type: 'buffer',
+      bookFiles: true,
+      cellStyles: true,
+      bookVBA: true,
+      raw: false,
+      cellDates: false
+    });
+  } catch (e) {
+    return { risks: [], hasMacros: false, note: 'Could not inspect this file: ' + e.message };
+  }
+
+  const found = new Set();
+  const keys = wb.keys || Object.keys(wb.files || {});
+
+  keys.forEach(k => {
+    const p = String(k).toLowerCase();
+    if (p.includes('xl/charts/'))       found.add('charts');
+    if (p.includes('xl/pivotcache/'))   found.add('pivot');
+    if (p.includes('xl/pivottables/'))  found.add('pivot');
+    if (p.includes('xl/media/'))        found.add('images');
+    if (p.includes('xl/drawings/'))     found.add('images');
+  });
+
+  // scan every worksheet's own xml
+  keys.filter(k => /^xl\/worksheets\/sheet\d+\.xml$/i.test(String(k))).forEach(k => {
+    const xml = zipText(wb, k);
+    if (!xml) return;
+    if (xml.includes('<conditionalFormatting')) found.add('conditional');
+    if (xml.includes('<mergeCell'))             found.add('merged');
+    if (/<col\b[^>]*\bwidth=/.test(xml))        found.add('widths');
+    if (xml.includes('<autoFilter'))            found.add('filters');
+    if (xml.includes('<dataValidation'))        found.add('validation');
+    if (/<pane\b[^>]*state="frozen"/.test(xml)) found.add('freeze');
+  });
+
+  // any fill beyond the two Excel always ships with
+  const styles = zipText(wb, 'xl/styles.xml');
+  if (styles) {
+    const fills = styles.match(/<patternFill[^>]*patternType="([^"]+)"/g) || [];
+    const real = fills.filter(f => !/patternType="(none|gray125)"/.test(f));
+    if (real.length) found.add('fills');
+  }
+
+  // fall back to whatever the parsed sheets can tell us
+  wb.SheetNames.forEach(n => {
+    const ws = wb.Sheets[n];
+    if (!ws) return;
+    if ((ws['!merges'] || []).length) found.add('merged');
+    if ((ws['!cols'] || []).some(c => c && (c.wpx || c.wch || c.width))) found.add('widths');
+  });
+
+  const hasMacros = keys.some(k => String(k).toLowerCase().includes('vbaproject.bin'));
+
+  return {
+    hasMacros,
+    risks: Array.from(found).map(k => ({ key: k, label: RISK_LABELS[k] || k }))
+  };
+}
+
+/* ---------- writing the status column ---------- */
+
+function colLetter(i) {
+  let s = '';
+  let n = i;
+  while (n >= 0) {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  }
+  return s;
+}
+
+// Google Sheets: touch only the cells we mean to touch
+export async function writeStatusSheet(sheetId, tabTitle, headerRow, colIndex, rows, headerText, value) {
+  const sheets = google.sheets({ version: 'v4', auth: auth() });
+  const L = colLetter(colIndex);
+
+  const data = [{
+    range: `'${tabTitle}'!${L}${headerRow}`,
+    values: [[headerText]]
+  }];
+
+  rows.forEach(r => {
+    data.push({ range: `'${tabTitle}'!${L}${r}`, values: [[value]] });
+  });
+
+  const size = 500;
+  for (let i = 0; i < data.length; i += size) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { valueInputOption: 'RAW', data: data.slice(i, i + size) }
+    });
+  }
+  return rows.length;
+}
+
+// Excel on Drive: pull it down, set the cells, push the same file back
+export async function writeStatusExcel(fileId, tabTitle, headerRow, colIndex, rows, headerText, value) {
+  const info = await fileInfo(fileId);
+  const name = info.name || '';
+  const macro = /\.xlsm$/i.test(name) || info.mimeType === XLSM_MIME;
+
+  const buf = await downloadBytes(fileId);
+  const wb = openWorkbook(buf, true);
+
+  const ws = wb.Sheets[tabTitle] || wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('That tab is not in the file any more');
+
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+
+  const put = (r, text) => {
+    const addr = XLSX.utils.encode_cell({ r: r - 1, c: colIndex });
+    ws[addr] = { t: 's', v: text };
+    if (r - 1 > range.e.r) range.e.r = r - 1;
+  };
+
+  put(headerRow, headerText);
+  rows.forEach(r => put(r, value));
+
+  if (colIndex > range.e.c) range.e.c = colIndex;
+  ws['!ref'] = XLSX.utils.encode_range(range);
+
+  const out = XLSX.write(wb, {
+    type: 'buffer',
+    bookType: macro ? 'xlsm' : 'xlsx',
+    bookVBA: true,
+    cellStyles: true,
+    compression: true
+  });
+
+  await uploadBytes(fileId, out, macro ? XLSM_MIME : XLSX_MIME);
+  return rows.length;
+}
+
+/* ---------- painting (Google Sheets only) ---------- */
+
 export async function paintRows(sheetId, tabId, colours, width) {
   if (!colours.length) return;
   const sheets = google.sheets({ version: 'v4', auth: auth() });
