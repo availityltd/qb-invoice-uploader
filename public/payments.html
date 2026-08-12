@@ -399,7 +399,7 @@
     S.headerRow = d.headerRow;
     S.statusCol = d.statusCol;
     S.statusExists = d.statusExists;
-    S.inspect = d.inspect || { hasMacros: false, risks: [] };
+   if (d.inspect) S.inspect = d.inspect;   // keep what the first read told us
   }
 
   /* ---------- columns ---------- */
@@ -463,8 +463,8 @@
     post('/api/cpr/columns', { courier: S.courier, cols: cols }).then(function(){
       return get('/api/cpr/open?sheetId=' + encodeURIComponent(S.sheetId) +
                  '&courier=' + encodeURIComponent(S.courier) +
-                 '&tab=' + encodeURIComponent(S.tab) +
-                 (S.excel ? '&excel=1' : ''));
+                '&tab=' + encodeURIComponent(S.tab) +
+                 (S.excel ? '&excel=1&inspect=0' : ''));
     }).then(function(d){
       $('btnCols').disabled = false;
       $('stepCols').classList.add('done');
