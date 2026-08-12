@@ -1044,7 +1044,38 @@ app.get('/api/cpr/folder', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// remember this courier's column choices
+app.post('/api/cpr/columns', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
+  const { courier, cols } = req.body;
+  if (!courier || !cols) return res.status(400).json({ error: 'courier and cols required' });
+
+  try {
+    await setSetting(realmId, `cpr:cols:${courier}`, cols);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// QB dropdowns
+app.get('/api/cpr/qb-options', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const token = await getAccessToken(realmId);
+    const [accounts, methods] = await Promise.all([
+      listAccounts(realmId, token),
+      listPaymentMethods(realmId, token)
+    ]);
+    const prefs = await getSetting(realmId, 'cpr:prefs', {}) || {};
+    res.json({ accounts, methods, prefs });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // where the QB Status column sits - reuse it if the sheet already has one
 const QB_STATUS_HEADER = 'QB Status';
 
