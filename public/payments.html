@@ -25,6 +25,29 @@
   .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
   .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
 
+  /* CPR cards */
+  .cprs{display:flex;flex-wrap:wrap;gap:9px;align-items:flex-start}
+  .cprCard{border:1px solid var(--line);background:#fff;border-radius:8px;
+    min-width:172px;max-width:340px;overflow:hidden;transition:.13s}
+  .cprCard:hover{border-color:var(--qbo)}
+  .cprCard.on{border-color:var(--qbo);box-shadow:0 0 0 1px var(--qbo)}
+  .cprCard.paid{border-color:var(--qbo);background:#F2FAF0}
+  .cprCard .head{padding:9px 14px;cursor:pointer;font-size:13px}
+  .cprCard .head b{font-weight:600;display:block}
+  .cprCard.on .head b{font-weight:700}
+  .cprCard .head small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+  .cprCard .tick{color:var(--qbo);font-weight:700;margin-right:4px}
+
+  .remBar{border-top:1px solid var(--line);background:#FFFBF0;padding:7px 14px;
+    font-size:11.5px;color:#8A6100;cursor:pointer;display:flex;
+    justify-content:space-between;gap:8px;align-items:center;font-weight:600}
+  .remBar:hover{background:#FFF6E0}
+  .remList{border-top:1px solid var(--line);max-height:190px;overflow:auto;background:#fff}
+  .remList table{width:100%;border-collapse:collapse;font-size:11.5px}
+  .remList td{padding:4px 14px;border-bottom:1px solid var(--line)}
+  .remList td.num{text-align:right;font-family:var(--mono)}
+  .remList td.why{color:var(--muted);font-size:10.5px}
+
   .crumb{font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--mono)}
   .crumb b{color:var(--text)}
 
@@ -109,7 +132,6 @@
 
       <div id="body" class="hide">
 
-        <!-- folder setup -->
         <div class="step" id="stepRoot">
           <h2>Drive folder</h2>
           <div class="hint">The folder that holds one sub-folder per courier. Paste the link or the ID.</div>
@@ -120,14 +142,12 @@
           <div id="rootNote" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
         </div>
 
-        <!-- browse -->
         <div class="step hide" id="stepBrowse">
           <h2>Pick the sheet</h2>
           <div class="crumb" id="crumb"></div>
           <div class="picks" id="browse"></div>
         </div>
 
-        <!-- columns -->
         <div class="step hide" id="stepCols">
           <h2>Columns</h2>
           <div class="hint" id="colsHint"></div>
@@ -137,14 +157,12 @@
           </div>
         </div>
 
-        <!-- CPR pick -->
         <div class="step hide" id="stepCpr">
           <h2>Pick the CPR</h2>
           <div class="hint">One CPR becomes one payment in QuickBooks.</div>
-          <div class="picks" id="cprList"></div>
+          <div class="cprs" id="cprList"></div>
         </div>
 
-        <!-- match -->
         <div class="step hide" id="stepMatch">
           <h2>What matched</h2>
           <div class="hint" id="matchHint"></div>
@@ -152,13 +170,10 @@
           <div class="lists" id="lists"></div>
         </div>
 
-        <!-- receive -->
         <div class="step hide" id="stepPay">
           <h2>Record the payment</h2>
           <div class="hint" id="payHint"></div>
-
           <div id="warnBox"></div>
-
           <div class="fields">
             <div>
               <label>Deposit to</label>
@@ -169,7 +184,6 @@
               <select id="method"></select>
             </div>
           </div>
-
           <button class="solid" id="btnPay">Receive payments</button>
           <div id="payOut"></div>
         </div>
@@ -190,8 +204,9 @@
     root: '', courier: '', trail: [],
     sheetId: '', sheetName: '', excel: false,
     tab: '', header: [], cols: null, hasStatus: false,
-    headerRow: 1, statusCol: 0, statusExists: false,
+    headerRow: 1, statusCol: 0,
     inspect: { hasMacros: false, risks: [] },
+    groups: [], state: {}, openRem: {}, currentKey: null,
     match: null, lastPaid: []
   };
 
@@ -343,24 +358,24 @@
     }
 
     folders.forEach(function(f){
-      var b = document.createElement('button');
-      b.className = 'pick';
-      b.textContent = '\u{1F4C1} ' + f.name;
-      b.addEventListener('click', function(){ onFolder(f); });
-      box.appendChild(b);
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.textContent = '\u{1F4C1} ' + f.name;
+      e.addEventListener('click', function(){ onFolder(f); });
+      box.appendChild(e);
     });
 
     (sheets || []).forEach(function(f){
-      var b = document.createElement('button');
-      b.className = 'pick';
-      b.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.innerHTML = '\u{1F4C4} ' + esc(f.name) +
         (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
-      b.addEventListener('click', function(){
+      e.addEventListener('click', function(){
         Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
-        b.classList.add('on');
+        e.classList.add('on');
         onSheet(f);
       });
-      box.appendChild(b);
+      box.appendChild(e);
     });
   }
 
@@ -371,6 +386,9 @@
     S.sheetId = file.id;
     S.sheetName = file.name;
     S.excel = !!file.excel;
+    S.state = {};
+    S.openRem = {};
+    S.currentKey = null;
     clearSay();
     say('', 'Reading the sheet...');
 
@@ -398,8 +416,7 @@
     S.hasStatus = d.hasStatus;
     S.headerRow = d.headerRow;
     S.statusCol = d.statusCol;
-    S.statusExists = d.statusExists;
-   if (d.inspect) S.inspect = d.inspect;   // keep what the first read told us
+    if (d.inspect) S.inspect = d.inspect;   // keep what the first read told us
   }
 
   /* ---------- columns ---------- */
@@ -463,7 +480,7 @@
     post('/api/cpr/columns', { courier: S.courier, cols: cols }).then(function(){
       return get('/api/cpr/open?sheetId=' + encodeURIComponent(S.sheetId) +
                  '&courier=' + encodeURIComponent(S.courier) +
-                '&tab=' + encodeURIComponent(S.tab) +
+                 '&tab=' + encodeURIComponent(S.tab) +
                  (S.excel ? '&excel=1&inspect=0' : ''));
     }).then(function(d){
       $('btnCols').disabled = false;
@@ -476,33 +493,78 @@
     });
   });
 
-  /* ---------- CPR list ---------- */
+  /* ---------- CPR cards ---------- */
+
+  function keyOf(g){ return g.cprNumber || 'All rows'; }
 
   function showCprs(groups){
+    if(groups) S.groups = groups;
     hideFrom('stepCpr');
     $('stepCpr').classList.remove('hide');
+    drawCprs();
+  }
 
+  function drawCprs(){
     var box = $('cprList');
     box.innerHTML = '';
 
-    if(!groups.length){
+    if(!S.groups.length){
       box.innerHTML = '<span style="font-size:13px;color:var(--muted)">No rows found.</span>';
       return;
     }
 
-    groups.forEach(function(g){
-      var b = document.createElement('button');
-      b.className = 'pick';
-      var label = g.cprNumber || 'All rows';
-      b.innerHTML = esc(label) + '<small>' +
-        (g.cprDate ? esc(g.cprDate) + ' \u00b7 ' : '') +
-        nf(g.delivered) + ' delivered \u00b7 ' + money(g.amount) + '</small>';
-      b.addEventListener('click', function(){
-        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
-        b.classList.add('on');
-        runMatch(g.cprNumber || 'All rows');
+    S.groups.forEach(function(g){
+      var key = keyOf(g);
+      var st = S.state[key];
+
+      var card = document.createElement('div');
+      card.className = 'cprCard' +
+        (st && st.done ? ' paid' : '') +
+        (S.currentKey === key ? ' on' : '');
+
+      var head = document.createElement('div');
+      head.className = 'head';
+      head.innerHTML =
+        '<b>' + (st && st.done ? '<span class="tick">\u2713</span>' : '') + esc(key) + '</b>' +
+        '<small>' +
+          (g.cprDate ? esc(g.cprDate) + ' \u00b7 ' : '') +
+          (st && st.done
+            ? nf(st.paidCount) + ' received \u00b7 ' + money(st.paidAmount)
+            : nf(g.delivered) + ' delivered \u00b7 ' + money(g.amount)) +
+        '</small>';
+      head.addEventListener('click', function(){
+        S.currentKey = key;
+        drawCprs();
+        runMatch(key);
       });
-      box.appendChild(b);
+      card.appendChild(head);
+
+      if(st && st.remaining && st.remaining.length){
+        var bar = document.createElement('div');
+        bar.className = 'remBar';
+        bar.innerHTML = '<span>' + nf(st.remaining.length) + ' invoices remaining</span>' +
+                        '<span>' + (S.openRem[key] ? '\u25B2' : '\u25BC') + '</span>';
+        bar.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          S.openRem[key] = !S.openRem[key];
+          drawCprs();
+        });
+        card.appendChild(bar);
+
+        if(S.openRem[key]){
+          var list = document.createElement('div');
+          list.className = 'remList';
+          list.innerHTML = '<table>' + st.remaining.map(function(r){
+            return '<tr><td>' + esc(r.invoice) + '</td>' +
+                   '<td class="why">' + esc(r.why) + '</td>' +
+                   '<td class="num">' + money(r.amount) + '</td></tr>';
+          }).join('') + '</table>';
+          list.addEventListener('click', function(ev){ ev.stopPropagation(); });
+          card.appendChild(list);
+        }
+      }
+
+      box.appendChild(card);
     });
   }
 
@@ -535,7 +597,7 @@
     var t = d.totals;
 
     $('matchHint').textContent =
-      'CPR ' + (d.cprNumber || '-') + (d.cprDate ? ' dated ' + d.cprDate : '') +
+      'CPR ' + (d.cprNumber || '-') + (d.cprDate ? ' dated ' + d.cprDate : ' - no date in the sheet') +
       ' \u00b7 ' + nf(t.sheetRows) + ' rows in the sheet' +
       (t.skipped ? ' \u00b7 ' + nf(t.skipped) + ' not delivered, skipped' : '');
 
@@ -571,10 +633,44 @@
 
     if(!t.matched){
       $('stepPay').classList.add('hide');
+      // nothing to pay, but the leftovers are still worth showing on the card
+      recordState(d, [], false);
       say('bad', '<b>Nothing left to pay in this CPR.</b>');
       return;
     }
     showPay(d);
+  }
+
+  // remember what happened to this CPR so the card can show it
+  function recordState(d, paidInvoices, markDone){
+    var key = d.cprNumber || 'All rows';
+    var paidSet = {};
+    var paidAmount = 0;
+    (paidInvoices || []).forEach(function(p){
+      paidSet[String(p.invoice)] = true;
+      paidAmount += Number(p.amount || 0);
+    });
+
+    var rem = [];
+    d.amountOff.forEach(function(r){
+      rem.push({ invoice: r.invoice, amount: r.sheetAmount, why: 'amount differs' });
+    });
+    d.notInQb.forEach(function(r){
+      rem.push({ invoice: r.invoice, amount: r.amount, why: 'not in QB' });
+    });
+    d.matched.forEach(function(r){
+      if(!paidSet[String(r.invoice)]) {
+        rem.push({ invoice: r.invoice, amount: r.qbBalance, why: markDone ? 'not posted' : 'ready to pay' });
+      }
+    });
+
+    S.state[key] = {
+      done: !!markDone,
+      paidCount: (paidInvoices || []).length,
+      paidAmount: paidAmount,
+      remaining: rem
+    };
+    drawCprs();
   }
 
   /* ---------- pay ---------- */
@@ -586,10 +682,14 @@
     var parts = d.payments.map(function(p){
       return esc(p.customerName) + ' - ' + nf(p.count) + ' invoices, ' + money(p.amount);
     });
-    $('payHint').innerHTML = d.payments.length > 1
-      ? 'This CPR covers ' + d.payments.length + ' customers, so it will be split into ' +
-        d.payments.length + ' payments:<br>' + parts.join('<br>')
-      : parts.join('');
+    $('payHint').innerHTML =
+      (d.cprDate
+        ? 'Payment date will be <b>' + esc(d.cprDate) + '</b> (the CPR date).<br>'
+        : '<b style="color:var(--warn)">No CPR date found in the sheet - QuickBooks will use today.</b><br>') +
+      (d.payments.length > 1
+        ? 'This CPR covers ' + d.payments.length + ' customers, so it will be split into ' +
+          d.payments.length + ' payments:<br>' + parts.join('<br>')
+        : parts.join(''));
 
     drawWarning();
 
@@ -625,27 +725,16 @@
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   }
 
-  // the whole point of the inspection: warn before anything is written
   function drawWarning(){
     var box = $('warnBox');
     var risks = (S.inspect && S.inspect.risks) || [];
 
-    // Google Sheets are edited cell by cell - nothing else can be touched
-    if(!S.excel){
+    if(!S.excel || !risks.length){
       box.innerHTML =
         '<label style="font-size:13px;display:flex;align-items:center;gap:7px;margin-bottom:16px">' +
         '<input type="checkbox" id="doWrite" checked style="width:auto">' +
         'Write "Received" into the QB Status column' +
-        '</label>';
-      return;
-    }
-
-    if(!risks.length){
-      box.innerHTML =
-        '<label style="font-size:13px;display:flex;align-items:center;gap:7px;margin-bottom:16px">' +
-        '<input type="checkbox" id="doWrite" checked style="width:auto">' +
-        'Write "Received" into the QB Status column' +
-        (S.inspect.hasMacros ? ' <span style="color:var(--muted)">(macros will be kept)</span>' : '') +
+        (S.excel && S.inspect.hasMacros ? ' <span style="color:var(--muted)">(macros will be kept)</span>' : '') +
         '</label>';
       return;
     }
@@ -683,6 +772,7 @@
     var write = wantsWrite();
     var msg = 'Record ' + S.match.totals.matched + ' payments totalling ' +
               money(S.match.totals.amount) + '?';
+    if(!S.match.cprDate) msg += '\n\nNo CPR date was found, so QuickBooks will date this today.';
     if(write && S.excel && (S.inspect.risks || []).length){
       msg += '\n\nThe sheet will be saved again and the formatting listed above will be lost.';
     }
@@ -725,6 +815,7 @@
       }
       $('payOut').innerHTML = html;
 
+      recordState(S.match, S.lastPaid, d.ok);
       if(S.lastPaid.length) drawPaidList();
       if(d.ok) $('stepPay').classList.add('done');
     }).catch(function(e){
