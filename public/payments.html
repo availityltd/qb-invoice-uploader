@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receive payments</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .step.done{border-color:var(--qbo)}
+
+  .picks{display:flex;flex-wrap:wrap;gap:8px}
+  .pick{border:1px solid var(--line);background:#fff;border-radius:7px;padding:9px 14px;
+    cursor:pointer;font-size:13px;font-family:inherit;transition:.13s;text-align:left}
+  .pick:hover{border-color:var(--qbo)}
+  .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+
+  .crumb{font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--mono)}
+  .crumb b{color:var(--text)}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+  .tally > div{flex:1;min-width:118px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+  .cols label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;
+    margin-bottom:16px}
+  .fields label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .lists .box{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}
+  .lists .box h4{margin:0;padding:9px 13px;font-size:12px;font-weight:600;
+    background:var(--tint);border-bottom:1px solid var(--line)}
+  .lists .box .inner{max-height:230px;overflow:auto}
+  .lists table{width:100%;border-collapse:collapse;font-size:12px}
+  .lists td{padding:5px 13px;border-bottom:1px solid var(--line)}
+  .lists td.num{text-align:right;font-family:var(--mono)}
+
+  .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
+    background:#fff;font-size:13px}
+  .result.good{border-color:var(--qbo);background:#F2FAF0}
+  .result.bad{border-color:var(--bad);background:#FDF3F3}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Receive payments</h1>
+        <div class="sub">Match a courier settlement against QuickBooks and record the payment.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Everything on this page comes straight from your company file.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <!-- folder setup -->
+        <div class="step" id="stepRoot">
+          <h2>Drive folder</h2>
+          <div class="hint">The folder that holds one sub-folder per courier. Paste the link or the ID.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="rootIn" placeholder="https://drive.google.com/drive/folders/..." style="flex:1;min-width:260px">
+            <button class="solid" id="btnRoot">Save</button>
+          </div>
+          <div id="rootNote" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+        </div>
+
+        <!-- browse -->
+        <div class="step hide" id="stepBrowse">
+          <h2>Pick the sheet</h2>
+          <div class="crumb" id="crumb"></div>
+          <div class="picks" id="browse"></div>
+        </div>
+
+        <!-- columns -->
+        <div class="step hide" id="stepCols">
+          <h2>Columns</h2>
+          <div class="hint" id="colsHint"></div>
+          <div class="cols" id="colsBox"></div>
+          <div style="margin-top:14px">
+            <button class="solid" id="btnCols">Save and continue</button>
+          </div>
+        </div>
+
+        <!-- CPR pick -->
+        <div class="step hide" id="stepCpr">
+          <h2>Pick the CPR</h2>
+          <div class="hint">One CPR becomes one payment in QuickBooks.</div>
+          <div class="picks" id="cprList"></div>
+        </div>
+
+        <!-- match -->
+        <div class="step hide" id="stepMatch">
+          <h2>What matched</h2>
+          <div class="hint" id="matchHint"></div>
+          <div class="tally" id="tally"></div>
+          <div class="lists" id="lists"></div>
+        </div>
+
+        <!-- receive -->
+        <div class="step hide" id="stepPay">
+          <h2>Record the payment</h2>
+          <div class="hint" id="payHint"></div>
+          <div class="fields">
+            <div>
+              <label>Deposit to</label>
+              <select id="acct"></select>
+            </div>
+            <div>
+              <label>Payment method</label>
+              <select id="method"></select>
+            </div>
+          </div>
+          <label style="font-size:13px;display:flex;align-items:center;gap:7px;margin-bottom:14px">
+            <input type="checkbox" id="paint" checked style="width:auto">
+            Colour the matched rows green in the sheet
+          </label>
+          <button class="solid" id="btnPay">Receive payments</button>
+          <div id="payOut"></div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    root: '', courier: '', courierId: '',
+    trail: [], sheetId: '', sheetName: '', excel: false,
+    tab: '', header: [], cols: null, hasStatus: false,
+    cpr: null, match: null, width: 40, tabId: 0
+  };
+
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
+
+  function get(url){
+    return fetch(url).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    get('/api/cpr/root').then(function(d){
+      if(d.folderId){
+        S.root = d.folderId;
+        $('rootIn').value = d.folderId;
+        $('rootNote').textContent = 'Saved.';
+        $('stepRoot').classList.add('done');
+        openCouriers();
+      }
+    }).catch(function(e){ say('bad', '<b>' + e.message + '</b>'); });
+  });
+
+  $('btnRoot').addEventListener('click', function(){
+    var v = $('rootIn').value.trim();
+    if(!v) return;
+    $('btnRoot').disabled = true;
+    post('/api/cpr/root', { folderId: v }).then(function(d){
+      $('btnRoot').disabled = false;
+      S.root = d.folderId;
+      $('rootIn').value = d.folderId;
+      $('rootNote').textContent = 'Saved.';
+      $('stepRoot').classList.add('done');
+      openCouriers();
+    }).catch(function(e){
+      $('btnRoot').disabled = false;
+      $('rootNote').textContent = e.message;
+    });
+  });
+
+  /* ---------- browsing ---------- */
+
+  function hideFrom(step){
+    var order = ['stepBrowse','stepCols','stepCpr','stepMatch','stepPay'];
+    var i = order.indexOf(step);
+    order.slice(i).forEach(function(id){ $(id).classList.add('hide'); });
+  }
+
+  function drawCrumb(){
+    var bits = ['Root'];
+    S.trail.forEach(function(t){ bits.push(t.name); });
+    $('crumb').innerHTML = bits.map(function(b, i){
+      return i === bits.length - 1 ? '<b>' + b + '</b>' : b;
+    }).join(' / ');
+  }
+
+  function openCouriers(){
+    hideFrom('stepBrowse');
+    S.trail = [];
+    $('stepBrowse').classList.remove('hide');
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading Drive…</span>';
+
+    get('/api/cpr/couriers').then(function(d){
+      if(!d.folders.length){
+        $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">No folders in there.</span>';
+        return;
+      }
+      paint(d.folders, [], function(f){
+        S.courier = f.name;
+        S.courierId = f.id;
+        openFolder(f);
+      });
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + e.message + '</b>');
+    });
+  }
+
+  function openFolder(folder){
+    hideFrom('stepCols');
+    S.trail.push(folder);
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading…</span>';
+
+    get('/api/cpr/folder?id=' + encodeURIComponent(folder.id)).then(function(d){
+      if(!d.folders.length && !d.sheets.length){
+        $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Nothing in there. ' +
+          '<a href="#" id="back">Go back</a></span>';
+        $('back').addEventListener('click', function(e){ e.preventDefault(); goBack(); });
+        return;
+      }
+      paint(d.folders, d.sheets, openFolder, openSheet);
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + e.message + '</b>');
+    });
+  }
+
+  function goBack(){
+    S.trail.pop();
+    if(!S.trail.length){ openCouriers(); return; }
+    var last = S.trail.pop();
+    openFolder(last);
+  }
+
+  function paint(folders, sheets, onFolder, onSheet){
+    var box = $('browse');
+    box.innerHTML = '';
+
+    if(S.trail.length){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      b.innerHTML = '← Back';
+      b.addEventListener('click', goBack);
+      box.appendChild(b);
+    }
+
+    folders.forEach(function(f){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      b.innerHTML = '📁 ' + f.name;
+      b.addEventListener('click', function(){ onFolder(f); });
+      box.appendChild(b);
+    });
+
+    (sheets || []).forEach(function(f){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      b.innerHTML = '📄 ' + f.name + (f.excel ? '<small>Excel file</small>' : '');
+      b.addEventListener('click', function(){
+        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+        b.classList.add('on');
+        onSheet(f);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  /* ---------- open a sheet ---------- */
+
+  function openSheet(file){
+    hideFrom('stepCols');
+    S.sheetId = file.id;
+    S.sheetName = file.name;
+    S.excel = !!file.excel;
+    clearSay();
+    say('', 'Reading the sheet…');
+
+    var u = '/api/cpr/open?sheetId=' + encodeURIComponent(file.id) +
+            '&courier=' + encodeURIComponent(S.courier) +
+            (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(d){
+      clearSay();
+      S.tab = d.tab;
+      S.header = d.header;
+      S.cols = d.cols;
+      S.hasStatus = d.hasStatus;
+      var t = (d.tabs || []).filter(function(x){ return x.title === d.tab; })[0];
+      S.tabId = t ? t.id : 0;
+
+      if(d.remembered && d.cols.invoice >= 0 && d.cols.amount >= 0){
+        showCprs(d.groups);
+      } else {
+        showCols(d);
+      }
+    }).catch(function(e){
+      say('bad', '<b>' + e.message + '</b>');
+    });
+  }
+
+  /* ---------- columns ---------- */
+
+  function showCols(d){
+    $('stepCols').classList.remove('hide');
+    $('colsHint').textContent = S.header.length + ' columns found in "' + S.tab +
+      '". Check these are right — they will be remembered for ' + S.courier + '.';
+
+    var fields = [
+      ['invoice', 'Order / invoice number'],
+      ['cpr',     'CPR number'],
+      ['cprDate', 'CPR date'],
+      ['amount',  'Amount'],
+      ['status',  'Status (leave blank if none)']
+    ];
+
+    var box = $('colsBox');
+    box.innerHTML = '';
+    fields.forEach(function(f){
+      var wrap = document.createElement('div');
+      var lab = document.createElement('label');
+      lab.textContent = f[1];
+      var sel = document.createElement('select');
+      sel.id = 'col_' + f[0];
+
+      var none = document.createElement('option');
+      none.value = '-1';
+      none.textContent = '— none —';
+      sel.appendChild(none);
+
+      S.header.forEach(function(h, i){
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = (h || '(column ' + (i + 1) + ')');
+        sel.appendChild(o);
+      });
+
+      sel.value = String(d.cols[f[0]] === undefined ? -1 : d.cols[f[0]]);
+      wrap.appendChild(lab);
+      wrap.appendChild(sel);
+      box.appendChild(wrap);
+    });
+  }
+
+  $('btnCols').addEventListener('click', function(){
+    var cols = {
+      invoice: Number($('col_invoice').value),
+      cpr:     Number($('col_cpr').value),
+      cprDate: Number($('col_cprDate').value),
+      amount:  Number($('col_amount').value),
+      status:  Number($('col_status').value)
+    };
+
+    if(cols.invoice < 0) return say('bad', '<b>Pick the order / invoice number column.</b>');
+    if(cols.amount < 0)  return say('bad', '<b>Pick the amount column.</b>');
+
+    clearSay();
+    $('btnCols').disabled = true;
+
+    post('/api/cpr/columns', { courier: S.courier, cols: cols }).then(function(){
+      return get('/api/cpr/open?sheetId=' + encodeURIComponent(S.sheetId) +
+                 '&courier=' + encodeURIComponent(S.courier) +
+                 '&tab=' + encodeURIComponent(S.tab) +
+                 (S.excel ? '&excel=1' : ''));
+    }).then(function(d){
+      $('btnCols').disabled = false;
+      $('stepCols').classList.add('done');
+      S.cols = d.cols;
+      S.hasStatus = d.hasStatus;
+      showCprs(d.groups);
+    }).catch(function(e){
+      $('btnCols').disabled = false;
+      say('bad', '<b>' + e.message + '</b>');
+    });
+  });
+
+  /* ---------- CPR list ---------- */
+
+  function showCprs(groups){
+    hideFrom('stepCpr');
+    $('stepCpr').classList.remove('hide');
+
+    var box = $('cprList');
+    box.innerHTML = '';
+
+    if(!groups.length){
+      box.innerHTML = '<span style="font-size:13px;color:var(--muted)">No rows found.</span>';
+      return;
+    }
+
+    groups.forEach(function(g){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      var label = g.cprNumber || 'All rows';
+      b.innerHTML = label + '<small>' +
+        (g.cprDate ? g.cprDate + ' · ' : '') +
+        nf(g.delivered) + ' delivered · ' + money(g.amount) + '</small>';
+      b.addEventListener('click', function(){
+        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+        b.classList.add('on');
+        runMatch(g.cprNumber || 'All rows');
+      });
+      box.appendChild(b);
+    });
+  }
+
+  /* ---------- match ---------- */
+
+  function runMatch(cprKey){
+    hideFrom('stepMatch');
+    clearSay();
+    say('', 'Checking QuickBooks…');
+
+    var u = '/api/cpr/match?sheetId=' + encodeURIComponent(S.sheetId) +
+            '&tab=' + encodeURIComponent(S.tab) +
+            '&courier=' + encodeURIComponent(S.courier) +
+            '&cpr=' + encodeURIComponent(cprKey === 'All rows' ? '(no CPR number)' : cprKey) +
+            (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(d){
+      clearSay();
+      S.match = d;
+      S.width = d.width || 40;
+      showMatch(d);
+    }).catch(function(e){
+      say('bad', '<b>' + e.message + '</b>');
+    });
+  }
+
+  function showMatch(d){
+    $('stepMatch').classList.remove('hide');
+    var t = d.totals;
+
+    $('matchHint').textContent =
+      'CPR ' + (d.cprNumber || '—') + (d.cprDate ? ' dated ' + d.cprDate : '') +
+      ' · ' + nf(t.sheetRows) + ' rows in the sheet' +
+      (t.skipped ? ' · ' + nf(t.skipped) + ' not delivered, skipped' : '');
+
+    $('tally').innerHTML =
+      '<div class="ok"><div class="n">' + nf(t.matched) + '</div><div class="l">Ready to pay</div></div>' +
+      '<div class="ok"><div class="n">' + money(t.amount) + '</div><div class="l">Amount</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.amountOff) + '</div><div class="l">Amount differs</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.notInQb) + '</div><div class="l">Not in QB</div></div>' +
+      '<div><div class="n">' + nf(t.alreadyPaid) + '</div><div class="l">Already paid</div></div>';
+
+    var lists = $('lists');
+    lists.innerHTML = '';
+
+    function box(title, rows, render){
+      if(!rows.length) return;
+      var d = document.createElement('div');
+      d.className = 'box';
+      var inner = rows.map(render).join('');
+      d.innerHTML = '<h4>' + title + ' (' + nf(rows.length) + ')</h4>' +
+        '<div class="inner"><table>' + inner + '</table></div>';
+      lists.appendChild(d);
+    }
+
+    box('Amount differs', d.amountOff, function(r){
+      return '<tr><td>' + r.invoice + '</td><td class="num">' + money(r.sheetAmount) +
+             '</td><td class="num" style="color:var(--muted)">QB ' + money(r.qbBalance) + '</td></tr>';
+    });
+    box('Not found in QuickBooks', d.notInQb, function(r){
+      return '<tr><td>' + r.invoice + '</td><td class="num">' + money(r.amount) + '</td></tr>';
+    });
+    box('Already paid', d.alreadyPaid, function(r){
+      return '<tr><td>' + r.invoice + '</td><td class="num">' + money(r.qbTotal) + '</td></tr>';
+    });
+
+    if(!t.matched){
+      $('stepPay').classList.add('hide');
+      say('bad', '<b>Nothing left to pay in this CPR.</b>');
+      return;
+    }
+    showPay(d);
+  }
+
+  /* ---------- pay ---------- */
+
+  function showPay(d){
+    $('stepPay').classList.remove('hide');
+    $('payOut').innerHTML = '';
+
+    var parts = d.payments.map(function(p){
+      return p.customerName + ' — ' + nf(p.count) + ' invoices, ' + money(p.amount);
+    });
+    $('payHint').innerHTML = d.payments.length > 1
+      ? 'This CPR covers ' + d.payments.length + ' customers, so it will be split into ' +
+        d.payments.length + ' payments:<br>' + parts.join('<br>')
+      : parts.join('');
+
+    if($('acct').options.length) return;
+
+    get('/api/cpr/qb-options').then(function(o){
+      var a = $('acct'), m = $('method');
+      a.innerHTML = ''; m.innerHTML = '';
+
+      o.accounts.forEach(function(x){
+        var e = document.createElement('option');
+        e.value = x.id;
+        e.textContent = x.name;
+        a.appendChild(e);
+      });
+
+      var none = document.createElement('option');
+      none.value = '';
+      none.textContent = '— none —';
+      m.appendChild(none);
+      o.methods.forEach(function(x){
+        var e = document.createElement('option');
+        e.value = x.id;
+        e.textContent = x.name;
+        m.appendChild(e);
+      });
+
+      var pref = (o.prefs || {})[S.courier];
+      if(pref){
+        if(pref.accountId) a.value = pref.accountId;
+        if(pref.methodId)  m.value = pref.methodId;
+      }
+    }).catch(function(e){ say('bad', '<b>' + e.message + '</b>'); });
+  }
+
+  $('btnPay').addEventListener('click', function(){
+    if(!S.match || !S.match.matched.length) return;
+
+    var acctSel = $('acct');
+    if(!acctSel.value) return say('bad', '<b>Pick a deposit account.</b>');
+
+    if(!confirm('Record ' + S.match.totals.matched + ' payments totalling ' +
+                money(S.match.totals.amount) + '?')) return;
+
+    clearSay();
+    $('btnPay').disabled = true;
+    $('payOut').innerHTML = '<div style="font-size:13px;color:var(--muted);margin-top:12px">' +
+      'Posting to QuickBooks…</div>';
+
+    post('/api/cpr/receive', {
+      courier: S.courier,
+      cprNumber: S.match.cprNumber,
+      cprDate: S.match.cprDate,
+      accountId: acctSel.value,
+      accountName: acctSel.options[acctSel.selectedIndex].textContent,
+      methodId: $('method').value || null,
+      matched: S.match.matched,
+      sheetId: S.sheetId,
+      tabId: S.tabId,
+      width: S.width,
+      paint: $('paint').checked && !S.excel
+    }).then(function(d){
+      $('btnPay').disabled = false;
+      var html = '';
+      d.results.forEach(function(r){
+        html += '<div class="result ' + (r.ok ? 'good' : 'bad') + '">' +
+          (r.ok
+            ? '✓ ' + (r.customer || '') + ' — ' + nf(r.count) + ' invoices, ' + money(r.amount) +
+              (r.paymentId ? ' · QB payment ' + r.paymentId : '')
+            : '✗ ' + (r.customer ? r.customer + ' — ' : '') + r.msg) +
+          '</div>';
+      });
+      if(d.painted) html += '<div class="result">Coloured ' + nf(d.painted) + ' rows in the sheet.</div>';
+      $('payOut').innerHTML = html;
+      if(d.ok) $('stepPay').classList.add('done');
+    }).catch(function(e){
+      $('btnPay').disabled = false;
+      $('payOut').innerHTML = '';
+      say('bad', '<b>' + e.message + '</b>');
+    });
+  });
+})();
+</script>
+</body>
+</html>
