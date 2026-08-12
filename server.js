@@ -1278,8 +1278,7 @@ app.post('/api/cpr/receive', async (req, res) => {
       };
       if (cprDate) payload.TxnDate = cprDate;
       if (methodId) payload.PaymentMethodRef = { value: String(methodId) };
-      if (ref) payload.PaymentRefNum = ref;
-      if (cprNumber) payload.PrivateNote = `CPR ${cprNumber}${cprDate ? ' dated ' + cprDate : ''}`;
+      
 
       const r = await postPayment(realmId, token, payload);
 
