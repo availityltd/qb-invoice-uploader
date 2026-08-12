@@ -19,6 +19,10 @@ import {
 } from './qb.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
+import {
+  listFolders, listSheetsIn, loadSheet, groupByCpr, isDelivered,
+  findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits
+} from './cpr.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -975,6 +979,320 @@ app.post('/api/sheets/paint', async (req, res) => {
   try {
     await paintRows(sheetId, tabId, colours, width);
     res.json({ ok: true, painted: colours.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// ==================== CPR / Receive payments ====================
+
+// the root Drive folder, saved once per company
+app.get('/api/cpr/root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.json({ folderId: await getSetting(realmId, 'cpr:root', '') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/cpr/root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  let id = String(req.body.folderId || '').trim();
+  // people paste the whole Drive URL — pull the id out of it
+  const m = id.match(/[-\w]{25,}/);
+  if (m) id = m[0];
+  if (!id) return res.status(400).json({ error: 'Folder ID or link required' });
+
+  try {
+    await setSetting(realmId, 'cpr:root', id);
+    res.json({ ok: true, folderId: id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// couriers = the folders sitting in the root
+app.get('/api/cpr/couriers', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const root = await getSetting(realmId, 'cpr:root', '');
+    if (!root) return res.status(400).json({ error: 'Set the Drive folder first' });
+    res.json({ folders: await listFolders(root) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// months = the folders inside a courier, sheets = what is inside a month
+app.get('/api/cpr/folder', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const id = req.query.id;
+  if (!id) return res.status(400).json({ error: 'id required' });
+
+  try {
+    const [folders, sheets] = await Promise.all([listFolders(id), listSheetsIn(id)]);
+    res.json({ folders, sheets });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// open a sheet: work out the columns, list the CPRs inside it
+app.get('/api/cpr/open', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, courier } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    const tabs = await listTabs(sheetId, excel);
+    if (!tabs.length) return res.status(400).json({ error: 'That file has no tabs' });
+
+    const tab = req.query.tab || tabs[0].title;
+    const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+
+    const data = await loadSheet(sheetId, tab, excel, saved);
+    const hasStatus = data.cols.status >= 0;
+    const groups = groupByCpr(data.rows, hasStatus);
+
+    res.json({
+      tabs, tab,
+      header: data.header,
+      cols: data.cols,
+      hasStatus,
+      remembered: !!saved,
+      rowCount: data.rows.length,
+      groups: groups.map(g => ({
+        cprNumber: g.cprNumber,
+        cprDate: g.cprDate,
+        rows: g.rows.length,
+        delivered: g.delivered,
+        amount: Math.round(g.amount * 100) / 100
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// remember this courier's column choices
+app.post('/api/cpr/columns', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { courier, cols } = req.body;
+  if (!courier || !cols) return res.status(400).json({ error: 'courier and cols required' });
+
+  try {
+    await setSetting(realmId, `cpr:cols:${courier}`, cols);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// QB dropdowns
+app.get('/api/cpr/qb-options', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const token = await getAccessToken(realmId);
+    const [accounts, methods] = await Promise.all([
+      listAccounts(realmId, token),
+      listPaymentMethods(realmId, token)
+    ]);
+    const prefs = await getSetting(realmId, 'cpr:prefs', {}) || {};
+    res.json({ accounts, methods, prefs });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// match one CPR against QuickBooks
+app.get('/api/cpr/match', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, courier, cpr } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+
+  try {
+    const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+    const data = await loadSheet(sheetId, tab, excel, saved);
+    const hasStatus = data.cols.status >= 0;
+
+    let rows = data.rows;
+    if (cpr) rows = rows.filter(r => (r.cprNumber || '(no CPR number)') === cpr);
+    if (!rows.length) return res.status(400).json({ error: 'No rows for that CPR' });
+
+    const delivered = rows.filter(r => isDelivered(r, hasStatus));
+    const skipped = rows.length - delivered.length;
+
+    const token = await getAccessToken(realmId);
+    const found = await findInvoices(realmId, token, delivered.map(r => r.invoice));
+
+    const matched = [], amountOff = [], notInQb = [], alreadyPaid = [];
+
+    delivered.forEach(r => {
+      const inv = found.get(cprDigits(r.invoice));
+      if (!inv) { notInQb.push(r); return; }
+
+      const entry = {
+        sheetRow: r.sheetRow,
+        invoice: r.invoice,
+        sheetAmount: r.amount,
+        qbDoc: inv.doc,
+        qbId: inv.id,
+        qbTotal: inv.total,
+        qbBalance: inv.balance,
+        customerId: inv.customerId,
+        customerName: inv.customerName,
+        date: inv.date
+      };
+
+      if (inv.balance <= 0.005) { alreadyPaid.push(entry); return; }
+      if (r.amount > 0 && Math.abs(r.amount - inv.balance) > 0.5) { amountOff.push(entry); return; }
+      matched.push(entry);
+    });
+
+    // one payment per customer — QB will not mix two customers in one
+    const byCustomer = new Map();
+    matched.forEach(m => {
+      const k = m.customerId || 'none';
+      if (!byCustomer.has(k)) {
+        byCustomer.set(k, { customerId: m.customerId, customerName: m.customerName, lines: [], amount: 0 });
+      }
+      const g = byCustomer.get(k);
+      g.lines.push(m);
+      g.amount += (m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance);
+    });
+
+    const first = rows[0] || {};
+    res.json({
+      cprNumber: first.cprNumber || '',
+      cprDate: first.cprDate || null,
+      totals: {
+        sheetRows: rows.length,
+        skipped,
+        matched: matched.length,
+        amountOff: amountOff.length,
+        notInQb: notInQb.length,
+        alreadyPaid: alreadyPaid.length,
+        amount: Math.round(matched.reduce((s, m) => s + (m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance), 0) * 100) / 100
+      },
+      payments: Array.from(byCustomer.values()).map(g => ({
+        customerId: g.customerId,
+        customerName: g.customerName,
+        count: g.lines.length,
+        amount: Math.round(g.amount * 100) / 100
+      })),
+      matched, amountOff, notInQb, alreadyPaid,
+      width: data.width
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// post the payments
+app.post('/api/cpr/receive', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const {
+    courier, cprNumber, cprDate, accountId, accountName, methodId,
+    matched = [], sheetId, tabId, width, paint = true
+  } = req.body;
+
+  if (!accountId) return res.status(400).json({ error: 'Deposit account required' });
+  if (!matched.length) return res.status(400).json({ error: 'Nothing to receive' });
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    // group by customer again, on the server this time
+    const byCustomer = new Map();
+    matched.forEach(m => {
+      const k = m.customerId || 'none';
+      if (!byCustomer.has(k)) byCustomer.set(k, []);
+      byCustomer.get(k).push(m);
+    });
+
+    const ref = [cprNumber, cprDate].filter(Boolean).join(' · ').slice(0, 21);
+    const results = [];
+    const paintedRows = [];
+    let posted = 0, totalAmount = 0;
+
+    for (const [custId, lines] of byCustomer) {
+      if (!custId || custId === 'none') {
+        results.push({ ok: false, msg: 'Invoices with no customer were skipped', count: lines.length });
+        continue;
+      }
+
+      const amount = lines.reduce((s, m) => s + (m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance), 0);
+
+      const payload = {
+        CustomerRef: { value: String(custId) },
+        TotalAmt: Math.round(amount * 100) / 100,
+        DepositToAccountRef: { value: String(accountId) },
+        Line: lines.map(m => ({
+          Amount: Math.round((m.sheetAmount > 0 ? m.sheetAmount : m.qbBalance) * 100) / 100,
+          LinkedTxn: [{ TxnId: String(m.qbId), TxnType: 'Invoice' }]
+        }))
+      };
+      if (cprDate) payload.TxnDate = cprDate;
+      if (methodId) payload.PaymentMethodRef = { value: String(methodId) };
+      if (ref) payload.PaymentRefNum = ref;
+      if (cprNumber) payload.PrivateNote = `CPR ${cprNumber}${cprDate ? ' dated ' + cprDate : ''}`;
+
+      const r = await postPayment(realmId, token, payload);
+
+      if (r.ok) {
+        posted++;
+        totalAmount += amount;
+        lines.forEach(m => { if (m.sheetRow) paintedRows.push({ row: m.sheetRow, colour: 'green' }); });
+        results.push({
+          ok: true, customer: lines[0].customerName || custId,
+          count: lines.length, amount: Math.round(amount * 100) / 100, paymentId: r.id
+        });
+      } else {
+        results.push({ ok: false, customer: lines[0].customerName || custId, count: lines.length, msg: r.msg });
+      }
+    }
+
+    if (paint && sheetId && tabId !== undefined && paintedRows.length) {
+      try { await paintRows(sheetId, Number(tabId), paintedRows, width || 40); }
+      catch (e) { results.push({ ok: false, msg: 'Payments went through, colouring the sheet failed: ' + e.message }); }
+    }
+
+    try {
+      await recordRun(realmId, {
+        courier, cprNumber, cprDate, sheetId,
+        matched: matched.length, unmatched: 0,
+        amount: Math.round(totalAmount * 100) / 100,
+        qbPaymentId: (results.find(x => x.ok) || {}).paymentId || null,
+        bankAccount: accountName || null
+      });
+    } catch (e) {}
+
+    if (accountId || methodId) {
+      try {
+        const prefs = (await getSetting(realmId, 'cpr:prefs', {})) || {};
+        if (courier) prefs[courier] = { accountId, methodId };
+        await setSetting(realmId, 'cpr:prefs', prefs);
+      } catch (e) {}
+    }
+
+    res.json({ ok: posted > 0, posted, results, painted: paintedRows.length });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
