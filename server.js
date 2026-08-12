@@ -1253,7 +1253,7 @@ app.post('/api/cpr/receive', async (req, res) => {
       byCustomer.get(k).push(m);
     });
 
-    const ref = [cprNumber, cprDate].filter(Boolean).join(' - ').slice(0, 21);
+    const ref = String(cprNumber || '').trim().slice(0, 21);
     const results = [];
     const paidRows = [];
     const paidInvoices = [];
