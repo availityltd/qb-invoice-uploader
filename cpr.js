@@ -19,20 +19,62 @@ export function digitsOf(v) {
   return String(v ?? '').replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
 }
 
+const MONTHS = {
+  jan:1, feb:2, mar:3, apr:4, may:5, jun:6,
+  jul:7, aug:8, sep:9, oct:10, nov:11, dec:12
+};
+
 export function toISO(v) {
-  if (!v) return null;
-  const s = clean(v);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (v === null || v === undefined || v === '') return null;
+
+  // Excel keeps dates as a count of days since 1899-12-30
+  const asNum = Number(String(v).trim());
+  if (!isNaN(asNum) && asNum > 20000 && asNum < 80000) {
+    const ms = Math.round((asNum - 25569) * 86400000);
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+
+  let s = clean(v);
+  if (!s) return null;
+
+  // drop any time that came along for the ride
+  s = s.replace(/[T ]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\s*(am|pm)?.*$/i, '').trim();
+
+  const pad = n => String(n).padStart(2, '0');
+
+  // 2026-07-15
+  let m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+
+  // 15/07/2026 or 7/15/2026 - couriers use both
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
   if (m) {
-    // couriers write m/d/yyyy — swap when the first number can only be a day
     let a = Number(m[1]), b = Number(m[2]);
     let mo = a, da = b;
     if (a > 12) { mo = b; da = a; }
-    return `${m[3]}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}`;
+    return `${m[3]}-${pad(mo)}-${pad(da)}`;
   }
-  m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+
+  // 15-Jul-2026 or 15 July 2026
+  m = s.match(/^(\d{1,2})[\s\-]([A-Za-z]{3,})[\s\-](\d{4})$/);
+  if (m) {
+    const mo = MONTHS[m[2].slice(0, 3).toLowerCase()];
+    if (mo) return `${m[3]}-${pad(mo)}-${pad(m[1])}`;
+  }
+
+  // Jul 15, 2026
+  m = s.match(/^([A-Za-z]{3,})[\s\-](\d{1,2}),?[\s\-](\d{4})$/);
+  if (m) {
+    const mo = MONTHS[m[1].slice(0, 3).toLowerCase()];
+    if (mo) return `${m[3]}-${pad(mo)}-${pad(m[2])}`;
+  }
+
+  // last resort - let the browser engine try
+  const d = new Date(s);
+  if (!isNaN(d.getTime()) && d.getFullYear() > 1990 && d.getFullYear() < 2100) {
+    return d.toISOString().slice(0, 10);
+  }
+
   return null;
 }
 
