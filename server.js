@@ -1074,9 +1074,10 @@ app.get('/api/cpr/open', async (req, res) => {
     const hasStatus = data.cols.status >= 0;
     const groups = groupByCpr(data.rows, hasStatus);
 
-    // only Excel files are at risk - Google Sheets are edited cell by cell
-    let inspect = { hasMacros: false, risks: [] };
-    if (excel) {
+   // only Excel files are at risk - Google Sheets are edited cell by cell.
+    // the page asks for this once and remembers it, so skip it on repeat calls
+    let inspect = null;
+    if (excel && req.query.inspect !== '0') {
       try { inspect = await inspectExcel(sheetId); }
       catch (e) { inspect = { hasMacros: false, risks: [], note: e.message }; }
     }
