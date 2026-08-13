@@ -42,7 +42,7 @@
             <h2><span class="no">01</span> Invoices to create</h2>
 
             <div id="fromConvert" class="note ok hide" style="margin-bottom:14px"></div>
-            <div id="resumeNote" class="note warn hide" style="margin-bottom:14px"></div>
+            <div id="liveNote" class="note warn hide" style="margin-bottom:14px"></div>
 
             <div id="fileArea">
               <div class="zone" id="zoneFile" tabindex="0" role="button">
@@ -96,7 +96,7 @@
             <div class="acts" style="margin-top:12px;margin-bottom:0">
               <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
               <button class="mini" id="btnCopyLog">Copy log</button>
-              <button class="mini" id="btnClear">Clear saved progress</button>
+              <button class="mini" id="btnClear">Clear finished run</button>
             </div>
           </div>
 
@@ -112,9 +112,9 @@
         </div>
 
         <footer>
-          <p><b>It keeps going on its own:</b> the hosting connection is cut after about fifteen minutes. When that happens the app reconnects by itself within a few seconds and carries on from the exact invoice where it stopped. Nothing is skipped and nothing is uploaded twice.</p>
+          <p><b>It runs on the server:</b> once you press Start the work carries on by itself. You can open another page, or close this one, and come back — the log and the progress will still be here.</p>
+          <p><b>Stop works at once:</b> pressing Stop tells the server directly. It finishes the invoice it is on and then stops.</p>
           <p><b>Failures are retried:</b> anything that fails is tried again automatically, up to three more rounds, with a growing pause between them.</p>
-          <p><b>Safe to close:</b> progress is saved as it goes. If you close the app the button becomes Resume and picks up where it stopped.</p>
         </footer>
       </div>
     </div>
@@ -128,31 +128,19 @@
   var $ = function(id){ return document.getElementById(id); };
 
   var invoices = [], negSet = {}, itemCounts = {}, logLines = [];
-  var running = false, stopRequested = false;
-  var doneSet = {}, failedSet = {}, cursor = 0, retryMode = false;
-  var autoRound = 0, MAX_AUTO_ROUNDS = 3;
-  var segStart = 0, autoTimer = null, pendingRetry = null;
-  var STORE = 'sqbo_upload_progress';
+  var lastEventId = 0, poller = null, job = null;
+  var KEEP = 'sqbo_invoices';
 
-  window.APP.ready.then(function(s){
-    if(s.connected){
-      $('main').classList.remove('hide');
-      loadNegatives(function(){ checkIncoming(); });
-    } else {
-      $('gate').classList.remove('hide');
-    }
-  });
-  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  /* ---------- small helpers ---------- */
 
   function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function setStat(el, cls, html){ el.className = 'stat ' + cls; el.innerHTML = html; }
 
   function log(msg, cls){
-    var line = new Date().toLocaleTimeString() + '  ' + msg;
-    logLines.push(line);
+    logLines.push(msg);
     var d = document.createElement('div');
     if(cls) d.className = cls;
-    d.textContent = line;
+    d.textContent = msg;
     $('log').appendChild(d);
     $('log').scrollTop = $('log').scrollHeight;
   }
@@ -173,48 +161,30 @@
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function(){URL.revokeObjectURL(a.href);},4000);
   }
-  function fmtDate(iso){
-    if(!iso) return "";
-    var p=String(iso).split("-");
-    return p.length===3 ? (p[2]+"/"+p[1]+"/"+p[0]) : iso;
-  }
-  function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
 
-  function saveProgress(){
-    try{
-      localStorage.setItem(STORE, JSON.stringify({
-        cursor: cursor,
-        done: Object.keys(doneSet),
-        failed: Object.keys(failedSet),
-        total: invoices.length,
-        first: invoices.length ? invoices[0].docNumber : null,
-        at: Date.now()
-      }));
-    }catch(e){}
-  }
-  function loadProgress(){
-    try{
-      var raw = localStorage.getItem(STORE);
-      return raw ? JSON.parse(raw) : null;
-    }catch(e){ return null; }
-  }
-  function clearProgress(){
-    try{ localStorage.removeItem(STORE); }catch(e){}
+  function post(url, body){
+    return fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
   }
 
-  $('btnClear').addEventListener('click', function(){
-    clearProgress();
-    cursor = 0; doneSet = {}; failedSet = {}; autoRound = 0;
-    if(autoTimer){ clearInterval(autoTimer); autoTimer = null; pendingRetry = null; }
-    $('resumeNote').classList.add('hide');
-    $('resultSec').classList.add('hide');
-    $('btnRetry').style.display = 'none';
-    $('btnStart').textContent = 'Start upload';
-    $('bar').style.width = '0%';
-    $('stat').textContent = 'Ready';
-    updateBatchAside();
-    log('Saved progress cleared.', 'warn');
+  /* ---------- start ---------- */
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('main').classList.remove('hide');
+    loadNegatives(function(){
+      restoreInvoices();
+      checkIncoming();
+      refresh(true);          // pick up whatever the server is already doing
+    });
   });
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
 
   function loadNegatives(done){
     fetch('/api/negative-items')
@@ -224,6 +194,19 @@
         if(done) done();
       })
       .catch(function(){ if(done) done(); });
+  }
+
+  // invoices survive a reload so Start still works after coming back
+  function keepInvoices(){
+    try { sessionStorage.setItem(KEEP, JSON.stringify(invoices)); } catch(e){}
+  }
+  function restoreInvoices(){
+    try {
+      var raw = sessionStorage.getItem(KEEP);
+      if(!raw) return;
+      var list = JSON.parse(raw);
+      if(list && list.length) accept(list, true);
+    } catch(e){}
   }
 
   function checkIncoming(){
@@ -242,6 +225,8 @@
         'To use a file instead, reload this page.';
     } catch(e){}
   }
+
+  /* ---------- file in ---------- */
 
   var z = $('zoneFile'), inp = $('file');
   z.addEventListener('click', function(){ inp.click(); });
@@ -269,8 +254,9 @@
       .catch(function(e){ setStat($('statFile'),'bad','Could not read the file: '+e.message); });
   }
 
-  function accept(list){
+  function accept(list, quiet){
     invoices = list;
+    keepInvoices();
     itemCounts = {};
     list.forEach(function(inv){
       inv.lines.forEach(function(l){
@@ -282,34 +268,21 @@
     buildNegTable();
     $('negSec').classList.remove('hide');
     $('runSec').classList.remove('hide');
-    log('Loaded ' + nf(list.length) + ' invoices.', 'info');
-
-    var p = loadProgress();
-    if(p && p.total === list.length && p.first === list[0].docNumber && p.cursor > 0 && p.cursor < list.length){
-      cursor = p.cursor;
-      doneSet = {}; (p.done||[]).forEach(function(d){ doneSet[d]=1; });
-      failedSet = {}; (p.failed||[]).forEach(function(d){ failedSet[d]=1; });
-      $('resumeNote').classList.remove('hide');
-      $('resumeNote').textContent =
-        'A previous run stopped at invoice ' + nf(cursor) + ' of ' + nf(list.length) + '. ' +
-        Object.keys(doneSet).length + ' uploaded, ' + Object.keys(failedSet).length +
-        ' failed. Press Resume to carry on from there.';
-      $('btnStart').textContent = 'Resume from invoice ' + nf(cursor + 1);
-      $('bar').style.width = Math.round(cursor / list.length * 100) + '%';
-      paintProgress();
-      showResults();
-    } else {
-      clearProgress();
-      cursor = 0; doneSet = {}; failedSet = {}; autoRound = 0;
-    }
+    if(!quiet) log('Loaded ' + nf(list.length) + ' invoices.', 'info');
     updateBatchAside();
   }
 
   function updateBatchAside(){
+    if(job && job.total){
+      var left = Math.max(0, job.total - job.cursor);
+      $('batchAside').textContent = left > 0 ? (nf(left) + ' still to send') : 'all sent';
+      return;
+    }
     if(!invoices.length){ $('batchAside').textContent = ''; return; }
-    var left = invoices.length - cursor;
-    $('batchAside').textContent = left > 0 ? (nf(left) + ' still to send') : 'all sent';
+    $('batchAside').textContent = nf(invoices.length) + ' ready to send';
   }
+
+  /* ---------- negative amounts ---------- */
 
   function buildNegTable(){
     var names = Object.keys(itemCounts).sort();
@@ -399,239 +372,126 @@
     return Object.keys(negSet).filter(function(k){ return negSet[k]; });
   }
 
-  function sendSegment(list){
-    return new Promise(function(resolve){
-      var outcome = { ok:false, broke:false, cancelled:false, moved:0 };
+  /* ---------- talking to the job ---------- */
 
-      fetch('/api/upload', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          invoices: list,
-          delay: (parseFloat($('delay').value) || 1) * 1000,
-          negativeItems: negativeList()
-        })
+  var CLS = { ok:'ok', fail:'err', retry:'warn', error:'err', log:'info' };
+
+  function refresh(first){
+    var u = '/api/upload/status?since=' + lastEventId + (first ? '&full=1' : '');
+    return fetch(u)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d.job){
+          job = null;
+          stopPolling();
+          paint();
+          return;
+        }
+
+        // a different run than the one we were watching - start the log again
+        if(job && d.job.id !== job.id){
+          $('log').innerHTML = '';
+          logLines.length = 0;
+          lastEventId = 0;
+          job = d.job;
+          return refresh(true);
+        }
+
+        job = d.job;
+        (d.job.events || []).forEach(function(e){
+          log(e.msg, CLS[e.type] || '');
+        });
+        if(d.job.lastEventId) lastEventId = d.job.lastEventId;
+
+        if(first && d.job.done){
+          job.doneList = d.job.done;
+          job.failedList = d.job.failed;
+          job.remainingList = d.job.remaining;
+        }
+
+        paint();
+
+        if(d.job.state === 'running' || d.job.state === 'waiting') startPolling();
+        else { stopPolling(); refreshLists(); }
       })
-      .then(function(res){
-        if(!res.ok){
-          return res.json().then(function(d){
-            log('Server refused the request: ' + (d.error || res.status), 'err');
-            outcome.broke = true; resolve(outcome);
-          }).catch(function(){
-            log('Server refused the request (' + res.status + ')', 'err');
-            outcome.broke = true; resolve(outcome);
-          });
-        }
+      .catch(function(){ /* one missed poll is nothing to worry about */ });
+  }
 
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
-        var buffer = '';
-        var lastBeat = Date.now();
-        var settled = false;
-
-        var watchdog = setInterval(function(){
-          if(Date.now() - lastBeat > 90000 && !settled){
-            settled = true;
-            clearInterval(watchdog);
-            try{ reader.cancel(); }catch(e){}
-            log('No response for 90 seconds — dropping this connection.', 'warn');
-            outcome.broke = true;
-            resolve(outcome);
-          }
-        }, 5000);
-
-        function done(){
-          if(settled) return;
-          settled = true;
-          clearInterval(watchdog);
-          resolve(outcome);
-        }
-
-        function pump(){
-          return reader.read().then(function(step){
-            lastBeat = Date.now();
-            if(step.done){ done(); return; }
-            buffer += decoder.decode(step.value, {stream:true});
-            var parts = buffer.split('\n\n');
-            buffer = parts.pop();
-            parts.forEach(function(p){ handle(p, outcome); });
-            return pump();
-          }).catch(function(){ done(); });
-        }
-        return pump();
+  function refreshLists(){
+    fetch('/api/upload/status?since=' + lastEventId + '&full=1')
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d.job) return;
+        job.doneList = d.job.done;
+        job.failedList = d.job.failed;
+        job.remainingList = d.job.remaining;
+        showResults();
       })
-      .catch(function(e){
-        outcome.broke = true;
-        resolve(outcome);
-      });
-    });
+      .catch(function(){});
   }
 
-  function handle(part, outcome){
-    if(part.indexOf('data: ') !== 0) return;
-    var ev;
-    try{ ev = JSON.parse(part.slice(6)); }catch(e){ return; }
-
-    if(ev.type === 'log'){
-      if(!/Connecting to QuickBooks|Loading products|Products loaded/.test(ev.msg) || segStart === 0)
-        log(ev.msg, 'info');
-    }
-    else if(ev.type === 'ok'){
-      log('OK      ' + ev.doc + '   (QB Id ' + ev.id + ')', 'ok');
-      doneSet[ev.doc] = 1; delete failedSet[ev.doc];
-    }
-    else if(ev.type === 'retry') log('retry ' + ev.attempt + '/5  ' + ev.doc + '  ' + ev.msg, 'warn');
-    else if(ev.type === 'fail'){
-      log('FAILED  ' + ev.doc + '  ' + ev.msg, 'err');
-      if(/duplicate document number/i.test(ev.msg)){
-        doneSet[ev.doc] = 1; delete failedSet[ev.doc];
-      } else {
-        failedSet[ev.doc] = 1;
-      }
-    }
-    else if(ev.type === 'error') log('ERROR: ' + ev.msg, 'err');
-    else if(ev.type === 'progress'){
-      outcome.moved = ev.current;
-      if(!retryMode){ cursor = segStart + ev.current; saveProgress(); }
-      paintProgress();
-    }
-    else if(ev.type === 'cancelled'){ outcome.cancelled = true; }
-    else if(ev.type === 'complete'){ outcome.ok = true; }
+  function startPolling(){
+    if(poller) return;
+    poller = setInterval(function(){ refresh(false); }, 2000);
+  }
+  function stopPolling(){
+    if(!poller) return;
+    clearInterval(poller);
+    poller = null;
   }
 
-  function paintProgress(){
-    var pct = invoices.length ? Math.round(cursor / invoices.length * 100) : 0;
-    $('bar').style.width = pct + '%';
-    var d = Object.keys(doneSet).length;
-    var f = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; }).length;
-    $('stat').textContent = d + ' done · ' + f + ' failed · ' +
-      Math.max(0, invoices.length - cursor) + ' remaining';
-  }
+  /* ---------- drawing ---------- */
 
-  async function runAll(list, isRetry){
-    if(running) return;
-    running = true; stopRequested = false; retryMode = !!isRetry;
+  function paint(){
+    var live = job && (job.state === 'running' || job.state === 'waiting');
 
-    if(autoTimer){ clearInterval(autoTimer); autoTimer = null; pendingRetry = null; }
-
-    $('btnStart').style.display = 'none';
-    $('btnStop').style.display = 'block';
+    $('btnStart').style.display = live ? 'none' : 'block';
+    $('btnStop').style.display  = live ? 'block' : 'none';
     $('btnStop').disabled = false;
     $('btnStop').textContent = 'Stop upload';
-    $('btnRetry').style.display = 'none';
-    $('resumeNote').classList.add('hide');
 
-    var at = isRetry ? 0 : cursor;
-    var total = list.length;
-    var reconnects = 0;
-
-    while(at < total){
-      if(stopRequested){ log('Stopped by you.', 'warn'); break; }
-
-      segStart = isRetry ? 0 : at;
-      var out = await sendSegment(list.slice(at));
-
-      if(out.cancelled || stopRequested){ log('Stopped.', 'warn'); break; }
-      if(out.ok){ at = total; if(!isRetry) cursor = total; break; }
-
-      var moved = out.moved || 0;
-      at += moved;
-      if(!isRetry) cursor = at;
-      saveProgress();
-
-      if(at >= total) break;
-
-      reconnects++;
-      if(reconnects > 60){
-        log('Too many reconnections — stopping. Press Resume to carry on.', 'err');
-        break;
-      }
-
-      log('Connection ended after ' + moved + ' invoice' + (moved===1?'':'s') +
-          '. Reconnecting and carrying on from invoice ' + (at + 1) + '…', 'warn');
-      await wait(3000);
-      if(stopRequested) break;
+    if(!job){
+      $('liveNote').classList.add('hide');
+      $('bar').style.width = '0%';
+      $('stat').textContent = invoices.length ? 'Ready' : 'Load a file first';
+      $('btnStart').textContent = 'Start upload';
+      $('btnRetry').style.display = 'none';
+      updateBatchAside();
+      return;
     }
 
-    finish(isRetry);
-  }
+    var pct = job.total ? Math.round(job.cursor / job.total * 100) : 0;
+    $('bar').style.width = pct + '%';
+    $('stat').textContent =
+      nf(job.doneCount) + ' done · ' + nf(job.failedCount) + ' failed · ' +
+      nf(Math.max(0, job.total - job.cursor)) + ' remaining';
 
-  function finish(isRetry){
-    running = false;
-    $('btnStop').style.display = 'none';
-    $('btnStart').style.display = 'block';
-    $('btnStart').disabled = false;
+    if(job.state === 'waiting'){
+      $('liveNote').classList.remove('hide');
+      $('liveNote').textContent =
+        'Waiting before retry round ' + job.round + '. The server is handling it — you can leave this page.';
+    } else if(job.state === 'running'){
+      $('liveNote').classList.remove('hide');
+      $('liveNote').textContent =
+        'Running on the server. You can move to another page and come back — nothing will be lost.';
+    } else {
+      $('liveNote').classList.add('hide');
+    }
 
-    var mainLeft = invoices.length - cursor;
-    $('btnStart').textContent = mainLeft > 0
-      ? 'Resume from invoice ' + nf(cursor + 1)
-      : 'Start upload';
+    $('btnStart').textContent = invoices.length ? 'Start upload' : 'Load a file first';
+    $('btnRetry').style.display = (!live && job.failedCount) ? 'inline-block' : 'none';
+    if(job.failedCount) $('btnRetry').textContent = 'Retry failed only (' + job.failedCount + ')';
 
-    showResults();
     updateBatchAside();
-    paintProgress();
-
-    var failedOnly = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
-
-    if(failedOnly.length){
-      $('btnRetry').style.display = 'inline-block';
-      $('btnRetry').textContent = 'Retry failed only (' + failedOnly.length + ')';
-    }
-
-    var mainDone = mainLeft <= 0;
-
-    if(failedOnly.length && mainDone && !stopRequested && autoRound < MAX_AUTO_ROUNDS){
-      autoRound++;
-      var pause = autoRound * 120;
-      var set = {};
-      failedOnly.forEach(function(d){ set[d] = 1; });
-      var list2 = invoices.filter(function(inv){ return set[inv.docNumber]; });
-
-      if(list2.length){
-        log('Retry round ' + autoRound + ' of ' + MAX_AUTO_ROUNDS + ' — ' + list2.length +
-            ' failed invoice' + (list2.length===1?'':'s') + ', starting in ' + pause + ' seconds.', 'warn');
-
-        pendingRetry = list2;
-        var left = pause;
-        $('btnStart').textContent = 'Retrying ' + list2.length + ' in ' + left + 's — press to start now';
-
-        autoTimer = setInterval(function(){
-          left--;
-          if(stopRequested || running){
-            clearInterval(autoTimer); autoTimer = null; pendingRetry = null;
-            return;
-          }
-          if(left <= 0){
-            clearInterval(autoTimer); autoTimer = null;
-            var go = pendingRetry; pendingRetry = null;
-            if(go && go.length) runAll(go, true);
-            return;
-          }
-          $('btnStart').textContent = 'Retrying ' + list2.length + ' in ' + left + 's — press to start now';
-        }, 1000);
-        return;
-      }
-    }
-
-    if(mainDone && !failedOnly.length){
-      log('--- All invoices uploaded ---', 'ok');
-      clearProgress();
-    } else if(mainDone && failedOnly.length && autoRound >= MAX_AUTO_ROUNDS){
-      log('--- ' + failedOnly.length + ' invoice' + (failedOnly.length===1?'':'s') +
-          ' still failing after ' + MAX_AUTO_ROUNDS + ' automatic rounds. ' +
-          'Use Retry failed only, or download the list below. ---', 'warn');
-    }
-  }
-
-  function remainingDocs(){
-    return invoices.slice(cursor).map(function(x){ return x.docNumber; });
+    if(!live) showResults();
   }
 
   function showResults(){
+    if(!job) return;
     $('resultSec').classList.remove('hide');
-    var d = Object.keys(doneSet);
-    var f = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
-    var r = remainingDocs();
+    var d = job.doneList || [];
+    var f = job.failedList || [];
+    var r = job.remainingList || [];
     $('resAside').textContent =
       nf(d.length) + ' uploaded · ' + nf(f.length) + ' failed · ' + nf(r.length) + ' not yet uploaded';
     $('dlDone').disabled = !d.length;
@@ -640,82 +500,89 @@
     $('dlRemainingFile').disabled = !r.length;
   }
 
+  /* ---------- buttons ---------- */
+
   $('btnStart').addEventListener('click', function(){
     if(!invoices.length){ log('Load a file first.', 'err'); return; }
 
-    if(autoTimer && pendingRetry && pendingRetry.length){
-      clearInterval(autoTimer); autoTimer = null;
-      var go = pendingRetry; pendingRetry = null;
-      log('Starting the retry now.', 'warn');
-      runAll(go, true);
-      return;
-    }
+    $('btnStart').disabled = true;
+    $('log').innerHTML = '';
+    logLines.length = 0;
+    lastEventId = 0;
+    job = null;
 
-    if(cursor === 0){ $('log').innerHTML = ''; logLines.length = 0; autoRound = 0; }
-    runAll(invoices, false);
+    post('/api/upload/start', {
+      invoices: invoices,
+      delay: (parseFloat($('delay').value) || 1) * 1000,
+      negativeItems: negativeList()
+    }).then(function(){
+      $('btnStart').disabled = false;
+      refresh(true);
+      startPolling();
+    }).catch(function(e){
+      $('btnStart').disabled = false;
+      log(e.message, 'err');
+    });
   });
 
   $('btnStop').addEventListener('click', function(){
-    stopRequested = true;
-    if(autoTimer){ clearInterval(autoTimer); autoTimer = null; pendingRetry = null; }
     $('btnStop').disabled = true;
     $('btnStop').textContent = 'Stopping…';
-    log('Stop requested — finishing the current invoice…', 'warn');
-    fetch('/api/upload-cancel', { method:'POST' }).catch(function(){});
+    post('/api/upload/stop').catch(function(){});
   });
 
   $('btnRetry').addEventListener('click', function(){
-    var failedOnly = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
-    var set = {};
-    failedOnly.forEach(function(d){ set[d] = 1; });
-    var list = invoices.filter(function(inv){ return set[inv.docNumber]; });
-    if(!list.length) return;
-    log('Retrying ' + list.length + ' failed invoices…', 'warn');
-    runAll(list, true);
+    $('btnRetry').disabled = true;
+    post('/api/upload/retry').then(function(){
+      $('btnRetry').disabled = false;
+      lastEventId = 0;
+      $('log').innerHTML = '';
+      logLines.length = 0;
+      job = null;
+      refresh(true);
+      startPolling();
+    }).catch(function(e){
+      $('btnRetry').disabled = false;
+      log(e.message, 'err');
+    });
   });
 
+  $('btnClear').addEventListener('click', function(){
+    post('/api/upload/clear').then(function(){
+      job = null;
+      lastEventId = 0;
+      $('log').innerHTML = '';
+      logLines.length = 0;
+      $('resultSec').classList.add('hide');
+      paint();
+      log('Finished run cleared.', 'warn');
+    }).catch(function(e){
+      log(e.message, 'err');
+    });
+  });
+
+  /* ---------- downloads ---------- */
+
   $('dlDone').addEventListener('click', function(){
-    var d = Object.keys(doneSet);
+    var d = (job && job.doneList) || [];
     if(!d.length) return;
     download('uploaded-invoices.csv', buildCSV(['Invoice number'], d.map(function(x){ return [x]; })));
   });
 
   $('dlFailed').addEventListener('click', function(){
-    var f = Object.keys(failedSet).filter(function(k){ return !doneSet[k]; });
+    var f = (job && job.failedList) || [];
     if(!f.length) return;
     download('failed-invoices.csv', buildCSV(['Invoice number'], f.map(function(x){ return [x]; })));
   });
 
   $('dlRemaining').addEventListener('click', function(){
-    var r = remainingDocs();
+    var r = (job && job.remainingList) || [];
     if(!r.length) return;
     download('not-yet-uploaded.csv', buildCSV(['Invoice number'], r.map(function(x){ return [x]; })));
   });
 
-  var HEADER = ["*InvoiceNo","*Customer","*InvoiceDate","*DueDate","Terms","Location","Memo",
-    "Item(Product/Service)","ItemDescription","ItemQuantity","ItemRate","*ItemAmount","Service Date"];
-
   $('dlRemainingFile').addEventListener('click', function(){
-    var list = invoices.slice(cursor);
-    if(!list.length) return;
-    var negs = {};
-    negativeList().forEach(function(k){ negs[k] = 1; });
-    var rows = [];
-    list.forEach(function(inv){
-      inv.lines.forEach(function(l){
-        var amt = l.amt, rate = l.rate || l.amt;
-        if(negs[String(l.item).toLowerCase()]){
-          amt = -Math.abs(amt); rate = -Math.abs(rate);
-        }
-        rows.push([
-          inv.docNumber, inv.customer, fmtDate(inv.txnDate), fmtDate(inv.dueDate),
-          inv.terms || '', '', inv.memo || '', l.item, l.desc || '',
-          Number(l.qty).toFixed(2), Number(rate).toFixed(2), Number(amt).toFixed(2),
-          fmtDate(l.svc || inv.txnDate)
-        ]);
-      });
-    });
-    download('remaining-invoices-import.csv', buildCSV(HEADER, rows));
+    location.href = '/api/upload/remaining-file';
   });
 
   $('btnCopyLog').addEventListener('click', function(){
