@@ -25,6 +25,7 @@ import {
 } from './cpr.js';
 import { inspectExcel, writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
+import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -1343,178 +1344,94 @@ app.post('/api/cpr/receive', async (req, res) => {
   }
 });
 // ==================== Upload ====================
-function buildPayload(inv, customerId, itemMap, termMap, negSet) {
-  const lines = [];
+// the work happens in a server-side job now, so leaving the page changes nothing
 
-  for (const L of inv.lines) {
-    const itemId = itemMap[L.item.toLowerCase()];
-    if (!itemId) throw new Error(`Item not found in QuickBooks: "${L.item}"`);
-
-    let amount = L.amt;
-    let rate = L.rate || L.amt;
-    if (negSet.has(L.item.toLowerCase())) {
-      amount = -Math.abs(amount);
-      rate = -Math.abs(rate);
-    }
-
-    const detail = { ItemRef: { value: itemId }, Qty: L.qty, UnitPrice: rate };
-    if (L.svc) detail.ServiceDate = L.svc;
-
-    const line = { DetailType: 'SalesItemLineDetail', Amount: amount, SalesItemLineDetail: detail };
-    if (L.desc) line.Description = L.desc;
-    lines.push(line);
-  }
-
-  const p = { DocNumber: inv.docNumber, CustomerRef: { value: customerId }, Line: lines };
-  if (inv.txnDate) p.TxnDate = inv.txnDate;
-  if (inv.dueDate) p.DueDate = inv.dueDate;
-  if (inv.memo) p.CustomerMemo = { value: inv.memo };
-
-  const termId = termMap[(inv.terms || '').toLowerCase()];
-  if (termId) p.SalesTermRef = { value: termId };
-
-  return p;
-}
-
-const cancelFlags = new Map();
-
-function sleepUnlessCancelled(ms, realmId, isGone) {
-  return new Promise(resolve => {
-    const step = 250;
-    let waited = 0;
-    const t = setInterval(() => {
-      waited += step;
-      if (waited >= ms || cancelFlags.get(realmId) || isGone()) {
-        clearInterval(t);
-        resolve();
-      }
-    }, step);
-  });
-}
-
-app.post('/api/upload-cancel', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-  cancelFlags.set(realmId, true);
-  res.json({ ok: true });
-});
-
-app.post('/api/upload', async (req, res) => {
+app.post('/api/upload/start', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const { invoices, delay = 1500, negativeItems = [] } = req.body;
+  const { invoices, delay = 1000, negativeItems = [] } = req.body;
   if (!Array.isArray(invoices) || !invoices.length) {
     return res.status(400).json({ error: 'No invoices provided' });
   }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-
-  const send = obj => {
-    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch (e) {}
-  };
-  const negSet = new Set(negativeItems.map(s => String(s).toLowerCase()));
-
-  const heartbeat = setInterval(() => {
-    try { res.write(': ping\n\n'); } catch (e) {}
-  }, 10000);
-
-  let clientGone = false;
-  req.on('close', () => {
-    clientGone = true;
-    clearInterval(heartbeat);
-    cancelFlags.set(realmId, true);
-  });
-  const isGone = () => clientGone;
-
   try {
-    send({ type: 'log', msg: 'Connecting to QuickBooks...' });
-    const token = await getAccessToken(realmId);
-
-    send({ type: 'log', msg: 'Loading products...' });
-    const itemMap = await loadItems(realmId, token);
-    send({ type: 'log', msg: `Products loaded: ${Object.keys(itemMap).length}` });
-
-    const termMap = await loadTerms(realmId, token);
-    const custCache = {};
-
-    let done = 0, failed = 0;
-    const failedList = [];
-    const doneList = [];
-    let cancelled = false;
-
-    cancelFlags.delete(realmId);
-
-    for (let i = 0; i < invoices.length; i++) {
-      if (clientGone || cancelFlags.get(realmId)) {
-        cancelled = true;
-        cancelFlags.delete(realmId);
-        const remaining = invoices.slice(i).map(x => x.docNumber);
-        send({ type: 'cancelled', done, failed, doneList, failedList, remaining });
-        break;
-      }
-
-      const inv = invoices[i];
-      let success = false, lastErr = '';
-
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        if (clientGone || cancelFlags.get(realmId)) break;
-        try {
-          const custId = await getOrCreateCustomer(realmId, token, inv.customer, custCache);
-          const payload = buildPayload(inv, custId, itemMap, termMap, negSet);
-          const result = await postInvoice(realmId, token, payload);
-
-          if (result.ok) {
-            send({ type: 'ok', doc: inv.docNumber, id: result.id });
-            await logUpload(realmId, inv.docNumber, 'success', `QB Id ${result.id}`, result.tid);
-            success = true;
-            break;
-          }
-
-          lastErr = `${result.msg} [tid=${result.tid}]`;
-          if (!result.retryable) break;
-
-          send({ type: 'retry', doc: inv.docNumber, attempt, msg: result.msg.slice(0, 100) });
-          await sleepUnlessCancelled(attempt * 5000, realmId, isGone);
-
-        } catch (e) {
-          lastErr = e.message;
-          if (/not found in QuickBooks/.test(e.message)) break;
-          send({ type: 'retry', doc: inv.docNumber, attempt, msg: e.message.slice(0, 100) });
-          await sleepUnlessCancelled(attempt * 5000, realmId, isGone);
-        }
-      }
-
-      if (success) { done++; doneList.push(inv.docNumber); }
-      else {
-        failed++;
-        failedList.push(inv.docNumber);
-        send({ type: 'fail', doc: inv.docNumber, msg: lastErr.slice(0, 250) });
-        await logUpload(realmId, inv.docNumber, 'failed', lastErr, null);
-      }
-
-      send({ type: 'progress', done, failed, total: invoices.length, current: i + 1 });
-      if (i < invoices.length - 1) {
-        await sleepUnlessCancelled(Number(delay), realmId, isGone);
-      }
-    }
-
-    if (!cancelled) send({ type: 'complete', done, failed, doneList, failedList });
-    clearInterval(heartbeat);
-    res.end();
-
-  } catch (err) {
-    cancelFlags.delete(realmId);
-    send({ type: 'error', msg: err.message });
-    clearInterval(heartbeat);
-    res.end();
+    const id = startJob(realmId, { invoices, delay, negativeItems });
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
   }
 });
 
+app.get('/api/upload/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const snap = snapshot(realmId, req.query.since || 0, req.query.full === '1');
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/upload/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopJob(realmId) });
+});
+
+app.post('/api/upload/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearJob(realmId);
+  if (!ok) return res.status(409).json({ error: 'The upload is still running' });
+  res.json({ ok: true });
+});
+
+app.post('/api/upload/retry', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.json({ ok: true, jobId: retryFailed(realmId) });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+// whatever has not been sent yet, back in QuickBooks import shape
+app.get('/api/upload/remaining-file', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const list = remainingInvoices(realmId);
+  if (!list.length) return res.status(404).json({ error: 'Nothing left to send' });
+
+  const HEADER = ['*InvoiceNo','*Customer','*InvoiceDate','*DueDate','Terms','Location','Memo',
+    'Item(Product/Service)','ItemDescription','ItemQuantity','ItemRate','*ItemAmount','Service Date'];
+
+  const cell = v => {
+    const s = v == null ? '' : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const dmy = iso => {
+    if (!iso) return '';
+    const p = String(iso).split('-');
+    return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : iso;
+  };
+
+  const rows = [HEADER.join(',')];
+  list.forEach(inv => {
+    inv.lines.forEach(l => {
+      rows.push([
+        inv.docNumber, inv.customer, dmy(inv.txnDate), dmy(inv.dueDate),
+        inv.terms || '', '', inv.memo || '', l.item, l.desc || '',
+        Number(l.qty).toFixed(2), Number(l.rate || l.amt).toFixed(2), Number(l.amt).toFixed(2),
+        dmy(l.svc || inv.txnDate)
+      ].map(cell).join(','));
+    });
+  });
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="remaining-invoices-import.csv"');
+  res.send('\uFEFF' + rows.join('\r\n') + '\r\n');
+});
 // ==================== Start ====================
 const PORT = process.env.PORT || 3000;
 
