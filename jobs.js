@@ -6,12 +6,20 @@ const jobs = new Map();
 const MAX_EVENTS = 4000;
 const MAX_AUTO_ROUNDS = 3;
 
+// QuickBooks access tokens last an hour - refresh well before that
+const TOKEN_LIFE = 40 * 60 * 1000;
+
 function push(job, type, msg, extra) {
   job.lastId++;
   job.events.push(Object.assign({ id: job.lastId, type, msg }, extra || {}));
   if (job.events.length > MAX_EVENTS) {
     job.events.splice(0, job.events.length - MAX_EVENTS);
   }
+}
+
+function isAuthError(msg, status) {
+  return status === 401 ||
+    /AuthenticationFailed|003200|Unauthorized|token expired|invalid_grant/i.test(String(msg || ''));
 }
 
 function buildPayload(inv, customerId, itemMap, termMap, negSet) {
@@ -59,9 +67,20 @@ function nap(job, ms) {
   });
 }
 
+// hands back a token that is still good, fetching a new one when it has aged
+async function tokenFor(realmId, job, force) {
+  if (force || !job.token || (Date.now() - job.tokenAt) > TOKEN_LIFE) {
+    job.token = await getAccessToken(realmId);
+    job.tokenAt = Date.now();
+    job.custCache = {};                 // customer ids are fine, but start clean after a re-auth
+    if (force) push(job, 'log', 'QuickBooks sign-in had expired - signed in again.');
+  }
+  return job.token;
+}
+
 export function startJob(realmId, { invoices, delay, negativeItems }) {
   const live = jobs.get(realmId);
-  if (live && live.state === 'running') {
+  if (live && (live.state === 'running' || live.state === 'waiting')) {
     throw new Error('An upload is already running for this company');
   }
 
@@ -79,13 +98,16 @@ export function startJob(realmId, { invoices, delay, negativeItems }) {
     events: [],
     lastId: 0,
     round: 0,
+    token: null,
+    tokenAt: 0,
+    custCache: {},
     startedAt: Date.now(),
     finishedAt: null
   };
 
   jobs.set(realmId, job);
   run(realmId, job).catch(e => {
-    push(job, 'error', e.message);
+    push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
     job.finishedAt = Date.now();
   });
@@ -93,17 +115,19 @@ export function startJob(realmId, { invoices, delay, negativeItems }) {
   return job.id;
 }
 
-async function pass(realmId, job, token, itemMap, termMap, custCache, list, isRetry) {
+async function pass(realmId, job, itemMap, termMap, list, isRetry) {
   for (let i = 0; i < list.length; i++) {
     if (job.stop) return;
 
     const inv = list[i];
     let ok = false, lastErr = '';
+    let reAuthed = false;
 
     for (let attempt = 1; attempt <= 5; attempt++) {
       if (job.stop) return;
       try {
-        const custId = await getOrCreateCustomer(realmId, token, inv.customer, custCache);
+        const token = await tokenFor(realmId, job);
+        const custId = await getOrCreateCustomer(realmId, token, inv.customer, job.custCache);
         const payload = buildPayload(inv, custId, itemMap, termMap, job.negSet);
         const result = await postInvoice(realmId, token, payload);
 
@@ -127,12 +151,28 @@ async function pass(realmId, job, token, itemMap, termMap, custCache, list, isRe
           break;
         }
 
+        // the hour ran out - get a new token and have another go straight away
+        if (isAuthError(result.msg, result.status)) {
+          if (!reAuthed) {
+            reAuthed = true;
+            await tokenFor(realmId, job, true);
+            attempt--;                   // this try does not count against the invoice
+            continue;
+          }
+        }
+
         if (!result.retryable) break;
         push(job, 'retry', `retry ${attempt}/5  ${inv.docNumber}  ${result.msg.slice(0, 100)}`);
         await nap(job, attempt * 5000);
 
       } catch (e) {
         lastErr = e.message;
+
+        if (isAuthError(e.message, 0) && !reAuthed) {
+          reAuthed = true;
+          try { await tokenFor(realmId, job, true); attempt--; continue; } catch (e2) {}
+        }
+
         if (/not found in QuickBooks/.test(e.message)) break;
         push(job, 'retry', `retry ${attempt}/5  ${inv.docNumber}  ${e.message.slice(0, 100)}`);
         await nap(job, attempt * 5000);
@@ -152,16 +192,15 @@ async function pass(realmId, job, token, itemMap, termMap, custCache, list, isRe
 
 async function run(realmId, job) {
   push(job, 'log', 'Connecting to QuickBooks...');
-  const token = await getAccessToken(realmId);
+  const token = await tokenFor(realmId, job);
 
   push(job, 'log', 'Loading products...');
   const itemMap = await loadItems(realmId, token);
   push(job, 'log', `Products loaded: ${Object.keys(itemMap).length}`);
 
   const termMap = await loadTerms(realmId, token);
-  const custCache = {};
 
-  await pass(realmId, job, token, itemMap, termMap, custCache, job.invoices, false);
+  await pass(realmId, job, itemMap, termMap, job.invoices, false);
 
   // automatic retry rounds for whatever is still failing
   while (!job.stop && job.round < MAX_AUTO_ROUNDS) {
@@ -178,7 +217,7 @@ async function run(realmId, job) {
 
     const set = new Set(stuck);
     const list = job.invoices.filter(inv => set.has(inv.docNumber));
-    await pass(realmId, job, token, itemMap, termMap, custCache, list, true);
+    await pass(realmId, job, itemMap, termMap, list, true);
   }
 
   const stuck = [...job.failed].filter(d => !job.done.has(d));
@@ -207,7 +246,7 @@ export function stopJob(realmId) {
 
 export function clearJob(realmId) {
   const job = jobs.get(realmId);
-  if (job && job.state === 'running') return false;
+  if (job && (job.state === 'running' || job.state === 'waiting')) return false;
   jobs.delete(realmId);
   return true;
 }
