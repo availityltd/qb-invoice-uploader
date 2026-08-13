@@ -72,7 +72,6 @@ async function tokenFor(realmId, job, force) {
   if (force || !job.token || (Date.now() - job.tokenAt) > TOKEN_LIFE) {
     job.token = await getAccessToken(realmId);
     job.tokenAt = Date.now();
-    job.custCache = {};                 // customer ids are fine, but start clean after a re-auth
     if (force) push(job, 'log', 'QuickBooks sign-in had expired - signed in again.');
   }
   return job.token;
