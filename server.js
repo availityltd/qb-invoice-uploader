@@ -1350,13 +1350,13 @@ app.post('/api/upload/start', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const { invoices, delay = 1000, negativeItems = [] } = req.body;
+ const { invoices, delay = 1000, negativeItems = [], batchSize = 30 } = req.body;
   if (!Array.isArray(invoices) || !invoices.length) {
     return res.status(400).json({ error: 'No invoices provided' });
   }
 
   try {
-    const id = startJob(realmId, { invoices, delay, negativeItems });
+   const id = startJob(realmId, { invoices, delay, negativeItems, batchSize });
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
