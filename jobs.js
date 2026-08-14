@@ -1,13 +1,17 @@
-import { getAccessToken, loadItems, loadTerms, getOrCreateCustomer, postInvoice } from './qb.js';
+import { getAccessToken, loadItems, loadTerms, getOrCreateCustomer, postInvoiceBatch } from './qb.js';
 import { logUpload } from './db.js';
 
 // one running job per company, kept on the server so it survives page changes
 const jobs = new Map();
 const MAX_EVENTS = 4000;
-const MAX_AUTO_ROUNDS = 3;
+const MAX_ROUNDS = 5;
 
 // QuickBooks access tokens last an hour - refresh well before that
 const TOKEN_LIFE = 40 * 60 * 1000;
+
+// QB locks inventory while it writes - after a run of dead batches, back right off
+const DEAD_BATCH_STREAK = 3;
+const COOL_DOWN = 5 * 60 * 1000;
 
 function push(job, type, msg, extra) {
   job.lastId++;
@@ -20,6 +24,10 @@ function push(job, type, msg, extra) {
 function isAuthError(msg, status) {
   return status === 401 ||
     /AuthenticationFailed|003200|Unauthorized|token expired|invalid_grant/i.test(String(msg || ''));
+}
+
+function isDuplicate(msg) {
+  return /duplicate document number/i.test(String(msg || ''));
 }
 
 function buildPayload(inv, customerId, itemMap, termMap, negSet) {
@@ -77,11 +85,15 @@ async function tokenFor(realmId, job, force) {
   return job.token;
 }
 
-export function startJob(realmId, { invoices, delay, negativeItems }) {
+export function startJob(realmId, { invoices, delay, negativeItems, batchSize }) {
   const live = jobs.get(realmId);
   if (live && (live.state === 'running' || live.state === 'waiting')) {
     throw new Error('An upload is already running for this company');
   }
+
+  let size = Number(batchSize) || 30;
+  if (size < 1) size = 1;
+  if (size > 30) size = 30;          // QuickBooks will not take more than 30
 
   const job = {
     id: Date.now(),
@@ -91,12 +103,14 @@ export function startJob(realmId, { invoices, delay, negativeItems }) {
     total: invoices.length,
     cursor: 0,
     delay: Number(delay) || 1000,
+    batchSize: size,
     negSet: new Set((negativeItems || []).map(s => String(s).toLowerCase())),
     done: new Set(),
     failed: new Set(),
     events: [],
     lastId: 0,
     round: 0,
+    streak: 0,
     token: null,
     tokenAt: 0,
     custCache: {},
@@ -114,79 +128,146 @@ export function startJob(realmId, { invoices, delay, negativeItems }) {
   return job.id;
 }
 
+// one trip to QuickBooks with up to batchSize invoices on board
+async function sendChunk(realmId, job, itemMap, termMap, chunk) {
+  const token = await tokenFor(realmId, job);
+  const ready = [];
+  const rejected = [];
+
+  for (const inv of chunk) {
+    try {
+      const custId = await getOrCreateCustomer(realmId, token, inv.customer, job.custCache);
+      ready.push({ inv, payload: buildPayload(inv, custId, itemMap, termMap, job.negSet) });
+    } catch (e) {
+      // a missing product or a customer we could not reach - nothing a retry will fix
+      rejected.push({ inv, msg: e.message, retryable: !/not found in QuickBooks/i.test(e.message) });
+    }
+  }
+
+  const results = ready.length
+    ? await postInvoiceBatch(realmId, token, ready.map(r => r.payload))
+    : [];
+
+  const out = [];
+
+  results.forEach(r => {
+    const inv = ready[r.index].inv;
+    if (r.ok) {
+      out.push({ inv, ok: true, id: r.id });
+    } else if (isDuplicate(r.msg)) {
+      out.push({ inv, ok: true, id: null, already: true });
+    } else {
+      out.push({ inv, ok: false, msg: r.msg, status: r.status, retryable: r.retryable, tid: r.tid });
+    }
+  });
+
+  rejected.forEach(x => {
+    out.push({ inv: x.inv, ok: false, msg: x.msg, status: 0, retryable: x.retryable });
+  });
+
+  return out;
+}
+
 async function pass(realmId, job, itemMap, termMap, list, isRetry) {
-  for (let i = 0; i < list.length; i++) {
-    if (job.stop) return;
+  let pending = list;
 
-    const inv = list[i];
-    let ok = false, lastErr = '';
-    let reAuthed = false;
+  for (let round = 1; round <= MAX_ROUNDS && pending.length && !job.stop; round++) {
+    const again = [];
+    let firstRound = (round === 1);
 
-    for (let attempt = 1; attempt <= 5; attempt++) {
+    for (let i = 0; i < pending.length; i += job.batchSize) {
       if (job.stop) return;
+
+      // several dead batches in a row means QuickBooks is busy, not that we are wrong
+      if (job.streak >= DEAD_BATCH_STREAK) {
+        push(job, 'log', `${job.streak} batches failed in a row - QuickBooks looks busy. Pausing 5 minutes.`);
+        job.state = 'waiting';
+        await nap(job, COOL_DOWN);
+        if (job.stop) return;
+        job.state = 'running';
+        job.streak = 0;
+      }
+
+      const chunk = pending.slice(i, i + job.batchSize);
+      let results;
+
       try {
-        const token = await tokenFor(realmId, job);
-        const custId = await getOrCreateCustomer(realmId, token, inv.customer, job.custCache);
-        const payload = buildPayload(inv, custId, itemMap, termMap, job.negSet);
-        const result = await postInvoice(realmId, token, payload);
-
-        if (result.ok) {
-          push(job, 'ok', `OK      ${inv.docNumber}   (QB Id ${result.id})`, { doc: inv.docNumber });
-          job.done.add(inv.docNumber);
-          job.failed.delete(inv.docNumber);
-          try { await logUpload(realmId, inv.docNumber, 'success', `QB Id ${result.id}`, result.tid); } catch (e) {}
-          ok = true;
-          break;
-        }
-
-        lastErr = `${result.msg} [tid=${result.tid}]`;
-
-        // QB already has it - that counts as done, not failed
-        if (/duplicate document number/i.test(result.msg)) {
-          push(job, 'ok', `OK      ${inv.docNumber}   (already in QuickBooks)`, { doc: inv.docNumber });
-          job.done.add(inv.docNumber);
-          job.failed.delete(inv.docNumber);
-          ok = true;
-          break;
-        }
-
-        // the hour ran out - get a new token and have another go straight away
-        if (isAuthError(result.msg, result.status)) {
-          if (!reAuthed) {
-            reAuthed = true;
+        results = await sendChunk(realmId, job, itemMap, termMap, chunk);
+      } catch (e) {
+        if (isAuthError(e.message, 0)) {
+          try {
             await tokenFor(realmId, job, true);
-            attempt--;                   // this try does not count against the invoice
+            results = await sendChunk(realmId, job, itemMap, termMap, chunk);
+          } catch (e2) {
+            push(job, 'error', 'Batch failed: ' + e2.message);
+            chunk.forEach(inv => again.push(inv));
+            job.streak++;
             continue;
           }
+        } else {
+          push(job, 'error', 'Batch failed: ' + e.message);
+          chunk.forEach(inv => again.push(inv));
+          job.streak++;
+          continue;
         }
-
-        if (!result.retryable) break;
-        push(job, 'retry', `retry ${attempt}/5  ${inv.docNumber}  ${result.msg.slice(0, 100)}`);
-        await nap(job, attempt * 5000);
-
-      } catch (e) {
-        lastErr = e.message;
-
-        if (isAuthError(e.message, 0) && !reAuthed) {
-          reAuthed = true;
-          try { await tokenFor(realmId, job, true); attempt--; continue; } catch (e2) {}
-        }
-
-        if (/not found in QuickBooks/.test(e.message)) break;
-        push(job, 'retry', `retry ${attempt}/5  ${inv.docNumber}  ${e.message.slice(0, 100)}`);
-        await nap(job, attempt * 5000);
       }
+
+      let goodInChunk = 0;
+      let sawAuth = false;
+
+      for (const r of results) {
+        if (r.ok) {
+          goodInChunk++;
+          job.done.add(r.inv.docNumber);
+          job.failed.delete(r.inv.docNumber);
+          push(job, 'ok',
+            `OK      ${r.inv.docNumber}   ${r.already ? '(already in QuickBooks)' : '(QB Id ' + r.id + ')'}`,
+            { doc: r.inv.docNumber });
+          if (!r.already) {
+            try { await logUpload(realmId, r.inv.docNumber, 'success', `QB Id ${r.id}`, null); } catch (e) {}
+          }
+          continue;
+        }
+
+        if (isAuthError(r.msg, r.status)) sawAuth = true;
+
+        if (r.retryable && round < MAX_ROUNDS) {
+          again.push(r.inv);
+          push(job, 'retry', `retry ${round}/${MAX_ROUNDS}  ${r.inv.docNumber}  ${String(r.msg).slice(0, 100)}`);
+        } else {
+          job.failed.add(r.inv.docNumber);
+          push(job, 'fail', `FAILED  ${r.inv.docNumber}  ${String(r.msg).slice(0, 250)}`, { doc: r.inv.docNumber });
+          try { await logUpload(realmId, r.inv.docNumber, 'failed', r.msg, r.tid || null); } catch (e) {}
+        }
+      }
+
+      if (sawAuth) await tokenFor(realmId, job, true);
+
+      job.streak = goodInChunk ? 0 : job.streak + 1;
+
+      if (firstRound && !isRetry) {
+        job.cursor = Math.min(job.total, i + chunk.length);
+      }
+
+      if (i + job.batchSize < pending.length) await nap(job, job.delay);
     }
 
-    if (!ok) {
-      job.failed.add(inv.docNumber);
-      push(job, 'fail', `FAILED  ${inv.docNumber}  ${lastErr.slice(0, 250)}`, { doc: inv.docNumber });
-      try { await logUpload(realmId, inv.docNumber, 'failed', lastErr, null); } catch (e) {}
+    if (again.length && round < MAX_ROUNDS && !job.stop) {
+      const wait = round * 15;
+      push(job, 'log', `${again.length} invoice${again.length === 1 ? '' : 's'} to try again - waiting ${wait} seconds.`);
+      job.state = 'waiting';
+      await nap(job, wait * 1000);
+      if (job.stop) return;
+      job.state = 'running';
     }
 
-    if (!isRetry) job.cursor = i + 1;
-    if (i < list.length - 1) await nap(job, job.delay);
+    pending = again;
   }
+
+  // whatever is still standing after every round is a real failure
+  pending.forEach(inv => {
+    if (!job.done.has(inv.docNumber)) job.failed.add(inv.docNumber);
+  });
 }
 
 async function run(realmId, job) {
@@ -199,25 +280,8 @@ async function run(realmId, job) {
 
   const termMap = await loadTerms(realmId, token);
 
+  push(job, 'log', `Sending ${job.total} invoices in batches of ${job.batchSize}.`);
   await pass(realmId, job, itemMap, termMap, job.invoices, false);
-
-  // automatic retry rounds for whatever is still failing
-  while (!job.stop && job.round < MAX_AUTO_ROUNDS) {
-    const stuck = [...job.failed].filter(d => !job.done.has(d));
-    if (!stuck.length) break;
-
-    job.round++;
-    const pause = job.round * 120;
-    push(job, 'log', `Retry round ${job.round} of ${MAX_AUTO_ROUNDS} - ${stuck.length} invoice${stuck.length === 1 ? '' : 's'}, starting in ${pause} seconds.`);
-    job.state = 'waiting';
-    await nap(job, pause * 1000);
-    if (job.stop) break;
-    job.state = 'running';
-
-    const set = new Set(stuck);
-    const list = job.invoices.filter(inv => set.has(inv.docNumber));
-    await pass(realmId, job, itemMap, termMap, list, true);
-  }
 
   const stuck = [...job.failed].filter(d => !job.done.has(d));
 
@@ -232,6 +296,7 @@ async function run(realmId, job) {
     job.state = 'done';
   }
 
+  job.cursor = job.total;
   job.finishedAt = Date.now();
 }
 
@@ -239,7 +304,7 @@ export function stopJob(realmId) {
   const job = jobs.get(realmId);
   if (!job) return false;
   job.stop = true;
-  push(job, 'log', 'Stop requested - finishing the current invoice...');
+  push(job, 'log', 'Stop requested - finishing the batch in flight...');
   return true;
 }
 
@@ -266,7 +331,8 @@ export function retryFailed(realmId) {
   return startJob(realmId, {
     invoices: list,
     delay: job.delay,
-    negativeItems: [...job.negSet]
+    negativeItems: [...job.negSet],
+    batchSize: job.batchSize
   });
 }
 
@@ -284,6 +350,7 @@ export function snapshot(realmId, since, full) {
     failedCount: [...job.failed].filter(d => !job.done.has(d)).length,
     round: job.round,
     delay: job.delay,
+    batchSize: job.batchSize,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     events: job.events.filter(e => e.id > (Number(since) || 0)),
