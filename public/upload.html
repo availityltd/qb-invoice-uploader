@@ -381,8 +381,8 @@
   var CLS = { ok:'ok', fail:'err', retry:'warn', error:'err', log:'info' };
 
   function refresh(first){
-    var u = '/api/upload/status?since=' + lastEventId + (first ? '&full=1' : '');
-    return fetch(u)
+   var u = '/api/upload/status?since=' + lastEventId + (first ? '&full=1' : '');
+    return fetch(u, { cache: 'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(!d.job){
@@ -422,7 +422,7 @@
   }
 
   function refreshLists(){
-    fetch('/api/upload/status?since=' + lastEventId + '&full=1')
+   fetch('/api/upload/status?since=' + lastEventId + '&full=1', { cache: 'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(!d.job) return;
