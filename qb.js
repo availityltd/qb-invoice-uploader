@@ -157,3 +157,82 @@ export function isRetryable(msg, status) {
   if (status === 429 || status >= 500) return true;
   return /another user was creating|try again|deadlock|timeout|throttl/i.test(msg);
 }
+// Send up to 30 invoices in one request. QuickBooks still writes them one
+// after another, but the network trip happens once instead of thirty times.
+export async function postInvoiceBatch(realmId, token, payloads) {
+  const body = {
+    BatchItemRequest: payloads.map((p, i) => ({
+      bId: String(i),
+      operation: 'create',
+      Invoice: p
+    }))
+  };
+
+  const res = await qbFetch(
+    `${API}/v3/company/${realmId}/batch?minorversion=70`,
+    token,
+    { method: 'POST', body: JSON.stringify(body) }
+  );
+
+  const tid = tidOf(res);
+
+  // the whole batch was refused - hand the same verdict back for every line
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text.slice(0, 300);
+    try {
+      const f = JSON.parse(text).Fault;
+      if (f && f.Error && f.Error.length) {
+        msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+      }
+    } catch (e) {}
+    return payloads.map((p, i) => ({
+      index: i,
+      ok: false,
+      status: res.status,
+      msg,
+      tid,
+      retryable: isRetryable(msg, res.status)
+    }));
+  }
+
+  const json = await res.json();
+  const list = json.BatchItemResponse || [];
+  const out = payloads.map((p, i) => ({
+    index: i,
+    ok: false,
+    status: 0,
+    msg: 'QuickBooks sent no answer for this invoice',
+    tid,
+    retryable: true
+  }));
+
+  list.forEach(item => {
+    const i = Number(item.bId);
+    if (isNaN(i) || i < 0 || i >= out.length) return;
+
+    if (item.Invoice && item.Invoice.Id) {
+      out[i] = { index: i, ok: true, id: item.Invoice.Id, tid };
+      return;
+    }
+
+    let msg = 'Unknown error';
+    let status = 400;
+    if (item.Fault && item.Fault.Error && item.Fault.Error.length) {
+      const e = item.Fault.Error[0];
+      msg = `${e.Message || ''} | ${e.Detail || ''}`.trim();
+      if (e.code) status = Number(e.code) || 400;
+    }
+
+    out[i] = {
+      index: i,
+      ok: false,
+      status,
+      msg,
+      tid,
+      retryable: isRetryable(msg, status)
+    };
+  });
+
+  return out;
+}
