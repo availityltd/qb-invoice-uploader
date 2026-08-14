@@ -1366,7 +1366,7 @@ app.post('/api/upload/start', async (req, res) => {
 app.get('/api/upload/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-
+res.setHeader('Cache-Control', 'no-store');
   const snap = snapshot(realmId, req.query.since || 0, req.query.full === '1');
   res.json(snap ? { job: snap } : { job: null });
 });
