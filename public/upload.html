@@ -78,13 +78,17 @@
           <div class="sec hide" id="runSec">
             <h2><span class="no">03</span> Run <span class="aside" id="batchAside"></span></h2>
             <div class="g3">
-              <div>
-                <label for="delay">Delay between invoices (seconds)</label>
-                <input type="number" id="delay" value="1" step="0.5" min="0.5">
-                <p class="hint">Raise this if QuickBooks reports inventory lock errors.</p>
+             <div>
+                <label for="batchSize">Invoices per batch</label>
+                <input type="number" id="batchSize" value="30" step="1" min="1" max="30">
+                <p class="hint">QuickBooks takes up to 30 at a time. Lower this if you see inventory lock errors.</p>
               </div>
-              <div></div>
-              <div></div>
+              <div>
+                <label for="delay">Pause between batches (seconds)</label>
+                <input type="number" id="delay" value="1" step="0.5" min="0">
+                <p class="hint">A short breather so QuickBooks can settle between batches.</p>
+              </div>
+              <div></div> 
             </div>
             <div style="margin-top:16px">
               <button class="run" id="btnStart">Start upload</button>
@@ -514,6 +518,7 @@
     post('/api/upload/start', {
       invoices: invoices,
       delay: (parseFloat($('delay').value) || 1) * 1000,
+      batchSize: parseInt($('batchSize').value, 10) || 30,
       negativeItems: negativeList()
     }).then(function(){
       $('btnStart').disabled = false;
