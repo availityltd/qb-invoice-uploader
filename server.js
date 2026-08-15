@@ -1246,7 +1246,7 @@ app.post('/api/cpr/receive', async (req, res) => {
   try {
     const token = await getAccessToken(realmId);
 
-    // group by customer again, on the server this time
+  // group by customer again, on the server this time
     const byCustomer = new Map();
     matched.forEach(m => {
       const k = m.customerId || 'none';
@@ -1254,19 +1254,21 @@ app.post('/api/cpr/receive', async (req, res) => {
       byCustomer.get(k).push(m);
     });
 
+    // QuickBooks will not take a payment with thousands of lines on it.
+    // Under a thousand goes as one; anything bigger is split into 500s.
+    const SPLIT_ABOVE = 1000;
+    const CHUNK = 500;
+
     const ref = String(cprNumber || '').trim().slice(0, 21);
     const results = [];
     const paidRows = [];
     const paidInvoices = [];
     let posted = 0, totalAmount = 0;
 
-    for (const [custId, lines] of byCustomer) {
-      if (!custId || custId === 'none') {
-        results.push({ ok: false, msg: 'Invoices with no customer were skipped', count: lines.length });
-        continue;
-      }
-
-     const amount = lines.reduce((s, m) => s + m.qbBalance, 0);
+    // sends one payment; if QB chokes on the size, halves it and tries again
+    async function sendPart(custId, lines, label, depth) {
+      const amount = lines.reduce((s, m) => s + m.qbBalance, 0);
+      const who = lines[0].customerName || custId;
 
       const payload = {
         CustomerRef: { value: String(custId) },
@@ -1280,6 +1282,10 @@ app.post('/api/cpr/receive', async (req, res) => {
       if (cprDate) payload.TxnDate = cprDate;
       if (methodId) payload.PaymentMethodRef = { value: String(methodId) };
       if (ref) payload.PaymentRefNum = ref;
+      if (cprNumber) {
+        payload.PrivateNote = `CPR ${cprNumber}${cprDate ? ' dated ' + cprDate : ''}` +
+                              (label ? ` (${label})` : '');
+      }
 
       const r = await postPayment(realmId, token, payload);
 
@@ -1292,15 +1298,49 @@ app.post('/api/cpr/receive', async (req, res) => {
             invoice: m.invoice,
             qbDoc: m.qbDoc,
             customer: m.customerName || '',
-           amount: Math.round(m.qbBalance * 100) / 100
+            amount: Math.round(m.qbBalance * 100) / 100
           });
         });
         results.push({
-          ok: true, customer: lines[0].customerName || custId,
-          count: lines.length, amount: Math.round(amount * 100) / 100, paymentId: r.id
+          ok: true,
+          customer: who + (label ? ` (${label})` : ''),
+          count: lines.length,
+          amount: Math.round(amount * 100) / 100,
+          paymentId: r.id
         });
-      } else {
-        results.push({ ok: false, customer: lines[0].customerName || custId, count: lines.length, msg: r.msg });
+        return;
+      }
+
+      // too big for QuickBooks - cut it in half and send both halves
+      if (lines.length > 1 && depth < 2) {
+        const half = Math.ceil(lines.length / 2);
+        await sendPart(custId, lines.slice(0, half), `${label || 'part'} a`, depth + 1);
+        await sendPart(custId, lines.slice(half), `${label || 'part'} b`, depth + 1);
+        return;
+      }
+
+      results.push({
+        ok: false,
+        customer: who + (label ? ` (${label})` : ''),
+        count: lines.length,
+        msg: r.msg
+      });
+    }
+
+    for (const [custId, lines] of byCustomer) {
+      if (!custId || custId === 'none') {
+        results.push({ ok: false, msg: 'Invoices with no customer were skipped', count: lines.length });
+        continue;
+      }
+
+      if (lines.length < SPLIT_ABOVE) {
+        await sendPart(custId, lines, '', 0);
+        continue;
+      }
+
+      const parts = Math.ceil(lines.length / CHUNK);
+      for (let i = 0; i < parts; i++) {
+        await sendPart(custId, lines.slice(i * CHUNK, (i + 1) * CHUNK), `part ${i + 1} of ${parts}`, 0);
       }
     }
 
