@@ -222,6 +222,7 @@
     headerRow: 1, statusCol: 0,
     inspect: { hasMacros: false, risks: [] },
     groups: [], state: {}, openRem: {}, currentKey: null,
+    settled: {},
     match: null, lastPaid: [],
     payJob: null, payPoller: null, lastEventId: 0
   };
@@ -415,6 +416,11 @@
             '&courier=' + encodeURIComponent(S.courier) +
             (S.excel ? '&excel=1' : '');
 
+   // whatever was settled before is remembered on the server
+    get('/api/cpr/settled?sheetId=' + encodeURIComponent(file.id))
+      .then(function(s){ S.settled = s.done || {}; })
+      .catch(function(){ S.settled = {}; });
+
     get(u).then(function(d){
       clearSay();
       soak(d);
@@ -535,6 +541,10 @@
     S.groups.forEach(function(g){
       var key = keyOf(g);
       var st = S.state[key];
+      // never seen this session, but the server remembers it was settled
+      if(!st && S.settled[key]){
+        st = { done: true, paidCount: S.settled[key].count, paidAmount: S.settled[key].amount, remaining: [] };
+      }
 
       var card = document.createElement('div');
       card.className = 'cprCard' +
@@ -650,12 +660,17 @@
       return '<tr><td>' + esc(r.invoice) + '</td><td class="num">' + money(r.qbTotal) + '</td></tr>';
     });
 
+  // nothing left to pay and most of it is already paid - this CPR is done
+    var settled = !t.matched && t.alreadyPaid > 0;
+
     if(!t.matched){
       $('stepPay').classList.add('hide');
-      recordState(d, [], false);
-      say('bad', '<b>Nothing left to pay in this CPR.</b>');
+      markSettled(d, settled);
+      if(settled) say('ok', '<b>This CPR is already received in QuickBooks.</b>');
+      else say('bad', '<b>Nothing left to pay in this CPR.</b>');
       return;
     }
+    markSettled(d, false);
     showPay(d);
   }
 
@@ -689,7 +704,43 @@
     };
     drawCprs();
   }
+// paints a CPR green when QuickBooks says it is already settled,
+  // and tells the server so the green survives a refresh
+  function markSettled(d, settled){
+    var key = d.cprNumber || 'All rows';
+    var already = d.alreadyPaid || [];
 
+    var rem = [];
+    (d.amountOff || []).forEach(function(r){
+      rem.push({ invoice: r.invoice, amount: r.sheetAmount, why: 'amount differs' });
+    });
+    (d.notInQb || []).forEach(function(r){
+      rem.push({ invoice: r.invoice, amount: r.amount, why: 'not in QB' });
+    });
+    (d.matched || []).forEach(function(r){
+      rem.push({ invoice: r.invoice, amount: r.qbBalance, why: 'ready to pay' });
+    });
+
+    var count = already.length;
+    var amount = already.reduce(function(s, r){ return s + Number(r.qbTotal || 0); }, 0);
+
+    S.state[key] = {
+      done: !!settled,
+      paidCount: count,
+      paidAmount: amount,
+      remaining: rem
+    };
+
+    if(settled) rememberSettled(key, count, amount);
+    drawCprs();
+  }
+
+  function rememberSettled(key, count, amount){
+    S.settled[key] = { count: count, amount: amount };
+    post('/api/cpr/settled', {
+      sheetId: S.sheetId, cpr: key, count: count, amount: amount
+    }).catch(function(){});
+  }
   /* ---------- pay ---------- */
 
   function showPay(d){
@@ -901,7 +952,12 @@
     $('payOut').innerHTML = html;
 
     S.lastPaid = j.paidInvoices || [];
-    if(S.match) recordState(S.match, S.lastPaid, j.posted > 0);
+    if(S.match){
+      recordState(S.match, S.lastPaid, j.posted > 0);
+      if(j.posted > 0){
+        rememberSettled(S.match.cprNumber || 'All rows', S.lastPaid.length, j.amount);
+      }
+    }
     if(S.lastPaid.length) drawPaidList();
     if(j.posted > 0) $('stepPay').classList.add('done');
 
