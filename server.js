@@ -26,6 +26,7 @@ import {
 import { inspectExcel, writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
+import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -1229,159 +1230,39 @@ app.get('/api/cpr/match', async (req, res) => {
   }
 });
 
-// post the payments, then optionally stamp the sheet
+// post the payments in the background, then stamp the sheet
 app.post('/api/cpr/receive', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const {
-    courier, cprNumber, cprDate, accountId, accountName, methodId,
-    matched = [], sheetId, tab, excel = false,
-    headerRow, statusCol, writeStatus = true
-  } = req.body;
-
-  if (!accountId) return res.status(400).json({ error: 'Deposit account required' });
-  if (!matched.length) return res.status(400).json({ error: 'Nothing to receive' });
-
   try {
-    const token = await getAccessToken(realmId);
-
-  // group by customer again, on the server this time
-    const byCustomer = new Map();
-    matched.forEach(m => {
-      const k = m.customerId || 'none';
-      if (!byCustomer.has(k)) byCustomer.set(k, []);
-      byCustomer.get(k).push(m);
-    });
-
-    // QuickBooks will not take a payment with thousands of lines on it.
-    // Under a thousand goes as one; anything bigger is split into 500s.
-    const SPLIT_ABOVE = 1000;
-    const CHUNK = 500;
-
-    const ref = String(cprNumber || '').trim().slice(0, 21);
-    const results = [];
-    const paidRows = [];
-    const paidInvoices = [];
-    let posted = 0, totalAmount = 0;
-
-    // sends one payment; if QB chokes on the size, halves it and tries again
-    async function sendPart(custId, lines, label, depth) {
-      const amount = lines.reduce((s, m) => s + m.qbBalance, 0);
-      const who = lines[0].customerName || custId;
-
-      const payload = {
-        CustomerRef: { value: String(custId) },
-        TotalAmt: Math.round(amount * 100) / 100,
-        DepositToAccountRef: { value: String(accountId) },
-        Line: lines.map(m => ({
-          Amount: Math.round(m.qbBalance * 100) / 100,
-          LinkedTxn: [{ TxnId: String(m.qbId), TxnType: 'Invoice' }]
-        }))
-      };
-      if (cprDate) payload.TxnDate = cprDate;
-      if (methodId) payload.PaymentMethodRef = { value: String(methodId) };
-      if (ref) payload.PaymentRefNum = ref;
-      if (cprNumber) {
-        payload.PrivateNote = `CPR ${cprNumber}${cprDate ? ' dated ' + cprDate : ''}` +
-                              (label ? ` (${label})` : '');
-      }
-
-      const r = await postPayment(realmId, token, payload);
-
-      if (r.ok) {
-        posted++;
-        totalAmount += amount;
-        lines.forEach(m => {
-          if (m.sheetRow) paidRows.push(m.sheetRow);
-          paidInvoices.push({
-            invoice: m.invoice,
-            qbDoc: m.qbDoc,
-            customer: m.customerName || '',
-            amount: Math.round(m.qbBalance * 100) / 100
-          });
-        });
-        results.push({
-          ok: true,
-          customer: who + (label ? ` (${label})` : ''),
-          count: lines.length,
-          amount: Math.round(amount * 100) / 100,
-          paymentId: r.id
-        });
-        return;
-      }
-
-      // too big for QuickBooks - cut it in half and send both halves
-      if (lines.length > 1 && depth < 2) {
-        const half = Math.ceil(lines.length / 2);
-        await sendPart(custId, lines.slice(0, half), `${label || 'part'} a`, depth + 1);
-        await sendPart(custId, lines.slice(half), `${label || 'part'} b`, depth + 1);
-        return;
-      }
-
-      results.push({
-        ok: false,
-        customer: who + (label ? ` (${label})` : ''),
-        count: lines.length,
-        msg: r.msg
-      });
-    }
-
-    for (const [custId, lines] of byCustomer) {
-      if (!custId || custId === 'none') {
-        results.push({ ok: false, msg: 'Invoices with no customer were skipped', count: lines.length });
-        continue;
-      }
-
-      if (lines.length < SPLIT_ABOVE) {
-        await sendPart(custId, lines, '', 0);
-        continue;
-      }
-
-      const parts = Math.ceil(lines.length / CHUNK);
-      for (let i = 0; i < parts; i++) {
-        await sendPart(custId, lines.slice(i * CHUNK, (i + 1) * CHUNK), `part ${i + 1} of ${parts}`, 0);
-      }
-    }
-
-    // stamp the sheet only if the payments actually landed
-    let stamped = 0;
-    if (writeStatus && paidRows.length && sheetId && tab && headerRow !== undefined && statusCol !== undefined) {
-      try {
-        if (excel) {
-          stamped = await writeStatusExcel(sheetId, tab, Number(headerRow), Number(statusCol),
-                                           paidRows, QB_STATUS_HEADER, 'Received');
-        } else {
-          stamped = await writeStatusSheet(sheetId, tab, Number(headerRow), Number(statusCol),
-                                           paidRows, QB_STATUS_HEADER, 'Received');
-        }
-      } catch (e) {
-        results.push({ ok: false, msg: 'Payments went through, writing the sheet failed: ' + e.message });
-      }
-    }
-
-    try {
-      await recordRun(realmId, {
-        courier, cprNumber, cprDate, sheetId,
-        matched: matched.length, unmatched: 0,
-        amount: Math.round(totalAmount * 100) / 100,
-        qbPaymentId: (results.find(x => x.ok) || {}).paymentId || null,
-        bankAccount: accountName || null
-      });
-    } catch (e) {}
-
-    if (accountId || methodId) {
-      try {
-        const prefs = (await getSetting(realmId, 'cpr:prefs', {})) || {};
-        if (courier) prefs[courier] = { accountId, methodId };
-        await setSetting(realmId, 'cpr:prefs', prefs);
-      } catch (e) {}
-    }
-
-    res.json({ ok: posted > 0, posted, results, stamped, paidInvoices });
+    const id = startPayJob(realmId, req.body);
+    res.json({ ok: true, jobId: id });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(409).json({ error: e.message });
   }
+});
+
+app.get('/api/cpr/receive-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = paySnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/cpr/receive-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopPayJob(realmId) });
+});
+
+app.post('/api/cpr/receive-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearPayJob(realmId);
+  if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
+  res.json({ ok: true });
 });
 // ==================== Upload ====================
 // the work happens in a server-side job now, so leaving the page changes nothing
