@@ -1078,6 +1078,44 @@ app.get('/api/cpr/qb-options', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// CPRs that have been settled, remembered per sheet so the green stays
+app.get('/api/cpr/settled', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const sheetId = req.query.sheetId;
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const done = await getSetting(realmId, `cpr:done:${sheetId}`, {}) || {};
+    res.json({ done });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/cpr/settled', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, cpr, count, amount } = req.body;
+  if (!sheetId || !cpr) return res.status(400).json({ error: 'sheetId and cpr required' });
+
+  try {
+    const key = `cpr:done:${sheetId}`;
+    const done = await getSetting(realmId, key, {}) || {};
+    done[cpr] = {
+      count: Number(count) || 0,
+      amount: Number(amount) || 0,
+      at: new Date().toISOString().slice(0, 10)
+    };
+    await setSetting(realmId, key, done);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // where the QB Status column sits - reuse it if the sheet already has one
 const QB_STATUS_HEADER = 'QB Status';
 
