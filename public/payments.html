@@ -25,7 +25,6 @@
   .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
   .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
 
-  /* CPR cards */
   .cprs{display:flex;flex-wrap:wrap;gap:9px;align-items:flex-start}
   .cprCard{border:1px solid var(--line);background:#fff;border-radius:8px;
     min-width:172px;max-width:340px;overflow:hidden;transition:.13s}
@@ -34,7 +33,6 @@
   .cprCard.paid{border-color:var(--qbo);background:#F2FAF0}
   .cprCard .head{padding:9px 14px;cursor:pointer;font-size:13px}
   .cprCard .head b{font-weight:600;display:block}
-  .cprCard.on .head b{font-weight:700}
   .cprCard .head small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
   .cprCard .tick{color:var(--qbo);font-weight:700;margin-right:4px}
 
@@ -92,6 +90,17 @@
   .choice label{display:flex;gap:9px;align-items:flex-start;font-size:13px;cursor:pointer}
   .choice input{width:auto;margin-top:2px;flex:none}
   .choice span small{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+
+  .prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:14px 0 8px}
+  .prog i{display:block;height:100%;width:0;background:var(--qbo);transition:width .3s}
+  .runline{font-size:12.5px;color:var(--muted);font-family:var(--mono);margin-bottom:10px}
+
+  .paylog{background:#0F2E24;color:#CFE8D8;border-radius:8px;padding:12px 15px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.7;max-height:220px;
+    overflow:auto;margin-top:12px}
+  .paylog .ok{color:#8FE3A8}
+  .paylog .fail{color:#FF9C9C}
+  .paylog .error{color:#FF9C9C}
 
   .paidbox{margin-top:14px;border:1px solid var(--line);border-radius:8px;background:#fff;
     overflow:hidden}
@@ -174,7 +183,7 @@
           <h2>Record the payment</h2>
           <div class="hint" id="payHint"></div>
           <div id="warnBox"></div>
-          <div class="fields">
+          <div class="fields" id="payFields">
             <div>
               <label>Deposit to</label>
               <select id="acct"></select>
@@ -185,6 +194,12 @@
             </div>
           </div>
           <button class="solid" id="btnPay">Receive payments</button>
+          <button class="solid" id="btnStop" style="display:none;background:var(--neg)">Stop</button>
+          <div id="runBox" class="hide">
+            <div class="prog"><i id="bar"></i></div>
+            <div class="runline" id="runline"></div>
+            <div class="paylog" id="paylog"></div>
+          </div>
           <div id="payOut"></div>
         </div>
 
@@ -207,7 +222,8 @@
     headerRow: 1, statusCol: 0,
     inspect: { hasMacros: false, risks: [] },
     groups: [], state: {}, openRem: {}, currentKey: null,
-    match: null, lastPaid: []
+    match: null, lastPaid: [],
+    payJob: null, payPoller: null, lastEventId: 0
   };
 
   function money(n){
@@ -228,7 +244,7 @@
   function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
 
   function get(url){
-    return fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
       if(d.error) throw new Error(d.error);
       return d;
     });
@@ -237,7 +253,7 @@
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body || {})
     }).then(function(r){ return r.json(); }).then(function(d){
       if(d.error) throw new Error(d.error);
       return d;
@@ -251,6 +267,9 @@
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
+
+    // a payment run may already be going from an earlier visit
+    pollPay(true);
 
     get('/api/cpr/root').then(function(d){
       if(d.folderId){
@@ -416,7 +435,7 @@
     S.hasStatus = d.hasStatus;
     S.headerRow = d.headerRow;
     S.statusCol = d.statusCol;
-    if (d.inspect) S.inspect = d.inspect;   // keep what the first read told us
+    if (d.inspect) S.inspect = d.inspect;
   }
 
   /* ---------- columns ---------- */
@@ -633,7 +652,6 @@
 
     if(!t.matched){
       $('stepPay').classList.add('hide');
-      // nothing to pay, but the leftovers are still worth showing on the card
       recordState(d, [], false);
       say('bad', '<b>Nothing left to pay in this CPR.</b>');
       return;
@@ -641,7 +659,6 @@
     showPay(d);
   }
 
-  // remember what happened to this CPR so the card can show it
   function recordState(d, paidInvoices, markDone){
     var key = d.cprNumber || 'All rows';
     var paidSet = {};
@@ -686,10 +703,10 @@
       (d.cprDate
         ? 'Payment date will be <b>' + esc(d.cprDate) + '</b> (the CPR date).<br>'
         : '<b style="color:var(--warn)">No CPR date found in the sheet - QuickBooks will use today.</b><br>') +
-      (d.payments.length > 1
-        ? 'This CPR covers ' + d.payments.length + ' customers, so it will be split into ' +
-          d.payments.length + ' payments:<br>' + parts.join('<br>')
-        : parts.join(''));
+      parts.join('<br>') +
+      (d.totals.matched >= 1000
+        ? '<br><span style="color:var(--muted)">Over a thousand invoices, so this goes to QuickBooks as several payments under the same CPR.</span>'
+        : '');
 
     drawWarning();
 
@@ -780,8 +797,10 @@
 
     clearSay();
     $('btnPay').disabled = true;
-    $('payOut').innerHTML = '<div style="font-size:13px;color:var(--muted);margin-top:12px">' +
-      'Posting to QuickBooks...</div>';
+    $('paylog').innerHTML = '';
+    $('payOut').innerHTML = '';
+    S.lastEventId = 0;
+    S.payJob = null;
 
     post('/api/cpr/receive', {
       courier: S.courier,
@@ -797,33 +816,97 @@
       headerRow: S.headerRow,
       statusCol: S.statusCol,
       writeStatus: write
-    }).then(function(d){
+    }).then(function(){
       $('btnPay').disabled = false;
-      S.lastPaid = d.paidInvoices || [];
-
-      var html = '';
-      d.results.forEach(function(r){
-        html += '<div class="result ' + (r.ok ? 'good' : 'bad') + '">' +
-          (r.ok
-            ? '\u2713 ' + esc(r.customer || '') + ' - ' + nf(r.count) + ' invoices, ' + money(r.amount) +
-              (r.paymentId ? ' \u00b7 QB payment ' + esc(r.paymentId) : '')
-            : '\u2717 ' + (r.customer ? esc(r.customer) + ' - ' : '') + esc(r.msg)) +
-          '</div>';
-      });
-      if(d.stamped){
-        html += '<div class="result">Wrote "Received" against ' + nf(d.stamped) + ' rows in the sheet.</div>';
-      }
-      $('payOut').innerHTML = html;
-
-      recordState(S.match, S.lastPaid, d.ok);
-      if(S.lastPaid.length) drawPaidList();
-      if(d.ok) $('stepPay').classList.add('done');
+      pollPay(true);
+      startPolling();
     }).catch(function(e){
       $('btnPay').disabled = false;
-      $('payOut').innerHTML = '';
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
   });
+
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    $('btnStop').textContent = 'Stopping...';
+    post('/api/cpr/receive-stop').catch(function(){});
+  });
+
+  /* ---------- watching the payment run ---------- */
+
+  function startPolling(){
+    if(S.payPoller) return;
+    S.payPoller = setInterval(function(){ pollPay(false); }, 2000);
+  }
+  function stopPolling(){
+    if(!S.payPoller) return;
+    clearInterval(S.payPoller);
+    S.payPoller = null;
+  }
+
+  function pollPay(first){
+    var u = '/api/cpr/receive-status?since=' + S.lastEventId + (first ? '&full=1' : '');
+    return get(u).then(function(d){
+      if(!d.job){ stopPolling(); return; }
+
+      var j = d.job;
+      S.payJob = j;
+
+      (j.events || []).forEach(function(e){
+        var line = document.createElement('div');
+        if(e.type === 'ok') line.className = 'ok';
+        else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
+        line.textContent = e.msg;
+        $('paylog').appendChild(line);
+        $('paylog').scrollTop = $('paylog').scrollHeight;
+      });
+      if(j.lastEventId) S.lastEventId = j.lastEventId;
+
+      $('stepPay').classList.remove('hide');
+      $('runBox').classList.remove('hide');
+
+      var live = j.state === 'running';
+      $('btnPay').style.display = live ? 'none' : 'block';
+      $('btnStop').style.display = live ? 'block' : 'none';
+      $('btnStop').disabled = false;
+      $('btnStop').textContent = 'Stop';
+
+      var pct = j.total ? Math.round(j.doneCount / j.total * 100) : 0;
+      $('bar').style.width = pct + '%';
+      $('runline').textContent =
+        nf(j.doneCount) + ' of ' + nf(j.total) + ' invoices \u00b7 ' +
+        nf(j.posted) + ' payment' + (j.posted === 1 ? '' : 's') + ' \u00b7 ' + money(j.amount) +
+        (live ? '  (running on the server - you can leave this page)' : '');
+
+      if(live){ startPolling(); return; }
+
+      stopPolling();
+      finishPay(j);
+    }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  function finishPay(j){
+    var html = '';
+    (j.results || []).forEach(function(r){
+      html += '<div class="result ' + (r.ok ? 'good' : 'bad') + '">' +
+        (r.ok
+          ? '\u2713 ' + esc(r.customer || '') + ' - ' + nf(r.count) + ' invoices, ' + money(r.amount) +
+            (r.paymentId ? ' \u00b7 QB payment ' + esc(r.paymentId) : '')
+          : '\u2717 ' + (r.customer ? esc(r.customer) + ' - ' : '') + esc(r.msg)) +
+        '</div>';
+    });
+    if(j.stamped){
+      html += '<div class="result">Wrote "Received" against ' + nf(j.stamped) + ' rows in the sheet.</div>';
+    }
+    $('payOut').innerHTML = html;
+
+    S.lastPaid = j.paidInvoices || [];
+    if(S.match) recordState(S.match, S.lastPaid, j.posted > 0);
+    if(S.lastPaid.length) drawPaidList();
+    if(j.posted > 0) $('stepPay').classList.add('done');
+
+    post('/api/cpr/receive-clear').catch(function(){});
+  }
 
   /* ---------- the paid list, to copy or download ---------- */
 
@@ -871,7 +954,8 @@
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = 'received-' + (S.match.cprNumber || 'cpr').replace(/[^\w-]/g, '') + '.csv';
+      a.download = 'received-' +
+        String((S.payJob && S.payJob.cprNumber) || 'cpr').replace(/[^\w-]/g, '') + '.csv';
       a.click();
       setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
     });
