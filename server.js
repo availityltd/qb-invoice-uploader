@@ -21,7 +21,8 @@ import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
 import {
   listFolders, listSheetsIn, loadSheet, groupByCpr, isDelivered,
-  findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits
+  findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits,
+  paymentsByCpr, paymentsByIds
 } from './cpr.js';
 import { inspectExcel, writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
@@ -1112,6 +1113,108 @@ app.post('/api/cpr/settled', async (req, res) => {
     };
     await setSetting(realmId, key, done);
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// One sweep of QuickBooks payments tells us where every CPR in the sheet stands.
+// Fast, because it looks at payments - not at thousands of invoices.
+app.get('/api/cpr/sheet-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, courier } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+    const tabs = await listTabs(sheetId, excel);
+    const useTab = tab || (tabs[0] && tabs[0].title);
+
+    const data = await loadSheet(sheetId, useTab, excel, saved);
+    const hasStatus = data.cols.status >= 0;
+    const groups = groupByCpr(data.rows, hasStatus);
+
+    // ask QB only for the window the sheet covers, plus a couple of months either side
+    const dates = groups.map(g => g.cprDate).filter(Boolean).sort();
+    let from = null, to = null;
+    if (dates.length) {
+      from = shiftDays(dates[0], -60);
+      to = shiftDays(dates[dates.length - 1], 60);
+    }
+
+    const token = await getAccessToken(realmId);
+    const byRef = await paymentsByCpr(realmId, token, from, to);
+
+    const prefs = (await getSetting(realmId, 'cpr:prefs', {})) || {};
+    const bank = courier ? (prefs[courier] || null) : null;
+
+    const out = groups.map(g => {
+      const key = g.cprNumber || 'All rows';
+      const sheetAmount = Math.round(g.amount * 100) / 100;
+      const hit = byRef[g.cprNumber] || null;
+
+      if (!hit) {
+        return {
+          cpr: key,
+          cprDate: g.cprDate,
+          delivered: g.delivered,
+          sheetAmount,
+          state: 'unknown',
+          notes: []
+        };
+      }
+
+      const notes = [];
+      const gap = Math.round((hit.amount - sheetAmount) * 100) / 100;
+      if (Math.abs(gap) > 10) {
+        notes.push({
+          kind: 'amount',
+          text: `QuickBooks has ${hit.amount.toFixed(2)}, the sheet says ${sheetAmount.toFixed(2)}`
+        });
+      }
+
+      if (g.cprDate && hit.dates.length && hit.dates.indexOf(g.cprDate) < 0) {
+        notes.push({
+          kind: 'date',
+          text: `Dated ${hit.dates.join(', ')} in QuickBooks, ${g.cprDate} in the sheet`
+        });
+      }
+
+      if (bank && bank.accountId && hit.accounts.length) {
+        const wrong = hit.accounts.filter(a => a.id !== String(bank.accountId));
+        if (wrong.length) {
+          notes.push({
+            kind: 'bank',
+            text: `Deposited to ${wrong.map(a => a.name || a.id).join(', ')}, not this courier's usual account`
+          });
+        }
+      }
+
+      return {
+        cpr: key,
+        cprDate: g.cprDate,
+        delivered: g.delivered,
+        sheetAmount,
+        state: notes.length ? 'off' : 'done',
+        qbAmount: hit.amount,
+        qbPayments: hit.count,
+        qbDates: hit.dates,
+        qbAccounts: hit.accounts,
+        paymentIds: hit.ids,
+        notes
+      };
+    });
+
+    res.json({
+      tab: useTab,
+      bank,
+      checked: !!dates.length,
+      cprs: out
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
