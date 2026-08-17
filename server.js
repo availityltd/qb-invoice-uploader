@@ -1603,7 +1603,7 @@ app.post('/api/void/scan', async (req, res) => {
       chunk.forEach(d => variants.push(`'#${d}'`, `'${d}'`));
 
       const q = await qbQuery(realmId, token,
-        `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn ` +
+        `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn, SyncToken ` +
         `FROM Invoice WHERE DocNumber IN (${variants.join(',')}) MAXRESULTS 1000`);
 
       (q.Invoice || []).forEach(inv => {
@@ -1644,6 +1644,7 @@ app.post('/api/void/scan', async (req, res) => {
         const total = Number(inv.TotalAmt || 0);
         const entry = {
           id: inv.Id,
+          syncToken: inv.SyncToken,
           doc: inv.DocNumber || '',
           date: inv.TxnDate || '',
           total,
