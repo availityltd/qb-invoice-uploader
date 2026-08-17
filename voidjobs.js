@@ -6,6 +6,13 @@ const API = 'https://quickbooks.api.intuit.com';
 // one void run per company, kept on the server so leaving the page is safe
 const jobs = new Map();
 const MAX_EVENTS = 3000;
+const MAX_ROUNDS = 4;
+
+// worth another go - QuickBooks was busy or the inventory was locked for a moment
+function worthRetry(msg) {
+  return /another user was creating|stale object|429|throttle|System Failure|application error|business validation|deadlock|timeout|temporarily|try again/i
+    .test(String(msg || ''));
+}
 
 function push(job, type, msg, extra) {
   job.lastId++;
@@ -146,7 +153,7 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
     invoices,
     force: !!force,
    delay: delay === undefined ? 0 : Number(delay) || 0,
-    lanes: 5,
+    lanes: 2,
     total: invoices.length,
     done: 0,
     voided: [],
@@ -178,60 +185,100 @@ async function run(realmId, job) {
  // Voiding does not touch stock, so several can run side by side.
   // Anything that needs its payment freeing goes one at a time - those
   // do touch a shared record and must not trip over each other.
-  const quick = job.invoices.filter(x => !x.hasPayment);
-  const careful = job.invoices.filter(x => x.hasPayment);
+ let pending = job.invoices.slice();
 
-  async function handle(inv) {
-    let r;
-    try {
-      r = await voidOne(realmId, token, inv, job.force);
-    } catch (e) {
-      r = { ok: false, msg: e.message };
+  for (let round = 1; round <= MAX_ROUNDS && pending.length && !job.stop; round++) {
+    const again = [];
+
+    if (round > 1) {
+      push(job, 'log', `Round ${round} of ${MAX_ROUNDS}: trying ${pending.length} again.`);
     }
 
-    job.done++;
-
-    if (r.ok) {
-      job.voided.push({ doc: inv.doc, id: inv.id, already: !!r.already });
-      push(job, 'ok', `VOID    ${inv.doc}` +
-        (r.already ? '   (was already void)' : '') +
-        ((r.notes && r.notes.length) ? '   [' + r.notes.join('; ') + ']' : ''),
-        { doc: inv.doc });
+    async function attempt(inv) {
+      let r;
       try {
-        await logUpload(realmId, inv.doc, 'voided', `QB Id ${inv.id} voided`, null);
-      } catch (e) {}
-    } else if (r.held) {
-      job.held.push({ doc: inv.doc, id: inv.id, msg: r.msg });
-      push(job, 'held', `HELD    ${inv.doc}   ${r.msg}`, { doc: inv.doc });
-    } else {
+        r = await voidOne(realmId, token, inv, job.force);
+      } catch (e) {
+        r = { ok: false, msg: e.message };
+      }
+
+      if (r.ok) {
+        job.done++;
+        job.voided.push({ doc: inv.doc, id: inv.id, already: !!r.already });
+        push(job, 'ok', `VOID    ${inv.doc}` +
+          (r.already ? '   (was already void)' : '') +
+          ((r.notes && r.notes.length) ? '   [' + r.notes.join('; ') + ']' : ''),
+          { doc: inv.doc });
+        try {
+          await logUpload(realmId, inv.doc, 'voided', `QB Id ${inv.id} voided`, null);
+        } catch (e) {}
+        return;
+      }
+
+      if (r.held) {
+        job.done++;
+        job.held.push({ doc: inv.doc, id: inv.id, msg: r.msg });
+        push(job, 'held', `HELD    ${inv.doc}   ${r.msg}`, { doc: inv.doc });
+        return;
+      }
+
+      // inventory locks and throttling pass - a fresh token and a pause fix them
+      if (worthRetry(r.msg) && round < MAX_ROUNDS) {
+        again.push(Object.assign({}, inv, { syncToken: null }));
+        push(job, 'retry', `retry ${round}/${MAX_ROUNDS}  ${inv.doc}   ${String(r.msg).slice(0, 110)}`);
+        return;
+      }
+
+      job.done++;
       job.failed.push({ doc: inv.doc, id: inv.id, msg: r.msg });
       push(job, 'fail', `FAILED  ${inv.doc}   ${String(r.msg).slice(0, 200)}`, { doc: inv.doc });
     }
-  }
 
-  if (quick.length) {
-    push(job, 'log', `${quick.length} with no payment on them - ${job.lanes} at a time.`);
-    let next = 0;
-    const lane = async () => {
-      while (!job.stop) {
-        const i = next++;
-        if (i >= quick.length) return;
-        await handle(quick[i]);
+    const quick = pending.filter(x => !x.hasPayment);
+    const careful = pending.filter(x => x.hasPayment);
+
+    if (quick.length) {
+      if (round === 1) {
+        push(job, 'log', `${quick.length} with no payment on them - ${job.lanes} at a time.`);
+      }
+      let next = 0;
+      const lane = async () => {
+        while (!job.stop) {
+          const i = next++;
+          if (i >= quick.length) return;
+          await attempt(quick[i]);
+          if (job.delay) await nap(job, job.delay);
+        }
+      };
+      await Promise.all(Array.from({ length: job.lanes }, lane));
+    }
+
+    if (careful.length && !job.stop) {
+      if (round === 1) {
+        push(job, 'log', `${careful.length} sit on payments - these go one at a time.`);
+      }
+      for (const inv of careful) {
+        if (job.stop) break;
+        await attempt(inv);
         if (job.delay) await nap(job, job.delay);
       }
-    };
-    await Promise.all(Array.from({ length: job.lanes }, lane));
-  }
+    }
 
-  if (careful.length && !job.stop) {
-    push(job, 'log', `${careful.length} sit on payments - these go one at a time.`);
-    for (const inv of careful) {
-      if (job.stop) break;
-      await handle(inv);
-      if (job.delay) await nap(job, job.delay);
+    pending = again;
+
+    if (pending.length && round < MAX_ROUNDS && !job.stop) {
+      const wait = round * 30;
+      push(job, 'log', `${pending.length} left over - waiting ${wait} seconds, then round ${round + 1}.`);
+      await nap(job, wait * 1000);
     }
   }
 
+  // anything still standing after every round really did not go through
+  pending.forEach(inv => {
+    job.done++;
+    job.failed.push({ doc: inv.doc, id: inv.id, msg: 'still failing after every round' });
+    push(job, 'fail', `FAILED  ${inv.doc}   still failing after ${MAX_ROUNDS} rounds`, { doc: inv.doc });
+  });
   if (job.stop) {
     push(job, 'log', 'Stopped.');
     job.state = 'stopped';
