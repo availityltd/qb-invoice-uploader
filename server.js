@@ -1370,7 +1370,171 @@ app.get('/api/cpr/match', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// What actually happened to one CPR: which payments sit behind its invoices,
+// and whether the CPR number, date and bank on them are right.
+app.get('/api/cpr/trace', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
+  const { sheetId, tab, courier, cpr } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+    const data = await loadSheet(sheetId, tab, excel, saved);
+    const hasStatus = data.cols.status >= 0;
+
+    let rows = data.rows;
+    if (cpr) rows = rows.filter(r => (r.cprNumber || '(no CPR number)') === cpr);
+    if (!rows.length) return res.status(400).json({ error: 'No rows for that CPR' });
+
+    const delivered = rows.filter(r => isDelivered(r, hasStatus));
+    const token = await getAccessToken(realmId);
+    const found = await findInvoices(realmId, token, delivered.map(r => r.invoice));
+
+    // gather every payment id hanging off these invoices
+    const ids = [];
+    found.forEach(inv => (inv.paymentIds || []).forEach(id => ids.push(id)));
+    const payments = await paymentsByIds(realmId, token, [...new Set(ids)]);
+
+    const sheetCpr = rows[0].cprNumber || '';
+    const sheetDate = rows[0].cprDate || null;
+    const prefs = (await getSetting(realmId, 'cpr:prefs', {})) || {};
+    const bank = courier ? (prefs[courier] || null) : null;
+
+    const right = [], wrongRef = [], noRef = [];
+    payments.forEach(p => {
+      if (!p.ref) noRef.push(p);
+      else if (sheetCpr && p.ref !== sheetCpr) wrongRef.push(p);
+      else right.push(p);
+    });
+
+    const notes = [];
+    if (noRef.length) {
+      notes.push({
+        kind: 'noref',
+        text: `${noRef.length} payment${noRef.length === 1 ? '' : 's'} on these invoices carry no CPR number`
+      });
+    }
+    if (wrongRef.length) {
+      const refs = [...new Set(wrongRef.map(p => p.ref))];
+      notes.push({
+        kind: 'wrongref',
+        text: `Received under ${refs.join(', ')} instead of ${sheetCpr}`
+      });
+    }
+
+    const allDates = [...new Set(payments.map(p => p.date).filter(Boolean))];
+    if (sheetDate && allDates.length && allDates.indexOf(sheetDate) < 0) {
+      notes.push({
+        kind: 'date',
+        text: `Dated ${allDates.join(', ')} in QuickBooks, ${sheetDate} in the sheet`
+      });
+    }
+
+    if (bank && bank.accountId) {
+      const wrongBank = [...new Set(payments
+        .filter(p => p.accountId && p.accountId !== String(bank.accountId))
+        .map(p => p.accountName || p.accountId))];
+      if (wrongBank.length) {
+        notes.push({
+          kind: 'bank',
+          text: `Deposited to ${wrongBank.join(', ')}, not this courier's usual account`
+        });
+      }
+    }
+
+    let paidCount = 0, openCount = 0, missing = 0;
+    delivered.forEach(r => {
+      const inv = found.get(cprDigits(r.invoice));
+      if (!inv) { missing++; return; }
+      if (inv.balance <= 0.005) paidCount++; else openCount++;
+    });
+
+    res.json({
+      cpr: sheetCpr || '(no CPR number)',
+      cprDate: sheetDate,
+      sheetRows: rows.length,
+      delivered: delivered.length,
+      sheetAmount: Math.round(delivered.reduce((s, r) => s + r.amount, 0) * 100) / 100,
+      paidCount, openCount, missing,
+      payments,
+      qbAmount: Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100,
+      right: right.length,
+      wrongRef, noRef,
+      bank,
+      notes
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Fix a payment that went in with the wrong CPR number, date or bank
+app.post('/api/cpr/fix-payment', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { paymentId, cprNumber, cprDate, accountId } = req.body;
+  if (!paymentId) return res.status(400).json({ error: 'paymentId required' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const q = await qbQuery(realmId, token, `SELECT * FROM Payment WHERE Id = '${paymentId}'`);
+    const pay = (q.Payment || [])[0];
+    if (!pay) return res.status(404).json({ error: 'That payment is not in QuickBooks any more' });
+
+    const body = { Id: pay.Id, SyncToken: pay.SyncToken, sparse: true };
+    if (cprNumber !== undefined) body.PaymentRefNum = String(cprNumber).slice(0, 21);
+    if (cprDate) body.TxnDate = cprDate;
+    if (accountId) body.DepositToAccountRef = { value: String(accountId) };
+
+    const r = await fetch(`${API}/v3/company/${realmId}/payment?minorversion=70`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    const text = await r.text();
+    if (!r.ok) {
+      let msg = text.slice(0, 300);
+      try {
+        const f = JSON.parse(text).Fault;
+        if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+      } catch (e) {}
+      return res.status(400).json({ error: msg });
+    }
+
+    res.json({ ok: true, id: pay.Id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// The bank this courier's money lands in - asked once, then remembered
+app.post('/api/cpr/bank', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { courier, accountId, methodId } = req.body;
+  if (!courier || !accountId) return res.status(400).json({ error: 'courier and accountId required' });
+
+  try {
+    const prefs = (await getSetting(realmId, 'cpr:prefs', {})) || {};
+    prefs[courier] = { accountId: String(accountId), methodId: methodId || null };
+    await setSetting(realmId, 'cpr:prefs', prefs);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // post the payments in the background, then stamp the sheet
 app.post('/api/cpr/receive', async (req, res) => {
   const realmId = await requireCompany(req, res);
