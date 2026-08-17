@@ -87,10 +87,16 @@ async function unlinkPayment(realmId, token, paymentId, invoiceId) {
 }
 
 async function voidOne(realmId, token, inv, force) {
-  // pick the invoice up fresh - the SyncToken has to be current
-  const q = await qbQuery(realmId, token, `SELECT * FROM Invoice WHERE Id = '${inv.id}'`);
-  const live = (q.Invoice || [])[0];
-  if (!live) return { ok: false, msg: 'not in QuickBooks any more' };
+  // the scan already handed us the SyncToken, so invoices with a clean slate
+  // need no second fetch - that halves the calls to QuickBooks
+  let live;
+  if (inv.syncToken && !inv.hasPayment) {
+    live = { Id: inv.id, SyncToken: inv.syncToken, TotalAmt: 1, LinkedTxn: [] };
+  } else {
+    const q = await qbQuery(realmId, token, `SELECT * FROM Invoice WHERE Id = '${inv.id}'`);
+    live = (q.Invoice || [])[0];
+    if (!live) return { ok: false, msg: 'not in QuickBooks any more' };
+  }
 
   if (Number(live.TotalAmt || 0) === 0) {
     return { ok: true, already: true, note: 'was already void' };
@@ -139,7 +145,8 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
     stop: false,
     invoices,
     force: !!force,
-    delay: Number(delay) || 400,
+   delay: delay === undefined ? 0 : Number(delay) || 0,
+    lanes: 8,
     total: invoices.length,
     done: 0,
     voided: [],
@@ -168,9 +175,13 @@ async function run(realmId, job) {
   push(job, 'log', `Voiding ${job.total} invoice${job.total === 1 ? '' : 's'}` +
     (job.force ? ' - linked payments will be freed first.' : '.'));
 
-  for (const inv of job.invoices) {
-    if (job.stop) break;
+ // Voiding does not touch stock, so several can run side by side.
+  // Anything that needs its payment freeing goes one at a time - those
+  // do touch a shared record and must not trip over each other.
+  const quick = job.invoices.filter(x => !x.hasPayment);
+  const careful = job.invoices.filter(x => x.hasPayment);
 
+  async function handle(inv) {
     let r;
     try {
       r = await voidOne(realmId, token, inv, job.force);
@@ -196,8 +207,29 @@ async function run(realmId, job) {
       job.failed.push({ doc: inv.doc, id: inv.id, msg: r.msg });
       push(job, 'fail', `FAILED  ${inv.doc}   ${String(r.msg).slice(0, 200)}`, { doc: inv.doc });
     }
+  }
 
-    await nap(job, job.delay);
+  if (quick.length) {
+    push(job, 'log', `${quick.length} with no payment on them - ${job.lanes} at a time.`);
+    let next = 0;
+    const lane = async () => {
+      while (!job.stop) {
+        const i = next++;
+        if (i >= quick.length) return;
+        await handle(quick[i]);
+        if (job.delay) await nap(job, job.delay);
+      }
+    };
+    await Promise.all(Array.from({ length: job.lanes }, lane));
+  }
+
+  if (careful.length && !job.stop) {
+    push(job, 'log', `${careful.length} sit on payments - these go one at a time.`);
+    for (const inv of careful) {
+      if (job.stop) break;
+      await handle(inv);
+      if (job.delay) await nap(job, job.delay);
+    }
   }
 
   if (job.stop) {
