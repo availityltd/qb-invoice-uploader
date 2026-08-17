@@ -146,7 +146,7 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
     invoices,
     force: !!force,
    delay: delay === undefined ? 0 : Number(delay) || 0,
-    lanes: 8,
+    lanes: 5,
     total: invoices.length,
     done: 0,
     voided: [],
