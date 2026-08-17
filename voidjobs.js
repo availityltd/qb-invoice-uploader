@@ -247,6 +247,7 @@ async function run(realmId, job) {
       // inventory locks and throttling pass - a fresh token and a pause fix them
       if (worthRetry(r.msg) && round < MAX_ROUNDS) {
         again.push(Object.assign({}, inv, { syncToken: null }));
+        job.retried = (job.retried || 0) + 1;
         push(job, 'retry', `retry ${round}/${MAX_ROUNDS}  ${inv.doc}   ${String(r.msg).slice(0, 110)}`);
         return;
       }
@@ -335,6 +336,8 @@ export function voidSnapshot(realmId, since, full) {
     state: job.state,
     total: job.total,
     done: job.done,
+    seen: job.done + (job.retried || 0),
+    retried: job.retried || 0,
     voidedCount: job.voided.length,
     heldCount: job.held.length,
     failedCount: job.failed.length,
