@@ -248,6 +248,7 @@
     headerRow: 1, statusCol: 0,
     inspect: { hasMacros: false, risks: [] },
     groups: [], status: {}, currentKey: null,
+    openTrouble: {},
     bank: null, options: null,
     match: null, trace: null, lastPaid: [],
     payJob: null, payPoller: null, lastEventId: 0
@@ -704,24 +705,35 @@
         card.appendChild(why);
       }
 
-      // the invoices behind the difference, kept on the card once looked up
+    // the invoices behind the difference - folded away until asked for
       if(st && st.trouble && st.trouble.length){
+        var open = !!S.openTrouble[key];
+
         var head = document.createElement('div');
-        head.className = 'why';
-        head.style.fontWeight = '700';
-        head.textContent = st.trouble.length + ' invoice' +
+        head.className = 'why toggle';
+        head.innerHTML =
+          '<span>' + st.trouble.length + ' invoice' +
           (st.trouble.length === 1 ? '' : 's') + ' behind the difference' +
-          (st.alreadyPaid !== undefined ? '  \u00b7  ' + nf(st.alreadyPaid) + ' received' : '');
+          (st.alreadyPaid !== undefined ? '  \u00b7  ' + nf(st.alreadyPaid) + ' received' : '') +
+          '</span><span>' + (open ? '\u25B2' : '\u25BC') + '</span>';
+        head.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          S.openTrouble[key] = !S.openTrouble[key];
+          drawCprs();
+        });
         card.appendChild(head);
 
-        var tbl = document.createElement('div');
-        tbl.className = 'trouble';
-        tbl.innerHTML = '<table>' + st.trouble.map(function(r){
-          return '<tr><td>' + esc(r.invoice) + '</td>' +
-                 '<td class="num">' + money(r.sheet) + '</td>' +
-                 '<td class="num">' + (r.qb === null ? '\u2014' : money(r.qb)) + '</td></tr>';
-        }).join('') + '</table>';
-        card.appendChild(tbl);
+        if(open){
+          var tbl = document.createElement('div');
+          tbl.className = 'trouble';
+          tbl.innerHTML = '<table>' + st.trouble.map(function(r){
+            return '<tr><td>' + esc(r.invoice) + '</td>' +
+                   '<td class="num">' + money(r.sheet) + '</td>' +
+                   '<td class="num">' + (r.qb === null ? '\u2014' : money(r.qb)) + '</td></tr>';
+          }).join('') + '</table>';
+          tbl.addEventListener('click', function(ev){ ev.stopPropagation(); });
+          card.appendChild(tbl);
+        }
       }
 
       card.addEventListener('click', function(){
