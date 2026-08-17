@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Void invoices</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+  .step.done{border-color:var(--qbo)}
+
+  textarea#nums{width:100%;min-height:150px;font-family:var(--mono);font-size:12.5px;
+    line-height:1.7;resize:vertical}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+  .tally > div{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+  .tally .bad .n{color:var(--bad)}
+
+  .bucket{border:1px solid var(--line);border-radius:8px;background:#fff;
+    overflow:hidden;margin-bottom:14px}
+  .bucket.warn{border-color:var(--warn)}
+  .bucket h4{margin:0;padding:10px 14px;font-size:12.5px;font-weight:600;
+    background:var(--tint);border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer}
+  .bucket.warn h4{background:#FFFBF0;color:#8A6100}
+  .bucket .inner{max-height:290px;overflow:auto}
+  .bucket table{width:100%;border-collapse:collapse;font-size:12px}
+  .bucket th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:6px 14px;border-bottom:1px solid var(--line)}
+  .bucket td{padding:6px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  .bucket td.num{text-align:right;font-family:var(--mono)}
+  .bucket td .paynote{display:block;font-size:10.5px;color:#8A6100;margin-top:3px;line-height:1.5}
+
+  .danger{border:1px solid var(--warn);background:#FFFBF0;border-radius:8px;
+    padding:14px 16px;margin:16px 0}
+  .danger h3{margin:0 0 6px;font-size:13px;font-weight:600}
+  .danger p{margin:0 0 10px;font-size:12.5px;color:var(--muted);line-height:1.6}
+  .danger label{display:flex;gap:9px;align-items:flex-start;font-size:13px;cursor:pointer}
+  .danger label input{width:auto;margin-top:2px;flex:none}
+
+  .prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:14px 0 8px}
+  .prog i{display:block;height:100%;width:0;background:var(--qbo);transition:width .3s}
+  .runline{font-size:12.5px;color:var(--muted);font-family:var(--mono);margin-bottom:10px}
+
+  .vlog{background:#0F2E24;color:#CFE8D8;border-radius:8px;padding:12px 15px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.7;max-height:260px;
+    overflow:auto;margin-top:12px}
+  .vlog .ok{color:#8FE3A8}
+  .vlog .held{color:#FFD98A}
+  .vlog .fail{color:#FF9C9C}
+  .vlog .error{color:#FF9C9C}
+
+  .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .acts button.mini{font-size:11.5px;padding:5px 12px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
+  .acts button.mini:hover{border-color:var(--qbo)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Void invoices</h1>
+        <div class="sub">Set returned orders to zero in QuickBooks, keeping the invoice number.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Nothing is changed until you have seen the list and pressed Void.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="step" id="stepPaste">
+          <h2>Order numbers</h2>
+          <div class="hint">
+            Paste them in any shape - one per line, or straight out of a spreadsheet column.
+            With or without the <b>#</b>; both spellings are looked up.
+          </div>
+          <textarea id="nums" placeholder="#91298851&#10;#91300886&#10;91302104"></textarea>
+          <div class="acts">
+            <button class="solid" id="btnScan">Look these up in QuickBooks</button>
+            <button class="mini" id="btnClearNums">Clear</button>
+            <span class="mono" id="numCount" style="font-size:12px;color:var(--muted);align-self:center"></span>
+          </div>
+        </div>
+
+        <div class="step hide" id="stepReview">
+          <h2>What QuickBooks found</h2>
+          <div class="hint" id="scanHint"></div>
+          <div class="tally" id="tally"></div>
+          <div id="buckets"></div>
+
+          <div id="dangerBox"></div>
+
+          <button class="solid" id="btnVoid">Void them</button>
+          <button class="solid" id="btnStop" style="display:none;background:var(--neg)">Stop</button>
+
+          <div id="runBox" class="hide">
+            <div class="prog"><i id="bar"></i></div>
+            <div class="runline" id="runline"></div>
+            <div class="vlog" id="vlog"></div>
+            <div class="acts">
+              <button class="mini" id="btnCopyLog">Copy log</button>
+              <button class="mini" id="btnDlVoided">Download voided</button>
+              <button class="mini" id="btnDlLeft">Download not voided</button>
+              <button class="mini" id="btnClearRun">Clear finished run</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    scan: null, job: null, poller: null, lastEventId: 0,
+    open: { ready:true, paid:true, alreadyVoid:false, notFound:false },
+    logLines: []
+  };
+
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
+
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  function download(name, rows){
+    var csv = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var b = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = name;
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+    pollJob(true);
+  });
+
+  function countNums(){
+    var n = $('nums').value.split(/[\s,;]+/).filter(Boolean).length;
+    $('numCount').textContent = n ? nf(n) + ' number' + (n === 1 ? '' : 's') + ' pasted' : '';
+  }
+  $('nums').addEventListener('input', countNums);
+
+  $('btnClearNums').addEventListener('click', function(){
+    $('nums').value = '';
+    countNums();
+    $('stepReview').classList.add('hide');
+    clearSay();
+  });
+
+  /* ---------- look them up ---------- */
+
+  $('btnScan').addEventListener('click', function(){
+    var text = $('nums').value.trim();
+    if(!text) return say('bad', '<b>Paste some order numbers first.</b>');
+
+    clearSay();
+    $('btnScan').disabled = true;
+    say('', 'Looking these up in QuickBooks...');
+
+    post('/api/void/scan', { numbers: text }).then(function(d){
+      $('btnScan').disabled = false;
+      clearSay();
+      S.scan = d;
+      $('stepPaste').classList.add('done');
+      showScan(d);
+    }).catch(function(e){
+      $('btnScan').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  function showScan(d){
+    $('stepReview').classList.remove('hide');
+    $('runBox').classList.add('hide');
+
+    $('scanHint').innerHTML =
+      nf(d.asked) + ' number' + (d.asked === 1 ? '' : 's') + ' pasted, ' +
+      nf(d.unique) + ' after removing repeats. ' +
+      '<b>Nothing has been changed yet.</b>';
+
+    $('tally').innerHTML =
+      '<div class="ok"><div class="n">' + nf(d.ready.length) + '</div>' +
+        '<div class="l">Ready to void</div></div>' +
+      '<div class="warn"><div class="n">' + nf(d.paid.length) + '</div>' +
+        '<div class="l">Payment received</div></div>' +
+      '<div><div class="n">' + nf(d.alreadyVoid.length) + '</div>' +
+        '<div class="l">Already void</div></div>' +
+      '<div class="bad"><div class="n">' + nf(d.notFound.length) + '</div>' +
+        '<div class="l">Not in QuickBooks</div></div>';
+
+    var box = $('buckets');
+    box.innerHTML = '';
+
+    bucket(box, 'ready', 'Ready to void', d.ready, false, function(r){
+      return '<tr><td>' + esc(r.doc) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">' + money(r.total) + '</td></tr>';
+    });
+
+    bucket(box, 'paid', 'Payment already received', d.paid, true, function(r){
+      var notes = (r.payments || []).map(function(p){
+        return 'CPR ' + esc(p.cpr) + ' \u00b7 ' + esc(p.date) +
+               ' \u00b7 ' + esc(p.bank) + ' \u00b7 ' + money(p.amount);
+      }).join('<br>');
+      return '<tr><td>' + esc(r.doc) +
+             '<span class="paynote">' + notes + '</span></td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">' + money(r.total) + '</td></tr>';
+    });
+
+    bucket(box, 'alreadyVoid', 'Already void - nothing to do', d.alreadyVoid, false, function(r){
+      return '<tr><td>' + esc(r.doc) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">0.00</td></tr>';
+    });
+
+    bucket(box, 'notFound', 'Not found in QuickBooks', d.notFound.map(function(x){
+      return { doc: x };
+    }), false, function(r){
+      return '<tr><td>' + esc(r.doc) + '</td><td></td><td></td></tr>';
+    });
+
+    drawDanger(d);
+
+    var can = d.ready.length + d.paid.length;
+    $('btnVoid').disabled = !can;
+    $('btnVoid').textContent = can
+      ? 'Void ' + nf(d.ready.length) + ' invoice' + (d.ready.length === 1 ? '' : 's')
+      : 'Nothing to void';
+    updateVoidButton();
+  }
+
+  function bucket(box, key, title, rows, warn, render){
+    if(!rows.length) return;
+    var el = document.createElement('div');
+    el.className = 'bucket' + (warn ? ' warn' : '');
+
+    var open = !!S.open[key];
+    el.innerHTML =
+      '<h4><span>' + esc(title) + ' (' + nf(rows.length) + ')</span>' +
+      '<span>' + (open ? '\u25B2' : '\u25BC') + '</span></h4>' +
+      (open
+        ? '<div class="inner"><table><thead><tr>' +
+          '<th>Invoice</th><th>Date</th><th class="num">Amount</th>' +
+          '</tr></thead><tbody>' + rows.map(render).join('') + '</tbody></table></div>'
+        : '');
+
+    el.querySelector('h4').addEventListener('click', function(){
+      S.open[key] = !S.open[key];
+      showScan(S.scan);
+    });
+
+    box.appendChild(el);
+  }
+
+  // the one dangerous choice on this page, spelled out
+  function drawDanger(d){
+    var box = $('dangerBox');
+    if(!d.paid.length){ box.innerHTML = ''; return; }
+
+    box.innerHTML =
+      '<div class="danger">' +
+        '<h3>' + nf(d.paid.length) + ' of these invoices already has a payment against it</h3>' +
+        '<p>QuickBooks will not void a paid invoice. To void these, the payment has to ' +
+          'let go of the invoice first. That means the payment total drops by this ' +
+          'invoice\u0027s amount - and the CPR it belongs to will no longer match the ' +
+          'courier sheet on the Receive payments page.</p>' +
+        '<p>Leave this unticked and those invoices are left exactly as they are.</p>' +
+        '<label><input type="checkbox" id="doForce">' +
+          '<span>Free the payments and void these too</span></label>' +
+      '</div>';
+
+    $('doForce').addEventListener('change', updateVoidButton);
+  }
+
+  function forceOn(){
+    var cb = $('doForce');
+    return !!(cb && cb.checked);
+  }
+
+  function updateVoidButton(){
+    if(!S.scan) return;
+    var n = S.scan.ready.length + (forceOn() ? S.scan.paid.length : 0);
+    $('btnVoid').disabled = !n;
+    $('btnVoid').textContent = n
+      ? 'Void ' + nf(n) + ' invoice' + (n === 1 ? '' : 's')
+      : 'Nothing to void';
+  }
+
+  /* ---------- do it ---------- */
+
+  $('btnVoid').addEventListener('click', function(){
+    if(!S.scan) return;
+
+    var force = forceOn();
+    var list = S.scan.ready.slice();
+    if(force) list = list.concat(S.scan.paid);
+    if(!list.length) return;
+
+    var msg = 'Void ' + list.length + ' invoice' + (list.length === 1 ? '' : 's') +
+              ' in QuickBooks?\n\nThe invoice numbers stay, the amounts become zero.';
+    if(force){
+      msg += '\n\n' + S.scan.paid.length + ' of them will be taken off their payments first. ' +
+             'Those CPR totals will change.';
+    }
+    if(!confirm(msg)) return;
+
+    clearSay();
+    $('btnVoid').disabled = true;
+    $('vlog').innerHTML = '';
+    S.logLines = [];
+    S.lastEventId = 0;
+    S.job = null;
+
+    post('/api/void/start', {
+      invoices: list.map(function(r){ return { id: r.id, doc: r.doc }; }),
+      force: force
+    }).then(function(){
+      pollJob(true);
+      startPolling();
+    }).catch(function(e){
+      $('btnVoid').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    $('btnStop').textContent = 'Stopping...';
+    post('/api/void/stop').catch(function(){});
+  });
+
+  /* ---------- watching the run ---------- */
+
+  function startPolling(){
+    if(S.poller) return;
+    S.poller = setInterval(function(){ pollJob(false); }, 2000);
+  }
+  function stopPolling(){
+    if(!S.poller) return;
+    clearInterval(S.poller);
+    S.poller = null;
+  }
+
+  function pollJob(first){
+    var u = '/api/void/status?since=' + S.lastEventId + (first ? '&full=1' : '');
+    return get(u).then(function(d){
+      if(!d.job){ stopPolling(); return; }
+
+      var j = d.job;
+      S.job = j;
+
+      $('body').classList.remove('hide');
+      $('stepReview').classList.remove('hide');
+      $('runBox').classList.remove('hide');
+
+      (j.events || []).forEach(function(e){
+        S.logLines.push(e.msg);
+        var line = document.createElement('div');
+        if(e.type === 'ok') line.className = 'ok';
+        else if(e.type === 'held') line.className = 'held';
+        else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
+        line.textContent = e.msg;
+        $('vlog').appendChild(line);
+        $('vlog').scrollTop = $('vlog').scrollHeight;
+      });
+      if(j.lastEventId) S.lastEventId = j.lastEventId;
+
+      var live = j.state === 'running';
+      $('btnVoid').style.display = live ? 'none' : 'block';
+      $('btnStop').style.display = live ? 'block' : 'none';
+      $('btnStop').disabled = false;
+      $('btnStop').textContent = 'Stop';
+      if(!live) $('btnVoid').disabled = false;
+
+      var pct = j.total ? Math.round(j.done / j.total * 100) : 0;
+      $('bar').style.width = pct + '%';
+      $('runline').textContent =
+        nf(j.done) + ' of ' + nf(j.total) + ' \u00b7 ' +
+        nf(j.voidedCount) + ' voided \u00b7 ' +
+        nf(j.heldCount) + ' held back \u00b7 ' +
+        nf(j.failedCount) + ' failed' +
+        (live ? '   (running on the server - you can leave this page)' : '');
+
+      if(live){ startPolling(); return; }
+      stopPolling();
+    }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  /* ---------- downloads ---------- */
+
+  $('btnCopyLog').addEventListener('click', function(){
+    var ta = document.createElement('textarea');
+    ta.value = S.logLines.join('\n');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); $('btnCopyLog').textContent = 'Copied'; }
+    catch(e){ $('btnCopyLog').textContent = 'Copy failed'; }
+    document.body.removeChild(ta);
+    setTimeout(function(){ $('btnCopyLog').textContent = 'Copy log'; }, 2000);
+  });
+
+  $('btnDlVoided').addEventListener('click', function(){
+    var v = (S.job && S.job.voided) || [];
+    if(!v.length) return say('bad', '<b>Nothing voided yet.</b>');
+    download('voided-invoices.csv',
+      [['Invoice', 'QB Id']].concat(v.map(function(r){ return [r.doc, r.id]; })));
+  });
+
+  $('btnDlLeft').addEventListener('click', function(){
+    var held = (S.job && S.job.held) || [];
+    var failed = (S.job && S.job.failed) || [];
+    var rows = held.map(function(r){ return [r.doc, 'held back', r.msg]; })
+      .concat(failed.map(function(r){ return [r.doc, 'failed', r.msg]; }));
+    if(!rows.length) return say('bad', '<b>Everything went through.</b>');
+    download('not-voided.csv', [['Invoice', 'What happened', 'Why']].concat(rows));
+  });
+
+  $('btnClearRun').addEventListener('click', function(){
+    post('/api/void/clear').then(function(){
+      S.job = null;
+      S.lastEventId = 0;
+      S.logLines = [];
+      $('vlog').innerHTML = '';
+      $('runBox').classList.add('hide');
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+})();
+</script>
+</body>
+</html>
