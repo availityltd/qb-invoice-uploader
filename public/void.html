@@ -439,7 +439,7 @@
         S.logLines.push(e.msg);
         var line = document.createElement('div');
         if(e.type === 'ok') line.className = 'ok';
-        else if(e.type === 'held') line.className = 'held';
+        else if(e.type === 'held' || e.type === 'retry') line.className = 'held';
         else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
         line.textContent = e.msg;
         $('vlog').appendChild(line);
