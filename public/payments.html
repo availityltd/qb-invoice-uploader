@@ -773,6 +773,34 @@
     st.readyToPay = d.totals.matched;
     drawCprs();
   }
+  // bring one card's colour and totals up to date, without touching the others
+  function refreshCard(key, d, tr){
+    var st = S.status[key];
+    if(!st) return;
+
+    var qbAmount = tr && tr.qbAmount !== undefined ? tr.qbAmount : st.qbAmount;
+    var notes = (tr && tr.notes) ? tr.notes.slice() : [];
+
+    // the sheet-vs-QuickBooks gap still belongs on the card
+    if(qbAmount !== undefined && st.sheetAmount !== undefined){
+      var gap = Math.round((qbAmount - st.sheetAmount) * 100) / 100;
+      if(Math.abs(gap) > 10){
+        notes.unshift({
+          kind: 'amount',
+          text: 'QuickBooks has ' + Number(qbAmount).toFixed(2) +
+                ', the sheet says ' + Number(st.sheetAmount).toFixed(2)
+        });
+      }
+    }
+
+    st.qbAmount = qbAmount;
+    st.notes = notes;
+
+    var clean = !notes.length && !d.totals.matched && d.totals.alreadyPaid > 0;
+    st.state = clean ? 'done' : (notes.length ? 'off' : st.state);
+
+    drawCprs();
+  }
   /* ---------- one CPR in detail ---------- */
 
   function openCpr(cprKey){
@@ -796,6 +824,7 @@
       if(S.match.headerRow !== undefined) S.headerRow = S.match.headerRow;
       if(S.match.statusCol !== undefined) S.statusCol = S.match.statusCol;
       keepOnCard(cprKey, S.match);
+      refreshCard(cprKey, S.match, S.trace);
       showMatch(S.match, S.trace);
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
@@ -921,9 +950,10 @@
           cprNumber: $('fx_ref_' + i).value.trim(),
           cprDate: $('fx_date_' + i).value || null,
           accountId: $('fx_acct_' + i).value || null
-        }).then(function(){
+       }).then(function(){
           b.textContent = 'Saved';
-          setTimeout(function(){ loadSheetStatus(); }, 800);
+          // only this CPR needs looking at again, not the whole sheet
+          setTimeout(function(){ openCpr(S.currentKey); }, 700);
         }).catch(function(e){
           b.disabled = false;
           b.textContent = 'Save';
