@@ -156,7 +156,9 @@ export async function loadSheet(sheetId, tabTitle, excel, saved) {
     const invoice = cols.invoice >= 0 ? clean(raw[cols.invoice]) : '';
     const amount  = cols.amount  >= 0 ? num(raw[cols.amount])   : 0;
     const status  = cols.status  >= 0 ? clean(raw[cols.status]) : '';
-
+// courier sheets end with a Total line - it has no order number, skip it
+    if (!invoice) continue;
+    if (/^(grand )?total/i.test(invoice)) continue;
     rows.push({
       sheetRow: r + 1,                       // 1-based, matches the sheet
       invoice,
