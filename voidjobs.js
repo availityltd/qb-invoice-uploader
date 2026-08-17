@@ -9,7 +9,6 @@ const MAX_EVENTS = 3000;
 const MAX_ROUNDS = 4;
 // QuickBooks access tokens last an hour - refresh well before that
 const TOKEN_LIFE = 40 * 60 * 1000;
-
 function isAuthError(msg) {
   return /AuthenticationFailed|003200|\(401\)|Unauthorized|token expired/i.test(String(msg || ''));
 }
