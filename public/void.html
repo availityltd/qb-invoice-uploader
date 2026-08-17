@@ -389,7 +389,12 @@
     S.job = null;
 
     post('/api/void/start', {
-      invoices: list.map(function(r){ return { id: r.id, doc: r.doc }; }),
+      invoices: list.map(function(r){
+        return {
+          id: r.id, doc: r.doc, syncToken: r.syncToken,
+          hasPayment: !!(r.payments && r.payments.length)
+        };
+      }),
       force: force
     }).then(function(){
       pollJob(true);
