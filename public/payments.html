@@ -693,11 +693,31 @@
         '<small>' + (g.cprDate ? esc(g.cprDate) + ' \u00b7 ' : '') + line + '</small>';
       card.appendChild(head);
 
-      if(st && st.notes && st.notes.length){
+     if(st && st.notes && st.notes.length){
         var why = document.createElement('div');
         why.className = 'why';
         why.innerHTML = st.notes.map(function(n){ return esc(n.text); }).join('<br>');
         card.appendChild(why);
+      }
+
+      // the invoices behind the difference, kept on the card once looked up
+      if(st && st.trouble && st.trouble.length){
+        var head = document.createElement('div');
+        head.className = 'why';
+        head.style.fontWeight = '700';
+        head.textContent = st.trouble.length + ' invoice' +
+          (st.trouble.length === 1 ? '' : 's') + ' behind the difference' +
+          (st.alreadyPaid !== undefined ? '  \u00b7  ' + nf(st.alreadyPaid) + ' received' : '');
+        card.appendChild(head);
+
+        var tbl = document.createElement('div');
+        tbl.className = 'trouble';
+        tbl.innerHTML = '<table>' + st.trouble.map(function(r){
+          return '<tr><td>' + esc(r.invoice) + '</td>' +
+                 '<td class="num">' + money(r.sheet) + '</td>' +
+                 '<td class="num">' + (r.qb === null ? '\u2014' : money(r.qb)) + '</td></tr>';
+        }).join('') + '</table>';
+        card.appendChild(tbl);
       }
 
       card.addEventListener('click', function(){
@@ -709,7 +729,29 @@
       box.appendChild(card);
     });
   }
+// hang the problem invoices off the CPR card, so opening another CPR
+  // does not hide what was wrong with this one
+  function keepOnCard(key, d){
+    var rows = [];
+    (d.amountOff || []).forEach(function(r){
+      rows.push({
+        invoice: r.invoice,
+        sheet: r.sheetAmount,
+        qb: r.qbBalance,
+        why: 'amount differs'
+      });
+    });
+    (d.notInQb || []).forEach(function(r){
+      rows.push({ invoice: r.invoice, sheet: r.amount, qb: null, why: 'not in QB' });
+    });
 
+    var st = S.status[key];
+    if(!st) { st = { cpr: key, state: 'unknown', notes: [] }; S.status[key] = st; }
+    st.trouble = rows;
+    st.alreadyPaid = d.totals.alreadyPaid;
+    st.readyToPay = d.totals.matched;
+    drawCprs();
+  }
   /* ---------- one CPR in detail ---------- */
 
   function openCpr(cprKey){
@@ -732,6 +774,7 @@
       S.trace = both[1];
       if(S.match.headerRow !== undefined) S.headerRow = S.match.headerRow;
       if(S.match.statusCol !== undefined) S.statusCol = S.match.statusCol;
+      keepOnCard(cprKey, S.match);
       showMatch(S.match, S.trace);
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
