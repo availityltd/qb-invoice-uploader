@@ -283,3 +283,59 @@ export async function postPayment(realmId, token, payload) {
 }
 
 export { listFolders, listSheetsIn, listTabs, paintRows, getSetting, setSetting, recordRun };
+// Every payment we post carries the CPR number in PaymentRefNum, so one
+// sweep of the payments tells us which CPRs are already done - no need to
+// check thousands of invoices one by one.
+export async function paymentsByCpr(realmId, token, fromDate, toDate) {
+  const out = new Map();
+
+  let where = '';
+  if (fromDate && toDate) {
+    where = `WHERE TxnDate >= '${fromDate}' AND TxnDate <= '${toDate}' `;
+  }
+
+  let start = 1;
+  while (true) {
+    const q = await qbQuery(realmId, token,
+      `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, PrivateNote ` +
+      `FROM Payment ${where}STARTPOSITION ${start} MAXRESULTS 1000`);
+
+    const arr = q.Payment || [];
+    arr.forEach(p => {
+      const ref = clean(p.PaymentRefNum);
+      if (!ref) return;
+
+      if (!out.has(ref)) {
+        out.set(ref, { cpr: ref, count: 0, amount: 0, ids: [], dates: [], accounts: [] });
+      }
+      const g = out.get(ref);
+      g.count++;
+      g.amount += Number(p.TotalAmt || 0);
+      g.ids.push(p.Id);
+      if (p.TxnDate && g.dates.indexOf(p.TxnDate) < 0) g.dates.push(p.TxnDate);
+
+      const acc = p.DepositToAccountRef;
+      if (acc && acc.value) {
+        const hit = g.accounts.find(a => a.id === String(acc.value));
+        if (!hit) g.accounts.push({ id: String(acc.value), name: acc.name || '' });
+      }
+    });
+
+    if (arr.length < 1000) break;
+    start += 1000;
+    if (start > 9000) break;
+  }
+
+  const obj = {};
+  out.forEach((v, k) => {
+    obj[k] = {
+      cpr: v.cpr,
+      count: v.count,
+      amount: Math.round(v.amount * 100) / 100,
+      ids: v.ids,
+      dates: v.dates,
+      accounts: v.accounts
+    };
+  });
+  return obj;
+}
