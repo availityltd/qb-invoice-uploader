@@ -678,6 +678,8 @@
 
     S.groups.forEach(function(g){
       var key = g.cprNumber || 'All rows';
+      // a stray row or two with no CPR number is not worth a card
+      if(!g.cprNumber && g.delivered < 5) return;
       var st = S.status[key];
 
       var card = document.createElement('div');
