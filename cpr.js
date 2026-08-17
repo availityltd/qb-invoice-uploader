@@ -212,8 +212,8 @@ export async function findInvoices(realmId, token, numbers) {
     });
     if (!variants.length) continue;
 
-    const q = await qbQuery(realmId, token,
-      `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, SyncToken ` +
+   const q = await qbQuery(realmId, token,
+      `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, SyncToken, LinkedTxn ` +
       `FROM Invoice WHERE DocNumber IN (${variants.join(',')}) MAXRESULTS 1000`);
 
     (q.Invoice || []).forEach(inv => {
@@ -224,6 +224,11 @@ export async function findInvoices(realmId, token, numbers) {
       const prev = found.get(d);
       // an unpaid copy is the one worth paying
       if (!prev || (prev.balance <= 0.005 && bal > 0.005)) {
+        // whatever payment is sitting on this invoice - the trail back to a CPR
+        const payIds = (inv.LinkedTxn || [])
+          .filter(t => t.TxnType === 'Payment')
+          .map(t => String(t.TxnId));
+
         found.set(d, {
           id: inv.Id,
           doc: inv.DocNumber || '',
@@ -231,7 +236,8 @@ export async function findInvoices(realmId, token, numbers) {
           total,
           balance: bal,
           customerId: inv.CustomerRef ? inv.CustomerRef.value : null,
-          customerName: inv.CustomerRef ? (inv.CustomerRef.name || '') : ''
+          customerName: inv.CustomerRef ? (inv.CustomerRef.name || '') : '',
+          paymentIds: payIds
         });
       }
     });
@@ -339,38 +345,38 @@ export async function paymentsByCpr(realmId, token, fromDate, toDate) {
   });
   return obj;
 }
-// Given invoices that QuickBooks says are paid, find the payments behind them.
-// Tells us whether a CPR was received without its number on the payment.
-export async function paymentsForInvoices(realmId, token, invoiceIds) {
-  const ids = [...new Set((invoiceIds || []).map(String).filter(Boolean))];
+// Look up payments by their own ids - the ids come off the invoices' LinkedTxn.
+// This is how we spot a CPR that was received under the wrong number, or with
+// no number at all: the invoice still leads us to the payment behind it.
+export async function paymentsByIds(realmId, token, paymentIds) {
+  const ids = [...new Set((paymentIds || []).map(String).filter(Boolean))];
   if (!ids.length) return [];
 
   const seen = new Map();
 
-  // linked payments are found by asking each invoice what is attached to it
-  for (let i = 0; i < ids.length; i += 30) {
-    const chunk = ids.slice(i, i + 30);
-    const list = chunk.map(x => `'${x}'`).join(',');
-
+  for (let i = 0; i < ids.length; i += 40) {
+    const list = ids.slice(i, i + 40).map(x => `'${x}'`).join(',');
     let q;
     try {
       q = await qbQuery(realmId, token,
-        `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, Line ` +
-        `FROM Payment WHERE Id IN (${list})`);
+        `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, PrivateNote ` +
+        `FROM Payment WHERE Id IN (${list}) MAXRESULTS 1000`);
     } catch (e) {
       continue;
     }
     (q.Payment || []).forEach(p => {
-      if (!seen.has(p.Id)) seen.set(p.Id, p);
+      if (seen.has(p.Id)) return;
+      seen.set(p.Id, {
+        id: p.Id,
+        date: p.TxnDate || '',
+        amount: Number(p.TotalAmt || 0),
+        ref: clean(p.PaymentRefNum),
+        note: clean(p.PrivateNote),
+        accountId: p.DepositToAccountRef ? String(p.DepositToAccountRef.value) : '',
+        accountName: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : ''
+      });
     });
   }
 
-  return [...seen.values()].map(p => ({
-    id: p.Id,
-    date: p.TxnDate || '',
-    amount: Number(p.TotalAmt || 0),
-    ref: clean(p.PaymentRefNum),
-    accountId: p.DepositToAccountRef ? String(p.DepositToAccountRef.value) : '',
-    accountName: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : ''
-  }));
+  return [...seen.values()];
 }
