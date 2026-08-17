@@ -7,7 +7,22 @@ const API = 'https://quickbooks.api.intuit.com';
 const jobs = new Map();
 const MAX_EVENTS = 3000;
 const MAX_ROUNDS = 4;
+// QuickBooks access tokens last an hour - refresh well before that
+const TOKEN_LIFE = 40 * 60 * 1000;
 
+function isAuthError(msg) {
+  return /AuthenticationFailed|003200|\(401\)|Unauthorized|token expired/i.test(String(msg || ''));
+}
+
+// hands back a token that is still good, fetching a new one when it has aged
+async function tokenFor(realmId, job, force) {
+  if (force || !job.token || (Date.now() - job.tokenAt) > TOKEN_LIFE) {
+    job.token = await getAccessToken(realmId);
+    job.tokenAt = Date.now();
+    if (force) push(job, 'log', 'QuickBooks sign-in had expired - signed in again.');
+  }
+  return job.token;
+}
 // worth another go - QuickBooks was busy or the inventory was locked for a moment
 function worthRetry(msg) {
   return /another user was creating|stale object|429|throttle|System Failure|application error|business validation|deadlock|timeout|temporarily|try again/i
@@ -154,6 +169,8 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
     force: !!force,
    delay: delay === undefined ? 0 : Number(delay) || 0,
     lanes: 1,
+    token: null,
+    tokenAt: 0,
     total: invoices.length,
     done: 0,
     voided: [],
@@ -177,7 +194,7 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
 
 async function run(realmId, job) {
   push(job, 'log', 'Connecting to QuickBooks...');
-  const token = await getAccessToken(realmId);
+  await tokenFor(realmId, job);
 
   push(job, 'log', `Voiding ${job.total} invoice${job.total === 1 ? '' : 's'}` +
     (job.force ? ' - linked payments will be freed first.' : '.'));
@@ -194,14 +211,20 @@ async function run(realmId, job) {
       push(job, 'log', `Round ${round} of ${MAX_ROUNDS}: trying ${pending.length} again.`);
     }
 
-    async function attempt(inv) {
+   async function attempt(inv) {
       let r;
       try {
+        const token = await tokenFor(realmId, job);
         r = await voidOne(realmId, token, inv, job.force);
+
+        // the hour ran out mid-run - sign in again and have another go now
+        if (!r.ok && isAuthError(r.msg)) {
+          const fresh = await tokenFor(realmId, job, true);
+          r = await voidOne(realmId, fresh, Object.assign({}, inv, { syncToken: null }), job.force);
+        }
       } catch (e) {
         r = { ok: false, msg: e.message };
       }
-
       if (r.ok) {
         job.done++;
         job.voided.push({ doc: inv.doc, id: inv.id, already: !!r.already });
