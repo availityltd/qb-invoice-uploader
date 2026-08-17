@@ -26,6 +26,7 @@ import {
 import { inspectExcel, writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
+import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1565,6 +1566,156 @@ app.post('/api/cpr/receive-clear', async (req, res) => {
   if (!realmId) return;
   const ok = clearPayJob(realmId);
   if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
+  res.json({ ok: true });
+});
+// ==================== Void invoices ====================
+
+// Look the pasted numbers up in QuickBooks and sort them into buckets,
+// so nothing is voided before you have seen what it is.
+app.post('/api/void/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const raw = req.body.numbers;
+  const list = (Array.isArray(raw) ? raw : String(raw || '').split(/[\s,;]+/))
+    .map(x => String(x).trim())
+    .filter(Boolean);
+
+  if (!list.length) return res.status(400).json({ error: 'Paste some invoice numbers first' });
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    // both spellings - QB treats #91313480 and 91313480 as different invoices
+    const wanted = [];
+    const seen = new Set();
+    list.forEach(n => {
+      const d = digitsOf(n);
+      if (!d || seen.has(d)) return;
+      seen.add(d);
+      wanted.push(d);
+    });
+
+    const found = new Map();
+    for (let i = 0; i < wanted.length; i += 40) {
+      const chunk = wanted.slice(i, i + 40);
+      const variants = [];
+      chunk.forEach(d => variants.push(`'#${d}'`, `'${d}'`));
+
+      const q = await qbQuery(realmId, token,
+        `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn ` +
+        `FROM Invoice WHERE DocNumber IN (${variants.join(',')}) MAXRESULTS 1000`);
+
+      (q.Invoice || []).forEach(inv => {
+        const d = digitsOf(inv.DocNumber);
+        if (!d) return;
+        if (!found.has(d)) found.set(d, []);
+        found.get(d).push(inv);
+      });
+    }
+
+    // anything with a payment on it needs the whole story before you decide
+    const payIds = [];
+    found.forEach(arr => arr.forEach(inv => {
+      (inv.LinkedTxn || []).forEach(t => {
+        if (t.TxnType === 'Payment') payIds.push(String(t.TxnId));
+      });
+    }));
+
+    let payMap = new Map();
+    if (payIds.length) {
+      const pays = await paymentsByIds(realmId, token, [...new Set(payIds)]);
+      pays.forEach(p => payMap.set(String(p.id), p));
+    }
+
+    const accounts = await listAccounts(realmId, token);
+    const accName = id => {
+      const hit = accounts.find(a => String(a.id) === String(id));
+      return hit ? hit.name : id;
+    };
+
+    const ready = [], paid = [], alreadyVoid = [], notFound = [];
+
+    wanted.forEach(d => {
+      const copies = found.get(d);
+      if (!copies || !copies.length) { notFound.push(d); return; }
+
+      copies.forEach(inv => {
+        const total = Number(inv.TotalAmt || 0);
+        const entry = {
+          id: inv.Id,
+          doc: inv.DocNumber || '',
+          date: inv.TxnDate || '',
+          total,
+          balance: Number(inv.Balance === undefined ? total : inv.Balance),
+          customer: inv.CustomerRef ? (inv.CustomerRef.name || '') : ''
+        };
+
+        if (total === 0) { alreadyVoid.push(entry); return; }
+
+        const linked = (inv.LinkedTxn || [])
+          .filter(t => t.TxnType === 'Payment')
+          .map(t => payMap.get(String(t.TxnId)))
+          .filter(Boolean);
+
+        if (linked.length) {
+          entry.payments = linked.map(p => ({
+            id: p.id,
+            cpr: p.ref || '(no CPR number)',
+            date: p.date,
+            amount: p.amount,
+            bank: p.accountName || accName(p.accountId)
+          }));
+          paid.push(entry);
+          return;
+        }
+
+        ready.push(entry);
+      });
+    });
+
+    res.json({
+      asked: list.length,
+      unique: wanted.length,
+      ready, paid, alreadyVoid, notFound
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/void/start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { invoices, force = false, delay = 400 } = req.body;
+  try {
+    const id = startVoidJob(realmId, { invoices, force, delay });
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/void/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = voidSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/void/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopVoidJob(realmId) });
+});
+
+app.post('/api/void/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearVoidJob(realmId);
+  if (!ok) return res.status(409).json({ error: 'The void run is still going' });
   res.json({ ok: true });
 });
 // ==================== Upload ====================
