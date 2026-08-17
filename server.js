@@ -3,7 +3,6 @@ import multer from 'multer';
 import cookieParser from 'cookie-parser';
 import XLSX from 'xlsx';
 import crypto from 'crypto';
-
 import {
   initDb, saveCompany, getCompany, logUpload,
   getNegativeItems, setNegativeItems
