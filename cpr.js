@@ -339,3 +339,38 @@ export async function paymentsByCpr(realmId, token, fromDate, toDate) {
   });
   return obj;
 }
+// Given invoices that QuickBooks says are paid, find the payments behind them.
+// Tells us whether a CPR was received without its number on the payment.
+export async function paymentsForInvoices(realmId, token, invoiceIds) {
+  const ids = [...new Set((invoiceIds || []).map(String).filter(Boolean))];
+  if (!ids.length) return [];
+
+  const seen = new Map();
+
+  // linked payments are found by asking each invoice what is attached to it
+  for (let i = 0; i < ids.length; i += 30) {
+    const chunk = ids.slice(i, i + 30);
+    const list = chunk.map(x => `'${x}'`).join(',');
+
+    let q;
+    try {
+      q = await qbQuery(realmId, token,
+        `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, Line ` +
+        `FROM Payment WHERE Id IN (${list})`);
+    } catch (e) {
+      continue;
+    }
+    (q.Payment || []).forEach(p => {
+      if (!seen.has(p.Id)) seen.set(p.Id, p);
+    });
+  }
+
+  return [...seen.values()].map(p => ({
+    id: p.Id,
+    date: p.TxnDate || '',
+    amount: Number(p.TotalAmt || 0),
+    ref: clean(p.PaymentRefNum),
+    accountId: p.DepositToAccountRef ? String(p.DepositToAccountRef.value) : '',
+    accountName: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : ''
+  }));
+}
