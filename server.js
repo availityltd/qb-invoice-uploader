@@ -243,7 +243,6 @@ function toISODate(v) {
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   return null;
 }
-
 function num(v) {
   const n = parseFloat(String(v ?? '').replace(/[^0-9.\-]/g, ''));
   return isNaN(n) ? 0 : n;
