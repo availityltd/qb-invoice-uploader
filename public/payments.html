@@ -742,10 +742,18 @@
     $('stepMatch').classList.remove('hide');
     var t = d.totals;
 
-    $('matchHint').textContent =
-      'CPR ' + (d.cprNumber || '-') + (d.cprDate ? ' dated ' + d.cprDate : ' - no date in the sheet') +
+   var trouble = t.amountOff + t.notInQb;
+
+    $('matchHint').innerHTML =
+      'CPR ' + esc(d.cprNumber || '-') +
+      (d.cprDate ? ' dated ' + esc(d.cprDate) : ' - no date in the sheet') +
       ' \u00b7 ' + nf(t.sheetRows) + ' rows in the sheet' +
-      (t.skipped ? ' \u00b7 ' + nf(t.skipped) + ' not delivered, skipped' : '');
+      (t.skipped ? ' \u00b7 ' + nf(t.skipped) + ' not delivered, skipped' : '') +
+      (trouble
+        ? '<br><b style="color:var(--warn)">' + nf(trouble) + ' invoice' +
+          (trouble === 1 ? '' : 's') + ' behind the difference</b> \u00b7 ' +
+          nf(t.alreadyPaid) + ' already received'
+        : '');
 
     drawTrace(tr);
 
@@ -768,9 +776,13 @@
       lists.appendChild(el);
     }
 
-    box('Amount differs', d.amountOff, function(r){
-      return '<tr><td>' + esc(r.invoice) + '</td><td class="num">' + money(r.sheetAmount) +
-             '</td><td class="num" style="color:var(--muted)">QB ' + money(r.qbBalance) + '</td></tr>';
+    box('Amount differs \u2014 sheet vs QuickBooks', d.amountOff, function(r){
+      var gap = Number(r.sheetAmount) - Number(r.qbBalance);
+      return '<tr><td>' + esc(r.invoice) + '</td>' +
+             '<td class="num">' + money(r.sheetAmount) + '</td>' +
+             '<td class="num" style="color:var(--muted)">' + money(r.qbBalance) + '</td>' +
+             '<td class="num" style="color:var(--warn)">' +
+               (gap > 0 ? '+' : '') + money(gap) + '</td></tr>';
     });
     box('Not found in QuickBooks', d.notInQb, function(r){
       return '<tr><td>' + esc(r.invoice) + '</td><td class="num">' + money(r.amount) + '</td></tr>';
