@@ -29,6 +29,7 @@ import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices }
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
+import { startAdvJob, stopAdvJob, clearAdvJob, advSnapshot } from './advjobs.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1776,6 +1777,52 @@ app.get('/api/adv/match', async (req, res) => {
       })),
       ready, overpaid, settled, notInQb
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// post the advance payments in the background
+app.post('/api/adv/receive', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const id = startAdvJob(realmId, req.body);
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/adv/receive-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = advSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/adv/receive-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopAdvJob(realmId) });
+});
+
+app.post('/api/adv/receive-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearAdvJob(realmId);
+  if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
+  res.json({ ok: true });
+});
+
+// the bank used last time, so it comes up ready
+app.get('/api/adv/last-bank', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ bank: await getSetting(realmId, 'adv:lastBank', null) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
