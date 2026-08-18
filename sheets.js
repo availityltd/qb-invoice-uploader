@@ -388,3 +388,50 @@ export async function testConnection() {
   const r = await drive.about.get({ fields: 'user' });
   return r.data.user;
 }
+
+// Sheets holds pictures two very different ways, and only one is reachable:
+// =IMAGE() formulas live inside a cell, while pasted pictures float over the
+// grid and the API has no listing for them. This reports which kind is there.
+export async function peekImages(sheetId, tabTitle) {
+  const sheets = google.sheets({ version: 'v4', auth: auth() });
+
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    fields: 'sheets.properties.title'
+  });
+  const tabs = (meta.data.sheets || []).map(s => s.properties.title);
+  const tab = tabTitle || tabs[0];
+
+  // a few hundred rows is plenty to tell what kind of pictures these are,
+  // and keeps a very large sheet from being pulled across
+  const r = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `'${tab}'!A1:Z200`,
+    valueRenderOption: 'FORMULA'
+  });
+
+  const grid = r.data.values || [];
+  const inCell = [];
+
+  grid.forEach((row, ri) => {
+    (row || []).forEach((cell, ci) => {
+      const s = String(cell == null ? '' : cell);
+      if (/^=\s*IMAGE\s*\(/i.test(s)) {
+        const url = (s.match(/["']([^"']+)["']/) || [])[1] || '';
+        if (inCell.length < 8) inCell.push({ row: ri + 1, col: ci + 1, url });
+      }
+    });
+  });
+
+  return {
+    tabs,
+    tab,
+    rowsScanned: grid.length,
+    imageFormulas: inCell.length,
+    samples: inCell,
+    verdict: inCell.length
+      ? 'Reachable - these are =IMAGE() formulas and their links can be read.'
+      : 'Not reachable through the sheet - no =IMAGE() formulas on this tab. ' +
+        'Pictures pasted over the grid are not listed by the API at all.'
+  };
+}
