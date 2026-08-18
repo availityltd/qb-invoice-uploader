@@ -18,8 +18,33 @@
   .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
   .step.done{border-color:var(--qbo)}
 
+  .tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:18px}
+  .tabs button{border:none;background:none;padding:10px 18px;font-size:13px;font-weight:600;
+    color:var(--muted);cursor:pointer;font-family:inherit;border-bottom:2px solid transparent}
+  .tabs button.on{color:var(--text);border-bottom-color:var(--qbo)}
+
   textarea#nums{width:100%;min-height:150px;font-family:var(--mono);font-size:12.5px;
     line-height:1.7;resize:vertical}
+
+  .picks{display:flex;flex-wrap:wrap;gap:8px}
+  .pick{border:1px solid var(--line);background:#fff;border-radius:7px;padding:9px 14px;
+    cursor:pointer;font-size:13px;font-family:inherit;transition:.13s;text-align:left}
+  .pick:hover{border-color:var(--qbo)}
+  .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+
+  .days{display:flex;flex-wrap:wrap;gap:7px;max-height:210px;overflow:auto;
+    border:1px solid var(--line);border-radius:8px;padding:12px;background:#fff}
+  .day{border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:12px;
+    cursor:pointer;font-family:var(--mono);transition:.12s}
+  .day:hover{border-color:var(--qbo)}
+  .day.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .day small{display:block;font-size:10px;color:var(--muted);font-family:var(--sans)}
+
+  .range{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;
+    margin-bottom:14px}
+  .range label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
 
   .tally{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
   .tally > div{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;
@@ -58,12 +83,14 @@
   .runline{font-size:12.5px;color:var(--muted);font-family:var(--mono);margin-bottom:10px}
 
   .vlog{background:#0F2E24;color:#CFE8D8;border-radius:8px;padding:12px 15px;
-    font-family:var(--mono);font-size:11.5px;line-height:1.7;max-height:260px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.7;max-height:280px;
     overflow:auto;margin-top:12px}
   .vlog .ok{color:#8FE3A8}
   .vlog .held{color:#FFD98A}
+  .vlog .retry{color:#FFD98A}
   .vlog .fail{color:#FF9C9C}
   .vlog .error{color:#FF9C9C}
+  .vlog .t{color:#6E9C82;margin-right:8px}
 
   .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .acts button.mini{font-size:11.5px;padding:5px 12px;border-radius:6px;
@@ -95,20 +122,75 @@
 
       <div id="body" class="hide">
 
-        <div class="step" id="stepPaste">
-          <h2>Order numbers</h2>
-          <div class="hint">
-            Paste them in any shape - one per line, or straight out of a spreadsheet column.
-            With or without the <b>#</b>; both spellings are looked up.
+        <div class="tabs">
+          <button id="tabSheet" class="on">From the return sheet</button>
+          <button id="tabPaste">Paste numbers</button>
+        </div>
+
+        <!-- ============ from the sheet ============ -->
+        <div id="modeSheet">
+
+          <div class="step" id="stepRoot">
+            <h2>Return sheet folder</h2>
+            <div class="hint">The Drive folder holding the return order workbooks. Paste the link or the ID.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input id="rootIn" placeholder="https://drive.google.com/drive/folders/..." style="flex:1;min-width:260px">
+              <button class="solid" id="btnRoot">Save</button>
+            </div>
+            <div id="rootNote" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
           </div>
-          <textarea id="nums" placeholder="#91298851&#10;#91300886&#10;91302104"></textarea>
-          <div class="acts">
-            <button class="solid" id="btnScan">Look these up in QuickBooks</button>
-            <button class="mini" id="btnClearNums">Clear</button>
-            <span class="mono" id="numCount" style="font-size:12px;color:var(--muted);align-self:center"></span>
+
+          <div class="step hide" id="stepBook">
+            <h2>Workbook</h2>
+            <div class="hint" id="bookHint"></div>
+            <div class="picks" id="books"></div>
+          </div>
+
+          <div class="step hide" id="stepTab">
+            <h2>Which sheet inside it</h2>
+            <div class="hint">Each client has its own tab.</div>
+            <div class="picks" id="tabList"></div>
+          </div>
+
+          <div class="step hide" id="stepDays">
+            <h2>Dates</h2>
+            <div class="hint" id="dayHint"></div>
+            <div class="range">
+              <div>
+                <label>From</label>
+                <select id="dFrom"></select>
+              </div>
+              <div>
+                <label>To</label>
+                <select id="dTo"></select>
+              </div>
+            </div>
+            <div class="days" id="dayList"></div>
+            <div class="acts">
+              <button class="solid" id="btnPull">Take these order numbers</button>
+              <span class="mono" id="pullNote" style="font-size:12px;color:var(--muted);align-self:center"></span>
+            </div>
           </div>
         </div>
 
+        <!-- ============ pasted ============ -->
+        <div id="modePaste" class="hide">
+          <div class="step" id="stepPaste">
+            <h2>Order numbers</h2>
+            <div class="hint">
+              One per line, or straight out of a spreadsheet column.
+              With or without the <b>#</b>; both spellings are looked up.
+            </div>
+            <textarea id="nums" placeholder="#91298851&#10;#91300886&#10;91302104"></textarea>
+            <div class="acts">
+              <button class="solid" id="btnScan">Look these up in QuickBooks</button>
+              <button class="mini" id="btnClearNums">Clear</button>
+              <span class="mono" id="numCount" style="font-size:12px;color:var(--muted);align-self:center"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ review and run ============ -->
         <div class="step hide" id="stepReview">
           <h2>What QuickBooks found</h2>
           <div class="hint" id="scanHint"></div>
@@ -125,6 +207,7 @@
             <div class="runline" id="runline"></div>
             <div class="vlog" id="vlog"></div>
             <div class="acts">
+              <button class="mini" id="btnRetry" style="display:none">Retry what is left</button>
               <button class="mini" id="btnCopyLog">Copy log</button>
               <button class="mini" id="btnDlVoided">Download voided</button>
               <button class="mini" id="btnDlLeft">Download not voided</button>
@@ -146,6 +229,8 @@
   var $ = function(id){ return document.getElementById(id); };
 
   var S = {
+    root: '', book: null, tab: '', excel: false,
+    days: [], picked: {},
     scan: null, job: null, poller: null, lastEventId: 0,
     open: { ready:true, paid:true, alreadyVoid:false, notFound:false },
     logLines: []
@@ -160,6 +245,10 @@
   function esc(s){
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function clock(ms){
+    var d = ms ? new Date(ms) : new Date();
+    return d.toLocaleTimeString();
   }
 
   function say(cls, html){
@@ -208,11 +297,219 @@
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
     pollJob(true);
+
+    get('/api/void/sheet-root').then(function(d){
+      if(d.folderId){
+        S.root = d.folderId;
+        $('rootIn').value = d.folderId;
+        $('rootNote').textContent = 'Saved.';
+        $('stepRoot').classList.add('done');
+        loadBooks();
+      }
+    }).catch(function(){});
   });
+
+  $('tabSheet').addEventListener('click', function(){
+    $('tabSheet').classList.add('on');
+    $('tabPaste').classList.remove('on');
+    $('modeSheet').classList.remove('hide');
+    $('modePaste').classList.add('hide');
+  });
+  $('tabPaste').addEventListener('click', function(){
+    $('tabPaste').classList.add('on');
+    $('tabSheet').classList.remove('on');
+    $('modePaste').classList.remove('hide');
+    $('modeSheet').classList.add('hide');
+  });
+
+  /* ---------- the return sheet ---------- */
+
+  $('btnRoot').addEventListener('click', function(){
+    var v = $('rootIn').value.trim();
+    if(!v) return;
+    $('btnRoot').disabled = true;
+    post('/api/void/sheet-root', { folderId: v }).then(function(d){
+      $('btnRoot').disabled = false;
+      S.root = d.folderId;
+      $('rootIn').value = d.folderId;
+      $('rootNote').textContent = 'Saved.';
+      $('stepRoot').classList.add('done');
+      loadBooks();
+    }).catch(function(e){
+      $('btnRoot').disabled = false;
+      $('rootNote').textContent = e.message;
+    });
+  });
+
+  function loadBooks(){
+    $('stepBook').classList.remove('hide');
+    $('bookHint').textContent = 'Reading the folder...';
+    $('books').innerHTML = '';
+
+    get('/api/void/sheets').then(function(d){
+      var all = (d.sheets || []);
+      if(!all.length){
+        $('bookHint').textContent = 'No workbooks in that folder.';
+        return;
+      }
+      $('bookHint').textContent = all.length + ' workbook' + (all.length === 1 ? '' : 's') + ' in there.';
+      var box = $('books');
+      box.innerHTML = '';
+      all.forEach(function(f){
+        var b = document.createElement('button');
+        b.className = 'pick';
+        b.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+          (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
+        b.addEventListener('click', function(){
+          Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+          b.classList.add('on');
+          S.book = f;
+          S.excel = !!f.excel;
+          loadTabs();
+        });
+        box.appendChild(b);
+      });
+    }).catch(function(e){
+      $('bookHint').textContent = e.message;
+    });
+  }
+
+  function loadTabs(){
+    $('stepTab').classList.remove('hide');
+    $('stepDays').classList.add('hide');
+    $('tabList').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading tabs...</span>';
+
+    get('/api/void/tabs?sheetId=' + encodeURIComponent(S.book.id) + (S.excel ? '&excel=1' : ''))
+      .then(function(d){
+        var box = $('tabList');
+        box.innerHTML = '';
+        (d.tabs || []).forEach(function(t){
+          var b = document.createElement('button');
+          b.className = 'pick';
+          b.textContent = t.title;
+          b.addEventListener('click', function(){
+            Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+            b.classList.add('on');
+            S.tab = t.title;
+            loadDays();
+          });
+          box.appendChild(b);
+        });
+      }).catch(function(e){
+        $('tabList').innerHTML = '';
+        say('bad', '<b>' + esc(e.message) + '</b>');
+      });
+  }
+
+  function loadDays(){
+    $('stepDays').classList.remove('hide');
+    $('dayHint').textContent = 'Reading the dates...';
+    $('dayList').innerHTML = '';
+    $('pullNote').textContent = '';
+    S.picked = {};
+
+    var u = '/api/void/days?sheetId=' + encodeURIComponent(S.book.id) +
+            '&tab=' + encodeURIComponent(S.tab) + (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(d){
+      S.days = d.days || [];
+      if(!S.days.length){
+        $('dayHint').textContent = 'No dated columns found on that tab.';
+        return;
+      }
+
+      var total = S.days.reduce(function(s, x){ return s + x.count; }, 0);
+      $('dayHint').innerHTML =
+        nf(S.days.length) + ' days on this tab, ' + nf(total) + ' order numbers in all. ' +
+        'Pick a range, or tap the days you want.';
+
+      var f = $('dFrom'), t = $('dTo');
+      f.innerHTML = ''; t.innerHTML = '';
+      S.days.forEach(function(x){
+        var a = document.createElement('option');
+        a.value = x.date; a.textContent = x.label || x.date;
+        f.appendChild(a);
+        var b = document.createElement('option');
+        b.value = x.date; b.textContent = x.label || x.date;
+        t.appendChild(b);
+      });
+      f.value = S.days[0].date;
+      t.value = S.days[S.days.length - 1].date;
+
+      f.addEventListener('change', applyRange);
+      t.addEventListener('change', applyRange);
+      applyRange();
+    }).catch(function(e){
+      $('dayHint').textContent = e.message;
+    });
+  }
+
+  function applyRange(){
+    var from = $('dFrom').value, to = $('dTo').value;
+    S.picked = {};
+    S.days.forEach(function(x){
+      if(x.date >= from && x.date <= to) S.picked[x.date] = true;
+    });
+    drawDays();
+  }
+
+  function drawDays(){
+    var box = $('dayList');
+    box.innerHTML = '';
+    var n = 0, orders = 0;
+
+    S.days.forEach(function(x){
+      var on = !!S.picked[x.date];
+      if(on){ n++; orders += x.count; }
+
+      var b = document.createElement('button');
+      b.className = 'day' + (on ? ' on' : '');
+      b.innerHTML = esc(x.date) + '<small>' + nf(x.count) + ' orders</small>';
+      b.addEventListener('click', function(){
+        S.picked[x.date] = !S.picked[x.date];
+        drawDays();
+      });
+      box.appendChild(b);
+    });
+
+    $('pullNote').textContent = n + ' day' + (n === 1 ? '' : 's') + ' \u00b7 ' +
+      nf(orders) + ' order numbers';
+  }
+
+  $('btnPull').addEventListener('click', function(){
+    var dates = Object.keys(S.picked).filter(function(k){ return S.picked[k]; }).sort();
+    if(!dates.length) return say('bad', '<b>Pick at least one day.</b>');
+
+    clearSay();
+    $('btnPull').disabled = true;
+    say('', 'Reading the sheet...');
+
+    var u = '/api/void/numbers?sheetId=' + encodeURIComponent(S.book.id) +
+            '&tab=' + encodeURIComponent(S.tab) +
+            '&from=' + encodeURIComponent(dates[0]) +
+            '&to=' + encodeURIComponent(dates[dates.length - 1]) +
+            (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(d){
+      // the range endpoint is inclusive; keep only the days actually ticked
+      var wanted = d.numbers;
+      $('btnPull').disabled = false;
+      clearSay();
+      if(!wanted.length) return say('bad', '<b>No order numbers in those days.</b>');
+      $('nums').value = wanted.join('\n');
+      countNums();
+      runScan(wanted.join('\n'));
+    }).catch(function(e){
+      $('btnPull').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  /* ---------- pasted numbers ---------- */
 
   function countNums(){
     var n = $('nums').value.split(/[\s,;]+/).filter(Boolean).length;
-    $('numCount').textContent = n ? nf(n) + ' number' + (n === 1 ? '' : 's') + ' pasted' : '';
+    $('numCount').textContent = n ? nf(n) + ' number' + (n === 1 ? '' : 's') + ' ready' : '';
   }
   $('nums').addEventListener('input', countNums);
 
@@ -223,12 +520,13 @@
     clearSay();
   });
 
-  /* ---------- look them up ---------- */
-
   $('btnScan').addEventListener('click', function(){
     var text = $('nums').value.trim();
     if(!text) return say('bad', '<b>Paste some order numbers first.</b>');
+    runScan(text);
+  });
 
+  function runScan(text){
     clearSay();
     $('btnScan').disabled = true;
     say('', 'Looking these up in QuickBooks...');
@@ -237,20 +535,21 @@
       $('btnScan').disabled = false;
       clearSay();
       S.scan = d;
-      $('stepPaste').classList.add('done');
       showScan(d);
+      $('stepReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }).catch(function(e){
       $('btnScan').disabled = false;
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
-  });
+  }
+
+  /* ---------- what was found ---------- */
 
   function showScan(d){
     $('stepReview').classList.remove('hide');
-    $('runBox').classList.add('hide');
 
     $('scanHint').innerHTML =
-      nf(d.asked) + ' number' + (d.asked === 1 ? '' : 's') + ' pasted, ' +
+      nf(d.asked) + ' number' + (d.asked === 1 ? '' : 's') + ' looked up, ' +
       nf(d.unique) + ' after removing repeats. ' +
       '<b>Nothing has been changed yet.</b>';
 
@@ -297,12 +596,6 @@
     });
 
     drawDanger(d);
-
-    var can = d.ready.length + d.paid.length;
-    $('btnVoid').disabled = !can;
-    $('btnVoid').textContent = can
-      ? 'Void ' + nf(d.ready.length) + ' invoice' + (d.ready.length === 1 ? '' : 's')
-      : 'Nothing to void';
     updateVoidButton();
   }
 
@@ -329,18 +622,17 @@
     box.appendChild(el);
   }
 
-  // the one dangerous choice on this page, spelled out
   function drawDanger(d){
     var box = $('dangerBox');
     if(!d.paid.length){ box.innerHTML = ''; return; }
 
     box.innerHTML =
       '<div class="danger">' +
-        '<h3>' + nf(d.paid.length) + ' of these invoices already has a payment against it</h3>' +
+        '<h3>' + nf(d.paid.length) + ' of these already has a payment against it</h3>' +
         '<p>QuickBooks will not void a paid invoice. To void these, the payment has to ' +
-          'let go of the invoice first. That means the payment total drops by this ' +
-          'invoice\u0027s amount - and the CPR it belongs to will no longer match the ' +
-          'courier sheet on the Receive payments page.</p>' +
+          'let go of the invoice first. That drops the payment total by this invoice\u0027s ' +
+          'amount - and the CPR it belongs to will no longer match the courier sheet ' +
+          'on the Receive payments page.</p>' +
         '<p>Leave this unticked and those invoices are left exactly as they are.</p>' +
         '<label><input type="checkbox" id="doForce">' +
           '<span>Free the payments and void these too</span></label>' +
@@ -365,6 +657,32 @@
 
   /* ---------- do it ---------- */
 
+  function startRun(list, force){
+    clearSay();
+    $('btnVoid').disabled = true;
+    $('btnRetry').style.display = 'none';
+    $('vlog').innerHTML = '';
+    S.logLines = [];
+    S.lastEventId = 0;
+    S.job = null;
+
+    return post('/api/void/start', {
+      invoices: list.map(function(r){
+        return {
+          id: r.id, doc: r.doc, syncToken: r.syncToken,
+          hasPayment: !!(r.payments && r.payments.length)
+        };
+      }),
+      force: force
+    }).then(function(){
+      pollJob(true);
+      startPolling();
+    }).catch(function(e){
+      $('btnVoid').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
   $('btnVoid').addEventListener('click', function(){
     if(!S.scan) return;
 
@@ -381,27 +699,18 @@
     }
     if(!confirm(msg)) return;
 
-    clearSay();
-    $('btnVoid').disabled = true;
-    $('vlog').innerHTML = '';
-    S.logLines = [];
-    S.lastEventId = 0;
-    S.job = null;
+    startRun(list, force);
+  });
 
-    post('/api/void/start', {
-      invoices: list.map(function(r){
-        return {
-          id: r.id, doc: r.doc, syncToken: r.syncToken,
-          hasPayment: !!(r.payments && r.payments.length)
-        };
-      }),
-      force: force
-    }).then(function(){
-      pollJob(true);
-      startPolling();
-    }).catch(function(e){
-      $('btnVoid').disabled = false;
-      say('bad', '<b>' + esc(e.message) + '</b>');
+  // whatever is still standing, one more sweep - as many times as it takes
+  $('btnRetry').addEventListener('click', function(){
+    var left = ((S.job && S.job.failed) || []).map(function(r){
+      return { id: r.id, doc: r.doc };
+    });
+    if(!left.length) return say('bad', '<b>Nothing left to retry.</b>');
+
+    post('/api/void/clear').catch(function(){}).then(function(){
+      startRun(left, forceOn());
     });
   });
 
@@ -436,12 +745,20 @@
       $('runBox').classList.remove('hide');
 
       (j.events || []).forEach(function(e){
-        S.logLines.push(e.msg);
+        var stamp = clock(e.at);
+        S.logLines.push(stamp + '  ' + e.msg);
+
         var line = document.createElement('div');
         if(e.type === 'ok') line.className = 'ok';
         else if(e.type === 'held' || e.type === 'retry') line.className = 'held';
         else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
-        line.textContent = e.msg;
+
+        var t = document.createElement('span');
+        t.className = 't';
+        t.textContent = stamp;
+        line.appendChild(t);
+        line.appendChild(document.createTextNode(e.msg));
+
         $('vlog').appendChild(line);
         $('vlog').scrollTop = $('vlog').scrollHeight;
       });
@@ -452,21 +769,29 @@
       $('btnStop').style.display = live ? 'block' : 'none';
       $('btnStop').disabled = false;
       $('btnStop').textContent = 'Stop';
-      if(!live) $('btnVoid').disabled = false;
+      if(!live){
+        $('btnVoid').disabled = false;
+        updateVoidButton();
+      }
 
-     var seen = j.seen === undefined ? j.done : j.seen;
+      var seen = j.seen === undefined ? j.done : j.seen;
       var pct = j.total ? Math.round(seen / j.total * 100) : 0;
       $('bar').style.width = pct + '%';
       $('runline').textContent =
         nf(seen) + ' of ' + nf(j.total) + ' looked at \u00b7 ' +
         nf(j.retried || 0) + ' waiting for another round \u00b7 ' +
         nf(j.voidedCount) + ' voided \u00b7 ' +
-        nf(j.heldCount) + ' held back \u00b7 ' +
+        nf(j.heldCount) + ' held \u00b7 ' +
         nf(j.failedCount) + ' failed' +
         (live ? '   (running on the server - you can leave this page)' : '');
 
       if(live){ startPolling(); return; }
+
       stopPolling();
+      if(j.failedCount){
+        $('btnRetry').style.display = 'inline-block';
+        $('btnRetry').textContent = 'Retry what is left (' + nf(j.failedCount) + ')';
+      }
     }).catch(function(){ /* a missed poll is nothing to worry about */ });
   }
 
@@ -508,6 +833,7 @@
       S.logLines = [];
       $('vlog').innerHTML = '';
       $('runBox').classList.add('hide');
+      $('btnRetry').style.display = 'none';
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
