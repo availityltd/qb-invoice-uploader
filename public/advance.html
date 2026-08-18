@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Advance payments</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+  .step.done{border-color:var(--qbo)}
+
+  .picks{display:flex;flex-wrap:wrap;gap:8px}
+  .pick{border:1px solid var(--line);background:#fff;border-radius:7px;padding:9px 14px;
+    cursor:pointer;font-size:13px;font-family:inherit;transition:.13s;text-align:left}
+  .pick:hover{border-color:var(--qbo)}
+  .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+  .cols label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .range{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;
+    margin-bottom:14px}
+  .range label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .days{display:flex;flex-wrap:wrap;gap:7px;max-height:190px;overflow:auto;
+    border:1px solid var(--line);border-radius:8px;padding:12px;background:#fff}
+  .day{border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:12px;
+    font-family:var(--mono);transition:.12s}
+  .day.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .day small{display:block;font-size:10px;color:var(--muted);font-family:var(--sans)}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+  .tally > div{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+  .tally .bad .n{color:var(--bad)}
+
+  .bucket{border:1px solid var(--line);border-radius:8px;background:#fff;
+    overflow:hidden;margin-bottom:14px}
+  .bucket.warn{border-color:var(--warn)}
+  .bucket h4{margin:0;padding:10px 14px;font-size:12.5px;font-weight:600;
+    background:var(--tint);border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer}
+  .bucket.warn h4{background:#FFFBF0;color:#8A6100}
+  .bucket .inner{max-height:280px;overflow:auto}
+  .bucket table{width:100%;border-collapse:collapse;font-size:12px}
+  .bucket th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:6px 14px;border-bottom:1px solid var(--line)}
+  .bucket td{padding:6px 14px;border-bottom:1px solid var(--line)}
+  .bucket td.num{text-align:right;font-family:var(--mono)}
+
+  .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;
+    margin-bottom:16px}
+  .fields label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .memo{border:1px solid var(--line);border-radius:8px;background:var(--tint);
+    padding:12px 15px;font-family:var(--mono);font-size:12.5px;line-height:1.7;
+    white-space:pre-wrap;margin-bottom:16px}
+
+  .prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:14px 0 8px}
+  .prog i{display:block;height:100%;width:0;background:var(--qbo);transition:width .3s}
+  .runline{font-size:12.5px;color:var(--muted);font-family:var(--mono);margin-bottom:10px}
+
+  .rlog{background:#0F2E24;color:#CFE8D8;border-radius:8px;padding:12px 15px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.7;max-height:240px;
+    overflow:auto;margin-top:12px}
+  .rlog .ok{color:#8FE3A8}
+  .rlog .fail{color:#FF9C9C}
+  .rlog .error{color:#FF9C9C}
+  .rlog .t{color:#6E9C82;margin-right:8px}
+
+  .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
+    background:#fff;font-size:13px}
+  .result.good{border-color:var(--qbo);background:#F2FAF0}
+  .result.bad{border-color:var(--bad);background:#FDF3F3}
+
+  .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .acts button.mini{font-size:11.5px;padding:5px 12px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
+  .acts button.mini:hover{border-color:var(--qbo)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Advance payments</h1>
+        <div class="sub">Receive part payments from the advance sheet against their invoices.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Nothing is written until you have seen the list and pressed Receive.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="step" id="stepRoot">
+          <h2>Advance sheet</h2>
+          <div class="hint">Paste the link to the sheet, or to the folder holding it.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="rootIn" placeholder="https://docs.google.com/spreadsheets/d/..." style="flex:1;min-width:280px">
+            <button class="solid" id="btnRoot">Save</button>
+          </div>
+          <div id="rootNote" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+        </div>
+
+        <div class="step hide" id="stepBook">
+          <h2>Workbook</h2>
+          <div class="hint" id="bookHint"></div>
+          <div class="picks" id="books"></div>
+        </div>
+
+        <div class="step hide" id="stepTab">
+          <h2>Which month</h2>
+          <div class="hint">Each month has its own tab.</div>
+          <div class="picks" id="tabList"></div>
+        </div>
+
+        <div class="step hide" id="stepCols">
+          <h2>Columns</h2>
+          <div class="hint" id="colsHint"></div>
+          <div class="cols" id="colsBox"></div>
+          <div style="margin-top:14px">
+            <button class="solid" id="btnCols">Save and continue</button>
+          </div>
+        </div>
+
+        <div class="step hide" id="stepDays">
+          <h2>Dates</h2>
+          <div class="hint" id="dayHint"></div>
+          <div class="range">
+            <div>
+              <label>From</label>
+              <select id="dFrom"></select>
+            </div>
+            <div>
+              <label>To</label>
+              <select id="dTo"></select>
+            </div>
+          </div>
+          <div class="days" id="dayList"></div>
+          <div class="acts">
+            <button class="solid" id="btnMatch">Check these against QuickBooks</button>
+            <span class="mono" id="rangeNote" style="font-size:12px;color:var(--muted);align-self:center"></span>
+          </div>
+        </div>
+
+        <div class="step hide" id="stepMatch">
+          <h2>What matched</h2>
+          <div class="hint" id="matchHint"></div>
+          <div class="tally" id="tally"></div>
+          <div id="buckets"></div>
+        </div>
+
+        <div class="step hide" id="stepPay">
+          <h2>Record the payments</h2>
+          <div class="hint" id="payHint"></div>
+          <div class="memo" id="memoBox"></div>
+          <div class="fields">
+            <div>
+              <label>Deposit to</label>
+              <select id="acct"></select>
+            </div>
+            <div>
+              <label>Payment method</label>
+              <select id="method"></select>
+            </div>
+            <div>
+              <label>Payment date</label>
+              <input type="date" id="payDate">
+            </div>
+          </div>
+          <button class="solid" id="btnPay">Receive payments</button>
+          <button class="solid" id="btnStop" style="display:none;background:var(--neg)">Stop</button>
+
+          <div id="runBox" class="hide">
+            <div class="prog"><i id="bar"></i></div>
+            <div class="runline" id="runline"></div>
+            <div class="rlog" id="rlog"></div>
+          </div>
+          <div id="payOut"></div>
+          <div class="acts" id="afterActs" style="display:none">
+            <button class="mini" id="btnCopyLog">Copy log</button>
+            <button class="mini" id="btnCsv">Download what was received</button>
+            <button class="mini" id="btnClearRun">Clear finished run</button>
+          </div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    root: '', book: null, tab: '', excel: false,
+    header: [], cols: null, days: [], picked: {},
+    match: null, options: null,
+    job: null, poller: null, lastEventId: 0,
+    open: { ready:true, overpaid:true, settled:false, notInQb:false },
+    logLines: []
+  };
+
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function clock(ms){
+    return (ms ? new Date(ms) : new Date()).toLocaleTimeString();
+  }
+
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
+
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    pollJob(true);
+    loadOptions();
+
+    get('/api/adv/root').then(function(d){
+      if(d.folderId){
+        S.root = d.folderId;
+        $('rootIn').value = d.folderId;
+        $('rootNote').textContent = 'Saved.';
+        $('stepRoot').classList.add('done');
+        loadBooks();
+      }
+    }).catch(function(){});
+  });
+
+  $('btnRoot').addEventListener('click', function(){
+    var v = $('rootIn').value.trim();
+    if(!v) return;
+    $('btnRoot').disabled = true;
+    post('/api/adv/root', { folderId: v }).then(function(d){
+      $('btnRoot').disabled = false;
+      S.root = d.folderId;
+      $('rootIn').value = d.folderId;
+      $('rootNote').textContent = 'Saved.';
+      $('stepRoot').classList.add('done');
+      loadBooks();
+    }).catch(function(e){
+      $('btnRoot').disabled = false;
+      $('rootNote').textContent = e.message;
+    });
+  });
+
+  function loadOptions(){
+    return get('/api/cpr/qb-options').then(function(o){
+      S.options = o;
+      fill($('acct'), o.accounts, false);
+      fill($('method'), o.methods, true);
+      return get('/api/adv/last-bank');
+    }).then(function(d){
+      if(d && d.bank){
+        if(d.bank.accountId) $('acct').value = d.bank.accountId;
+        if(d.bank.methodId)  $('method').value = d.bank.methodId;
+      }
+    }).catch(function(){});
+  }
+
+  function fill(sel, list, allowNone){
+    sel.innerHTML = '';
+    if(allowNone){
+      var n = document.createElement('option');
+      n.value = ''; n.textContent = '- none -';
+      sel.appendChild(n);
+    }
+    (list || []).forEach(function(x){
+      var e = document.createElement('option');
+      e.value = x.id; e.textContent = x.name;
+      sel.appendChild(e);
+    });
+  }
+
+  function hideFrom(step){
+    var order = ['stepBook','stepTab','stepCols','stepDays','stepMatch','stepPay'];
+    var i = order.indexOf(step);
+    order.slice(i).forEach(function(id){ $(id).classList.add('hide'); });
+  }
+
+  /* ---------- the sheet ---------- */
+
+  function loadBooks(){
+    hideFrom('stepBook');
+    $('stepBook').classList.remove('hide');
+    $('bookHint').textContent = 'Reading...';
+    $('books').innerHTML = '';
+
+    get('/api/adv/sheets').then(function(d){
+      var all = d.sheets || [];
+      if(!all.length){
+        $('bookHint').textContent = 'Nothing found at that link.';
+        return;
+      }
+      $('bookHint').textContent = all.length + ' workbook' + (all.length === 1 ? '' : 's') + '.';
+
+      var box = $('books');
+      box.innerHTML = '';
+      all.forEach(function(f){
+        var b = document.createElement('button');
+        b.className = 'pick';
+        b.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+          (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
+        b.addEventListener('click', function(){
+          Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+          b.classList.add('on');
+          S.book = f;
+          S.excel = !!f.excel;
+          loadTabs();
+        });
+        box.appendChild(b);
+      });
+
+      if(all.length === 1){ box.children[0].click(); }
+    }).catch(function(e){
+      $('bookHint').textContent = e.message;
+    });
+  }
+
+  function loadTabs(){
+    hideFrom('stepTab');
+    $('stepTab').classList.remove('hide');
+    $('tabList').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading tabs...</span>';
+
+    get('/api/adv/tabs?sheetId=' + encodeURIComponent(S.book.id) + (S.excel ? '&excel=1' : ''))
+      .then(function(d){
+        var box = $('tabList');
+        box.innerHTML = '';
+        (d.tabs || []).forEach(function(t){
+          var b = document.createElement('button');
+          b.className = 'pick';
+          b.textContent = t.title;
+          b.addEventListener('click', function(){
+            Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+            b.classList.add('on');
+            S.tab = t.title;
+            openTab();
+          });
+          box.appendChild(b);
+        });
+      }).catch(function(e){
+        $('tabList').innerHTML = '';
+        say('bad', '<b>' + esc(e.message) + '</b>');
+      });
+  }
+
+  function openTab(){
+    hideFrom('stepCols');
+    clearSay();
+    say('', 'Reading ' + S.tab + '...');
+
+    var u = '/api/adv/open?sheetId=' + encodeURIComponent(S.book.id) +
+            '&tab=' + encodeURIComponent(S.tab) + (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(d){
+      clearSay();
+      S.header = d.header;
+      S.cols = d.cols;
+      S.days = d.days || [];
+
+      if(d.remembered && d.cols.invoice >= 0 && d.cols.amount >= 0){
+        showDays();
+      } else {
+        showCols(d);
+      }
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  /* ---------- columns ---------- */
+
+  function showCols(d){
+    $('stepCols').classList.remove('hide');
+    $('colsHint').textContent = S.header.length + ' columns found. ' +
+      'Check these are right - they are remembered for next time.';
+
+    var fields = [
+      ['invoice', 'Order number'],
+      ['amount',  'Amount paid'],
+      ['payable', 'Payable amount (optional)'],
+      ['name',    'Account holder name (optional)'],
+      ['note',    'Comments (optional)']
+    ];
+
+    var box = $('colsBox');
+    box.innerHTML = '';
+    fields.forEach(function(f){
+      var wrap = document.createElement('div');
+      var lab = document.createElement('label');
+      lab.textContent = f[1];
+      var sel = document.createElement('select');
+      sel.id = 'col_' + f[0];
+
+      var none = document.createElement('option');
+      none.value = '-1';
+      none.textContent = '- none -';
+      sel.appendChild(none);
+
+      S.header.forEach(function(h, i){
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = (h || '(column ' + (i + 1) + ')');
+        sel.appendChild(o);
+      });
+
+      sel.value = String(d.cols[f[0]] === undefined ? -1 : d.cols[f[0]]);
+      wrap.appendChild(lab);
+      wrap.appendChild(sel);
+      box.appendChild(wrap);
+    });
+  }
+
+  $('btnCols').addEventListener('click', function(){
+    var cols = {
+      invoice: Number($('col_invoice').value),
+      amount:  Number($('col_amount').value),
+      payable: Number($('col_payable').value),
+      name:    Number($('col_name').value),
+      note:    Number($('col_note').value)
+    };
+
+    if(cols.invoice < 0) return say('bad', '<b>Pick the order number column.</b>');
+    if(cols.amount < 0)  return say('bad', '<b>Pick the amount paid column.</b>');
+
+    clearSay();
+    $('btnCols').disabled = true;
+
+    post('/api/adv/columns', { cols: cols }).then(function(){
+      return get('/api/adv/open?sheetId=' + encodeURIComponent(S.book.id) +
+                 '&tab=' + encodeURIComponent(S.tab) + (S.excel ? '&excel=1' : ''));
+    }).then(function(d){
+      $('btnCols').disabled = false;
+      $('stepCols').classList.add('done');
+      S.cols = d.cols;
+      S.days = d.days || [];
+      showDays();
+    }).catch(function(e){
+      $('btnCols').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  /* ---------- dates ---------- */
+
+  function showDays(){
+    hideFrom('stepDays');
+    $('stepDays').classList.remove('hide');
+
+    if(!S.days.length){
+      $('dayHint').textContent = 'No dated rows found on this tab.';
+      $('dayList').innerHTML = '';
+      return;
+    }
+
+    var rows = S.days.reduce(function(s, x){ return s + x.count; }, 0);
+    var amt = S.days.reduce(function(s, x){ return s + x.amount; }, 0);
+    $('dayHint').innerHTML =
+      nf(S.days.length) + ' days on this tab \u00b7 ' + nf(rows) + ' rows with money against them \u00b7 ' +
+      money(amt) + ' in all.';
+
+    var f = $('dFrom'), t = $('dTo');
+    f.innerHTML = ''; t.innerHTML = '';
+    S.days.forEach(function(x){
+      var a = document.createElement('option');
+      a.value = x.date; a.textContent = x.date;
+      f.appendChild(a);
+      var b = document.createElement('option');
+      b.value = x.date; b.textContent = x.date;
+      t.appendChild(b);
+    });
+    f.value = S.days[0].date;
+    t.value = S.days[S.days.length - 1].date;
+
+    f.onchange = drawDays;
+    t.onchange = drawDays;
+    drawDays();
+  }
+
+  function drawDays(){
+    var from = $('dFrom').value, to = $('dTo').value;
+    var box = $('dayList');
+    box.innerHTML = '';
+    var n = 0, rows = 0, amt = 0;
+
+    S.days.forEach(function(x){
+      var on = x.date >= from && x.date <= to;
+      if(on){ n++; rows += x.count; amt += x.amount; }
+
+      var d = document.createElement('div');
+      d.className = 'day' + (on ? ' on' : '');
+      d.innerHTML = esc(x.date) + '<small>' + nf(x.count) + ' \u00b7 ' + money(x.amount) + '</small>';
+      box.appendChild(d);
+    });
+
+    $('rangeNote').textContent = n + ' day' + (n === 1 ? '' : 's') + ' \u00b7 ' +
+      nf(rows) + ' rows \u00b7 ' + money(amt);
+  }
+
+  $('btnMatch').addEventListener('click', function(){
+    var from = $('dFrom').value, to = $('dTo').value;
+    if(!from || !to) return say('bad', '<b>Pick a range.</b>');
+    if(from > to) return say('bad', '<b>The first date is after the last one.</b>');
+
+    clearSay();
+    $('btnMatch').disabled = true;
+    say('', 'Checking QuickBooks...');
+
+    var u = '/api/adv/match?sheetId=' + encodeURIComponent(S.book.id) +
+            '&tab=' + encodeURIComponent(S.tab) +
+            '&from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) +
+            (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(d){
+      $('btnMatch').disabled = false;
+      clearSay();
+      S.match = d;
+      showMatch(d);
+    }).catch(function(e){
+      $('btnMatch').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  /* ---------- what matched ---------- */
+
+  function showMatch(d){
+    hideFrom('stepMatch');
+    $('stepMatch').classList.remove('hide');
+    var t = d.totals;
+
+    $('matchHint').innerHTML =
+      '<b>' + esc(d.label) + '</b> \u00b7 ' + nf(t.rows) + ' rows in the sheet with money against them. ' +
+      '<b>Nothing has been written yet.</b>';
+
+    $('tally').innerHTML =
+      '<div class="ok"><div class="n">' + nf(t.ready) + '</div>' +
+        '<div class="l">Ready to receive</div></div>' +
+      '<div class="ok"><div class="n">' + money(t.amount) + '</div>' +
+        '<div class="l">Amount</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.overpaid) + '</div>' +
+        '<div class="l">More than owed</div></div>' +
+      '<div><div class="n">' + nf(t.settled) + '</div>' +
+        '<div class="l">Already settled</div></div>' +
+      '<div class="bad"><div class="n">' + nf(t.notInQb) + '</div>' +
+        '<div class="l">Not in QB</div></div>';
+
+    var box = $('buckets');
+    box.innerHTML = '';
+
+    bucket(box, 'ready', 'Ready to receive', d.ready, false, function(r){
+      return '<tr><td>' + esc(r.invoice) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">' + money(r.amount) + '</td>' +
+             '<td class="num" style="color:var(--muted)">of ' + money(r.qbBalance) + '</td></tr>';
+    });
+
+    bucket(box, 'overpaid', 'Sheet says more than the invoice still owes', d.overpaid, true, function(r){
+      return '<tr><td>' + esc(r.invoice) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">' + money(r.amount) + '</td>' +
+             '<td class="num" style="color:var(--warn)">owes ' + money(r.qbBalance) + '</td></tr>';
+    });
+
+    bucket(box, 'settled', 'Already settled in QuickBooks', d.settled, false, function(r){
+      return '<tr><td>' + esc(r.invoice) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">' + money(r.amount) + '</td><td></td></tr>';
+    });
+
+    bucket(box, 'notInQb', 'Not found in QuickBooks', d.notInQb, false, function(r){
+      return '<tr><td>' + esc(r.invoice) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">' + money(r.amount) + '</td><td></td></tr>';
+    });
+
+    if(!t.ready){
+      $('stepPay').classList.add('hide');
+      say('bad', '<b>Nothing to receive in that range.</b>');
+      return;
+    }
+    showPay(d);
+  }
+
+  function bucket(box, key, title, rows, warn, render){
+    if(!rows.length) return;
+    var el = document.createElement('div');
+    el.className = 'bucket' + (warn ? ' warn' : '');
+    var open = !!S.open[key];
+
+    el.innerHTML =
+      '<h4><span>' + esc(title) + ' (' + nf(rows.length) + ')</span>' +
+      '<span>' + (open ? '\u25B2' : '\u25BC') + '</span></h4>' +
+      (open
+        ? '<div class="inner"><table><thead><tr>' +
+          '<th>Invoice</th><th>Date</th><th class="num">Paid</th><th class="num">Owed</th>' +
+          '</tr></thead><tbody>' + rows.map(render).join('') + '</tbody></table></div>'
+        : '');
+
+    el.querySelector('h4').addEventListener('click', function(){
+      S.open[key] = !S.open[key];
+      showMatch(S.match);
+    });
+
+    box.appendChild(el);
+  }
+
+  /* ---------- pay ---------- */
+
+  function showPay(d){
+    $('stepPay').classList.remove('hide');
+    $('payOut').innerHTML = '';
+
+    var parts = d.customers.map(function(c){
+      return esc(c.customerName) + ' - ' + nf(c.count) + ' invoices, ' + money(c.amount);
+    });
+    $('payHint').innerHTML = parts.join('<br>');
+
+    $('memoBox').textContent = 'Advance payment\ndated: ' + d.label;
+    $('payDate').value = d.from;
+
+    var over = d.overpaid.length;
+    if(over){
+      $('payHint').innerHTML +=
+        '<br><span style="color:var(--warn)">' + nf(over) + ' row' + (over === 1 ? '' : 's') +
+        ' where the sheet says more than the invoice owes are left out.</span>';
+    }
+  }
+
+  $('btnPay').addEventListener('click', function(){
+    if(!S.match || !S.match.ready.length) return;
+
+    var acctSel = $('acct');
+    if(!acctSel.value) return say('bad', '<b>Pick a deposit account.</b>');
+    if(!$('payDate').value) return say('bad', '<b>Pick a payment date.</b>');
+
+    var t = S.match.totals;
+    if(!confirm('Receive ' + t.ready + ' part payments totalling ' + money(t.amount) +
+                ' into ' + acctSel.options[acctSel.selectedIndex].textContent + '?\n\n' +
+                'Dated ' + $('payDate').value + ', memo: Advance payment dated ' + S.match.label)) return;
+
+    clearSay();
+    $('btnPay').disabled = true;
+    $('rlog').innerHTML = '';
+    $('payOut').innerHTML = '';
+    S.logLines = [];
+    S.lastEventId = 0;
+    S.job = null;
+
+    post('/api/adv/receive', {
+      rows: S.match.ready,
+      accountId: acctSel.value,
+      accountName: acctSel.options[acctSel.selectedIndex].textContent,
+      methodId: $('method').value || null,
+      txnDate: $('payDate').value,
+      label: S.match.label,
+      sheetId: S.book.id,
+      courier: 'Advance payments'
+    }).then(function(){
+      $('btnPay').disabled = false;
+      pollJob(true);
+      startPolling();
+    }).catch(function(e){
+      $('btnPay').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    $('btnStop').textContent = 'Stopping...';
+    post('/api/adv/receive-stop').catch(function(){});
+  });
+
+  /* ---------- watching the run ---------- */
+
+  function startPolling(){
+    if(S.poller) return;
+    S.poller = setInterval(function(){ pollJob(false); }, 2000);
+  }
+  function stopPolling(){
+    if(!S.poller) return;
+    clearInterval(S.poller);
+    S.poller = null;
+  }
+
+  function pollJob(first){
+    var u = '/api/adv/receive-status?since=' + S.lastEventId + (first ? '&full=1' : '');
+    return get(u).then(function(d){
+      if(!d.job){ stopPolling(); return; }
+
+      var j = d.job;
+      S.job = j;
+
+      $('stepPay').classList.remove('hide');
+      $('runBox').classList.remove('hide');
+
+      (j.events || []).forEach(function(e){
+        var stamp = clock(e.at);
+        S.logLines.push(stamp + '  ' + e.msg);
+
+        var line = document.createElement('div');
+        if(e.type === 'ok') line.className = 'ok';
+        else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
+
+        var t = document.createElement('span');
+        t.className = 't';
+        t.textContent = stamp;
+        line.appendChild(t);
+        line.appendChild(document.createTextNode(e.msg));
+
+        $('rlog').appendChild(line);
+        $('rlog').scrollTop = $('rlog').scrollHeight;
+      });
+      if(j.lastEventId) S.lastEventId = j.lastEventId;
+
+      var live = j.state === 'running';
+      $('btnPay').style.display = live ? 'none' : 'block';
+      $('btnStop').style.display = live ? 'block' : 'none';
+      $('btnStop').disabled = false;
+      $('btnStop').textContent = 'Stop';
+      if(!live) $('btnPay').disabled = false;
+
+      var pct = j.total ? Math.round(j.doneCount / j.total * 100) : 0;
+      $('bar').style.width = pct + '%';
+      $('runline').textContent =
+        nf(j.doneCount) + ' of ' + nf(j.total) + ' invoices \u00b7 ' +
+        nf(j.posted) + ' payment' + (j.posted === 1 ? '' : 's') + ' \u00b7 ' + money(j.amount) +
+        (live ? '   (running on the server - you can leave this page)' : '');
+
+      if(live){ startPolling(); return; }
+
+      stopPolling();
+      finish(j);
+    }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  function finish(j){
+    var html = '';
+    (j.results || []).forEach(function(r){
+      html += '<div class="result ' + (r.ok ? 'good' : 'bad') + '">' +
+        (r.ok
+          ? '\u2713 ' + esc(r.customer || '') + ' - ' + nf(r.count) + ' invoices, ' + money(r.amount) +
+            (r.paymentId ? ' \u00b7 QB payment ' + esc(r.paymentId) : '')
+          : '\u2717 ' + (r.customer ? esc(r.customer) + ' - ' : '') + esc(r.msg)) +
+        '</div>';
+    });
+    $('payOut').innerHTML = html;
+    $('afterActs').style.display = 'flex';
+    if(j.posted > 0) $('stepPay').classList.add('done');
+  }
+
+  /* ---------- afterwards ---------- */
+
+  $('btnCopyLog').addEventListener('click', function(){
+    var ta = document.createElement('textarea');
+    ta.value = S.logLines.join('\n');
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); $('btnCopyLog').textContent = 'Copied'; }
+    catch(e){ $('btnCopyLog').textContent = 'Copy failed'; }
+    document.body.removeChild(ta);
+    setTimeout(function(){ $('btnCopyLog').textContent = 'Copy log'; }, 2000);
+  });
+
+  $('btnCsv').addEventListener('click', function(){
+    var paid = (S.job && S.job.paid) || [];
+    if(!paid.length) return say('bad', '<b>Nothing received yet.</b>');
+
+    var rows = [['Invoice', 'QB Doc', 'Customer', 'Received', 'Was owed']].concat(
+      paid.map(function(p){ return [p.invoice, p.qbDoc, p.customer, p.amount, p.balanceWas]; })
+    );
+    var csv = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+
+    var b = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'advance-received.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  });
+
+  $('btnClearRun').addEventListener('click', function(){
+    post('/api/adv/receive-clear').then(function(){
+      S.job = null;
+      S.lastEventId = 0;
+      S.logLines = [];
+      $('rlog').innerHTML = '';
+      $('runBox').classList.add('hide');
+      $('afterActs').style.display = 'none';
+      $('payOut').innerHTML = '';
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+})();
+</script>
+</body>
+</html>
