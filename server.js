@@ -23,7 +23,7 @@ import {
   findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits,
   paymentsByCpr, paymentsByIds
 } from './cpr.js';
-import { inspectExcel, writeStatusSheet, writeStatusExcel } from './sheets.js';
+import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
@@ -1609,7 +1609,23 @@ app.get('/api/void/sheets', async (req, res) => {
     const id = req.query.id || await getSetting(realmId, 'void:root', '');
     if (!id) return res.status(400).json({ error: 'Set the Drive folder first' });
 
-    const [folders, sheets] = await Promise.all([listFolders(id), listSheetsIn(id)]);
+    // people paste the workbook link as often as the folder link - take either
+    let folders = [], sheets = [];
+    try {
+      [folders, sheets] = await Promise.all([listFolders(id), listSheetsIn(id)]);
+    } catch (e) { /* not a folder, then */ }
+
+    if (!sheets.length && !folders.length) {
+      const info = await fileInfo(id);
+      if (info && info.mimeType !== 'application/vnd.google-apps.folder') {
+        sheets = [{
+          id: info.id,
+          name: info.name,
+          excel: info.mimeType !== 'application/vnd.google-apps.spreadsheet'
+        }];
+      }
+    }
+
     res.json({ folders, sheets });
   } catch (e) {
     res.status(500).json({ error: e.message });
