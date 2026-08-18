@@ -28,6 +28,7 @@ import { clean as cprClean } from './cpr.js';
 import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
+import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1568,6 +1569,216 @@ app.post('/api/cpr/receive-clear', async (req, res) => {
   const ok = clearPayJob(realmId);
   if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
   res.json({ ok: true });
+});
+// ==================== Advance payments ====================
+
+// where the advance sheet lives, saved once per company
+app.get('/api/adv/root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ folderId: await getSetting(realmId, 'adv:root', '') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/adv/root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  let id = String(req.body.folderId || '').trim();
+  const m = id.match(/[-\w]{25,}/);
+  if (m) id = m[0];
+  if (!id) return res.status(400).json({ error: 'Folder or sheet link required' });
+
+  try {
+    await setSetting(realmId, 'adv:root', id);
+    res.json({ ok: true, folderId: id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// a folder link gives a list; a sheet link gives just that one
+app.get('/api/adv/sheets', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const id = req.query.id || await getSetting(realmId, 'adv:root', '');
+    if (!id) return res.status(400).json({ error: 'Set the sheet first' });
+
+    let folders = [], sheets = [];
+    try {
+      [folders, sheets] = await Promise.all([listFolders(id), listSheetsIn(id)]);
+    } catch (e) { /* not a folder, then */ }
+
+    if (!sheets.length && !folders.length) {
+      const info = await fileInfo(id);
+      if (info && info.mimeType !== 'application/vnd.google-apps.folder') {
+        sheets = [{
+          id: info.id,
+          name: info.name,
+          excel: info.mimeType !== 'application/vnd.google-apps.spreadsheet'
+        }];
+      }
+    }
+
+    res.json({ folders, sheets });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/adv/tabs', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const sheetId = req.query.sheetId;
+  const excel = req.query.excel === '1';
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ tabs: await listTabs(sheetId, excel) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// open a tab: work out the columns and list every day in it
+app.get('/api/adv/open', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const saved = await getSetting(realmId, 'adv:cols', null);
+    const d = await loadAdvance(sheetId, tab, excel, saved);
+
+    res.json({
+      header: d.header,
+      cols: d.cols,
+      remembered: !!saved,
+      headerRow: d.headerRow,
+      rowCount: d.rows.length,
+      days: d.days
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/adv/columns', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const cols = req.body.cols;
+  if (!cols) return res.status(400).json({ error: 'cols required' });
+
+  try {
+    await setSetting(realmId, 'adv:cols', cols);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the rows in a chosen span, matched against QuickBooks
+app.get('/api/adv/match', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, from, to } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const saved = await getSetting(realmId, 'adv:cols', null);
+    const d = await loadAdvance(sheetId, tab, excel, saved);
+
+    const rows = d.rows.filter(r => r.date && r.date >= from && r.date <= to);
+    if (!rows.length) return res.status(400).json({ error: 'No paid rows in that range' });
+
+    const token = await getAccessToken(realmId);
+    const found = await findForAdvance(realmId, token, rows.map(r => r.invoice));
+
+    const ready = [], overpaid = [], settled = [], notInQb = [];
+
+    rows.forEach(r => {
+      const inv = found.get(cprDigits(r.invoice));
+      if (!inv) { notInQb.push(r); return; }
+
+      const entry = {
+        sheetRow: r.sheetRow,
+        date: r.date,
+        invoice: r.invoice,
+        amount: r.amount,
+        payable: r.payable,
+        name: r.name,
+        qbDoc: inv.doc,
+        qbId: inv.id,
+        qbTotal: inv.total,
+        qbBalance: inv.balance,
+        customerId: inv.customerId,
+        customerName: inv.customerName
+      };
+
+      if (inv.balance <= 0.005) { settled.push(entry); return; }
+
+      // never hand QuickBooks more than the invoice still owes
+      if (r.amount > inv.balance + 0.005) {
+        entry.willPay = Math.round(inv.balance * 100) / 100;
+        overpaid.push(entry);
+        return;
+      }
+
+      entry.willPay = Math.round(r.amount * 100) / 100;
+      ready.push(entry);
+    });
+
+    const byCustomer = new Map();
+    ready.forEach(m => {
+      const k = m.customerId || 'none';
+      if (!byCustomer.has(k)) {
+        byCustomer.set(k, { customerId: m.customerId, customerName: m.customerName, count: 0, amount: 0 });
+      }
+      const g = byCustomer.get(k);
+      g.count++;
+      g.amount += m.willPay;
+    });
+
+    res.json({
+      from, to,
+      label: spanLabel(from, to),
+      totals: {
+        rows: rows.length,
+        ready: ready.length,
+        overpaid: overpaid.length,
+        settled: settled.length,
+        notInQb: notInQb.length,
+        amount: Math.round(ready.reduce((s, m) => s + m.willPay, 0) * 100) / 100
+      },
+      customers: [...byCustomer.values()].map(g => ({
+        customerId: g.customerId,
+        customerName: g.customerName,
+        count: g.count,
+        amount: Math.round(g.amount * 100) / 100
+      })),
+      ready, overpaid, settled, notInQb
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 // ==================== Void invoices ====================
 // The return sheet lives in its own Drive folder, saved once per company
