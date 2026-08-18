@@ -27,6 +27,7 @@ import { inspectExcel, writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
+import { readDateColumns } from './voidsheet.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1569,7 +1570,126 @@ app.post('/api/cpr/receive-clear', async (req, res) => {
   res.json({ ok: true });
 });
 // ==================== Void invoices ====================
+// The return sheet lives in its own Drive folder, saved once per company
+app.get('/api/void/sheet-root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ folderId: await getSetting(realmId, 'void:root', '') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
+app.post('/api/void/sheet-root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  let id = String(req.body.folderId || '').trim();
+  const m = id.match(/[-\w]{25,}/);
+  if (m) id = m[0];
+  if (!id) return res.status(400).json({ error: 'Folder ID or link required' });
+
+  try {
+    await setSetting(realmId, 'void:root', id);
+    res.json({ ok: true, folderId: id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// what is in that folder
+app.get('/api/void/sheets', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const id = req.query.id || await getSetting(realmId, 'void:root', '');
+    if (!id) return res.status(400).json({ error: 'Set the Drive folder first' });
+
+    const [folders, sheets] = await Promise.all([listFolders(id), listSheetsIn(id)]);
+    res.json({ folders, sheets });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the tabs inside one workbook
+app.get('/api/void/tabs', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const sheetId = req.query.sheetId;
+  const excel = req.query.excel === '1';
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ tabs: await listTabs(sheetId, excel) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// every dated column on a tab, with how many order numbers sit under it
+app.get('/api/void/days', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const d = await readDateColumns(sheetId, tab, excel);
+    res.json({
+      headerRow: d.headerRow,
+      days: d.days.map(x => ({ date: x.date, label: x.label, count: x.count }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the order numbers for a chosen span of days
+app.get('/api/void/numbers', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, from, to } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const d = await readDateColumns(sheetId, tab, excel);
+
+    const picked = d.days.filter(x => {
+      if (from && x.date < from) return false;
+      if (to && x.date > to) return false;
+      return true;
+    });
+
+    const seen = new Set();
+    const numbers = [];
+    picked.forEach(day => day.numbers.forEach(n => {
+      if (seen.has(n)) return;
+      seen.add(n);
+      numbers.push(n);
+    }));
+
+    res.json({
+      days: picked.map(x => ({ date: x.date, label: x.label, count: x.count })),
+      numbers,
+      count: numbers.length
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // Look the pasted numbers up in QuickBooks and sort them into buckets,
 // so nothing is voided before you have seen what it is.
 app.post('/api/void/scan', async (req, res) => {
