@@ -23,7 +23,7 @@ import {
   findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits,
   paymentsByCpr, paymentsByIds
 } from './cpr.js';
-import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo } from './sheets.js';
+import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
@@ -1570,6 +1570,21 @@ app.post('/api/cpr/receive-clear', async (req, res) => {
   const ok = clearPayJob(realmId);
   if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
   res.json({ ok: true });
+});
+// Only asks Google what it has. Nothing is changed.
+app.get('/api/adv/peek-images', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab } = req.query;
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await peekImages(sheetId, tab));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 // ==================== Advance payments ====================
 
