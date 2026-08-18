@@ -6,7 +6,7 @@ const API = 'https://quickbooks.api.intuit.com';
 // one void run per company, kept on the server so leaving the page is safe
 const jobs = new Map();
 const MAX_EVENTS = 3000;
-const MAX_ROUNDS = 4;
+const MAX_ROUNDS = 8;
 // QuickBooks access tokens last an hour - refresh well before that
 const TOKEN_LIFE = 40 * 60 * 1000;
 function isAuthError(msg) {
@@ -30,7 +30,10 @@ function worthRetry(msg) {
 
 function push(job, type, msg, extra) {
   job.lastId++;
-  job.events.push(Object.assign({ id: job.lastId, type, msg }, extra || {}));
+  job.events.push(Object.assign(
+    { id: job.lastId, type, msg, at: Date.now() },
+    extra || {}
+  ));
   if (job.events.length > MAX_EVENTS) {
     job.events.splice(0, job.events.length - MAX_EVENTS);
   }
