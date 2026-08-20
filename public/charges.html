@@ -336,12 +336,13 @@
 
   /* ---------- columns ---------- */
 
-  var FIELDS = [
-    ['cpr',     'CPR number'],
-    ['cprDate', 'CPR date'],
-    ['charges', 'Delivery charges'],
-    ['wht',     'Withholding income tax'],
-    ['wst',     'Withholding sales tax']
+   var FIELDS = [
+    ['cpr',      'CPR number'],
+    ['cprDate',  'CPR date'],
+    ['charges',  'Delivery charges'],
+    ['charges2', 'Plus this column (GST, surcharge)'],
+    ['wht',      'Withholding income tax'],
+    ['wst',      'Withholding sales tax']
   ];
 
   function showCols(){
@@ -382,7 +383,7 @@
     var cols = {};
     FIELDS.forEach(function(f){ cols[f[0]] = Number($('col_' + f[0]).value); });
 
-    if(cols.charges < 0 && cols.wht < 0 && cols.wst < 0){
+       if(cols.charges < 0 && cols.charges2 < 0 && cols.wht < 0 && cols.wst < 0){
       return say('bad', '<b>Pick at least one of the three charge columns.</b>');
     }
 
