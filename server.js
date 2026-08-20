@@ -1698,6 +1698,51 @@ app.get('/api/charges/check', async (req, res) => {
 });
 
 // one CPR, one journal entry
+// every CPR in the sheet, looked up in QuickBooks in one go
+app.post('/api/charges/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const list = Array.isArray(req.body.cprs) ? req.body.cprs : [];
+  if (!list.length) return res.status(400).json({ error: 'Nothing to look up' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const token = await getAccessToken(realmId);
+
+    const out = {};
+    for (const c of list) {
+      const cpr = String(c.cpr || '').trim();
+      if (!cpr) continue;
+
+      let found = null;
+      try {
+        found = await findJournal(realmId, token, cpr);
+      } catch (e) {
+        out[cpr] = { state: 'unknown', note: e.message };
+        continue;
+      }
+
+      if (!found) { out[cpr] = { state: 'none' }; continue; }
+
+      const sheetTotal = Math.round(Number(c.total || 0) * 100) / 100;
+      const gap = Math.round((found.amount - sheetTotal) * 100) / 100;
+
+      out[cpr] = {
+        state: Math.abs(gap) > 1 ? 'off' : 'done',
+        id: found.id,
+        date: found.date,
+        amount: found.amount,
+        sheetTotal,
+        gap
+      };
+    }
+
+    res.json({ checked: Object.keys(out).length, cprs: out });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.post('/api/charges/post', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
