@@ -30,6 +30,12 @@ import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjob
 import { readDateColumns } from './voidsheet.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
 import { startAdvJob, stopAdvJob, clearAdvJob, advSnapshot } from './advjobs.js';
+import {
+  initCouriers, listAccounts as listCourierAccounts, getAccount as getCourierAccount,
+  addAccount as addCourierAccount, removeAccount as removeCourierAccount,
+  markSync, saveOrders
+} from './couriers.js';
+import { adapter as postexAdapter } from './postex.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1586,6 +1592,121 @@ app.get('/api/adv/peek-images', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ==================== Courier accounts ====================
+
+// One adapter per courier. Adding a courier means adding a file and a line here.
+const ADAPTERS = {
+  postex: postexAdapter
+};
+
+app.get('/api/courier/kinds', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({
+    kinds: Object.values(ADAPTERS).map(a => ({ key: a.key, name: a.name }))
+  });
+});
+
+app.get('/api/courier/accounts', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ accounts: await listCourierAccounts(realmId) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the token is checked before it is kept, so a bad one never gets saved
+app.post('/api/courier/accounts', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const courier = String(req.body.courier || '').trim().toLowerCase();
+  const label = String(req.body.label || '').trim();
+  const token = String(req.body.token || '').trim();
+
+  if (!ADAPTERS[courier]) return res.status(400).json({ error: 'Unknown courier' });
+  if (!label) return res.status(400).json({ error: 'Give this account a name' });
+  if (!token) return res.status(400).json({ error: 'Token required' });
+
+  try {
+    const check = await ADAPTERS[courier].testToken(token);
+    const id = await addCourierAccount(realmId, { courier, label, token });
+    res.json({ ok: true, id, check });
+  } catch (e) {
+    res.status(400).json({ error: 'That token did not work: ' + e.message });
+  }
+});
+
+app.post('/api/courier/accounts/test', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const acc = await getCourierAccount(realmId, req.body.id);
+    if (!acc) return res.status(404).json({ error: 'No such account' });
+
+    const a = ADAPTERS[acc.courier];
+    if (!a) return res.status(400).json({ error: 'No adapter for ' + acc.courier });
+
+    const check = await a.testToken(acc.token);
+    await markSync(realmId, acc.id, null);
+    res.json({ ok: true, check });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/courier/accounts/remove', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    await removeCourierAccount(realmId, req.body.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// pull a span of days from one account into our own table
+app.post('/api/courier/sync', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { id, from, to } = req.body;
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
+  try {
+    const acc = await getCourierAccount(realmId, id);
+    if (!acc) return res.status(404).json({ error: 'No such account' });
+
+    const a = ADAPTERS[acc.courier];
+    if (!a) return res.status(400).json({ error: 'No adapter for ' + acc.courier });
+
+    const orders = await a.fetchOrders(acc.token, from, to, 0);
+    const saved = await saveOrders(realmId, acc.id, acc.courier, orders);
+    await markSync(realmId, acc.id, null);
+
+    // a quick count by bucket, so the page can show something straight away
+    const tally = {};
+    orders.forEach(o => {
+      tally[o.statusGroup] = (tally[o.statusGroup] || 0) + 1;
+    });
+
+    res.json({
+      ok: true,
+      account: acc.label,
+      pulled: orders.length,
+      saved,
+      tally
+    });
+  } catch (e) {
+    try { await markSync(realmId, req.body.id, e.message); } catch (e2) {}
+    res.status(400).json({ error: e.message });
+  }
+});
 // ==================== Advance payments ====================
 
 // where the advance sheet lives, saved once per company
@@ -2225,6 +2346,7 @@ initDb()
   .then(() => initUsers())
   .then(() => initSettings())
   .then(() => initCache())
+  .then(() => initCouriers())
   .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
   .catch(err => {
     console.error('DB init failed:', err);
