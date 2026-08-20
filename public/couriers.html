@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Couriers</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+
+  .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;
+    margin-bottom:14px}
+  .fields label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .accs{display:flex;flex-direction:column;gap:10px}
+  .acc{border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px 16px;
+    display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+  .acc.bad{border-color:var(--bad);background:#FDF3F3}
+  .acc .who b{font-size:13.5px;font-weight:600;display:block}
+  .acc .who small{font-size:11.5px;color:var(--muted);display:block;margin-top:3px}
+  .acc .acts{display:flex;gap:7px}
+  .acc button{font-size:11.5px;padding:5px 12px;border-radius:6px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;font-family:inherit}
+  .acc button:hover{border-color:var(--qbo)}
+  .acc button.danger:hover{border-color:var(--bad);color:var(--bad)}
+
+  .range{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;
+    margin-bottom:14px}
+  .range label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .tally > div{flex:1;min-width:110px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:20px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+
+  .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
+    background:#fff;font-size:13px}
+  .result.good{border-color:var(--qbo);background:#F2FAF0}
+  .result.bad{border-color:var(--bad);background:#FDF3F3}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Couriers</h1>
+        <div class="sub">Connect each courier account and pull its orders in.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Courier accounts are kept per company.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="step">
+          <h2>Add an account</h2>
+          <div class="hint">
+            One row per account, not per courier. PostEx - RB and PostEx - AH are two
+            accounts sharing the same courier. The token is checked before it is kept.
+          </div>
+          <div class="fields">
+            <div>
+              <label>Courier</label>
+              <select id="kind"></select>
+            </div>
+            <div>
+              <label>Account name</label>
+              <input id="label" placeholder="PostEx - RB">
+            </div>
+            <div>
+              <label>API token</label>
+              <input id="token" type="password" placeholder="paste the token">
+            </div>
+          </div>
+          <button class="solid" id="btnAdd">Check and save</button>
+          <div id="addOut"></div>
+        </div>
+
+        <div class="step">
+          <h2>Accounts <span class="aside" id="accCount"></span></h2>
+          <div class="hint">Nothing is pulled until you ask for it below.</div>
+          <div class="accs" id="accs"></div>
+        </div>
+
+        <div class="step hide" id="stepPull">
+          <h2>Pull orders</h2>
+          <div class="hint" id="pullHint"></div>
+          <div class="range">
+            <div>
+              <label>Account</label>
+              <select id="pullAcc"></select>
+            </div>
+            <div>
+              <label>From</label>
+              <input type="date" id="from">
+            </div>
+            <div>
+              <label>To</label>
+              <input type="date" id="to">
+            </div>
+          </div>
+          <button class="solid" id="btnPull">Pull them in</button>
+          <div id="tally" class="tally"></div>
+          <div id="pullOut"></div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var S = { kinds: [], accounts: [] };
+
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
+
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    var today = new Date().toISOString().slice(0, 10);
+    var back = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+    $('from').value = back;
+    $('to').value = today;
+
+    get('/api/courier/kinds').then(function(d){
+      S.kinds = d.kinds || [];
+      var sel = $('kind');
+      sel.innerHTML = '';
+      S.kinds.forEach(function(k){
+        var o = document.createElement('option');
+        o.value = k.key; o.textContent = k.name;
+        sel.appendChild(o);
+      });
+    }).catch(function(){});
+
+    loadAccounts();
+  });
+
+  /* ---------- accounts ---------- */
+
+  function loadAccounts(){
+    return get('/api/courier/accounts').then(function(d){
+      S.accounts = d.accounts || [];
+      drawAccounts();
+      fillPullAccounts();
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function drawAccounts(){
+    var box = $('accs');
+    box.innerHTML = '';
+    $('accCount').textContent = S.accounts.length
+      ? S.accounts.length + ' connected'
+      : 'none yet';
+
+    if(!S.accounts.length){
+      box.innerHTML = '<span style="font-size:13px;color:var(--muted)">' +
+        'No accounts yet. Add one above.</span>';
+      return;
+    }
+
+    S.accounts.forEach(function(a){
+      var el = document.createElement('div');
+      el.className = 'acc' + (a.last_error ? ' bad' : '');
+
+      var when = a.last_sync
+        ? 'last pulled ' + new Date(a.last_sync).toLocaleString()
+        : 'never pulled';
+
+      el.innerHTML =
+        '<div class="who"><b>' + esc(a.label) + '</b>' +
+        '<small>' + esc(a.courier) + ' \u00b7 ' + when +
+        (a.last_error ? ' \u00b7 <span style="color:var(--bad)">' + esc(a.last_error) + '</span>' : '') +
+        '</small></div>' +
+        '<div class="acts">' +
+          '<button data-test="' + a.id + '">Test</button>' +
+          '<button class="danger" data-del="' + a.id + '">Remove</button>' +
+        '</div>';
+
+      box.appendChild(el);
+    });
+
+    box.querySelectorAll('button[data-test]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var id = Number(b.getAttribute('data-test'));
+        b.disabled = true; b.textContent = 'Testing...';
+        post('/api/courier/accounts/test', { id: id }).then(function(){
+          b.textContent = 'Works';
+          setTimeout(loadAccounts, 900);
+        }).catch(function(e){
+          b.disabled = false; b.textContent = 'Test';
+          say('bad', '<b>' + esc(e.message) + '</b>');
+          loadAccounts();
+        });
+      });
+    });
+
+    box.querySelectorAll('button[data-del]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var id = Number(b.getAttribute('data-del'));
+        var a = S.accounts.filter(function(x){ return x.id === id; })[0];
+        if(!confirm('Remove ' + (a ? a.label : 'this account') + '?\n\n' +
+                    'Orders already pulled in stay where they are.')) return;
+        post('/api/courier/accounts/remove', { id: id })
+          .then(loadAccounts)
+          .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+      });
+    });
+  }
+
+  $('btnAdd').addEventListener('click', function(){
+    var courier = $('kind').value;
+    var label = $('label').value.trim();
+    var token = $('token').value.trim();
+
+    if(!label) return say('bad', '<b>Give this account a name.</b>');
+    if(!token) return say('bad', '<b>Paste the token.</b>');
+
+    clearSay();
+    $('btnAdd').disabled = true;
+    $('addOut').innerHTML = '<div class="result">Checking the token with the courier...</div>';
+
+    post('/api/courier/accounts', { courier: courier, label: label, token: token })
+      .then(function(d){
+        $('btnAdd').disabled = false;
+        $('addOut').innerHTML =
+          '<div class="result good">\u2713 ' + esc(label) + ' is connected.' +
+          (d.check && d.check.statuses && d.check.statuses.length
+            ? ' The courier knows ' + d.check.statuses.length + ' order statuses.'
+            : '') + '</div>';
+        $('label').value = '';
+        $('token').value = '';
+        loadAccounts();
+      })
+      .catch(function(e){
+        $('btnAdd').disabled = false;
+        $('addOut').innerHTML = '<div class="result bad">\u2717 ' + esc(e.message) + '</div>';
+      });
+  });
+
+  /* ---------- pulling ---------- */
+
+  function fillPullAccounts(){
+    var sel = $('pullAcc');
+    sel.innerHTML = '';
+    S.accounts.forEach(function(a){
+      var o = document.createElement('option');
+      o.value = a.id;
+      o.textContent = a.label;
+      sel.appendChild(o);
+    });
+
+    if(S.accounts.length){
+      $('stepPull').classList.remove('hide');
+      $('pullHint').textContent =
+        'Orders are kept here once pulled, so the same days can be asked for again ' +
+        'without making duplicates.';
+    } else {
+      $('stepPull').classList.add('hide');
+    }
+  }
+
+  $('btnPull').addEventListener('click', function(){
+    var id = Number($('pullAcc').value);
+    var from = $('from').value, to = $('to').value;
+
+    if(!id) return say('bad', '<b>Pick an account.</b>');
+    if(!from || !to) return say('bad', '<b>Pick both dates.</b>');
+    if(from > to) return say('bad', '<b>The first date is after the last one.</b>');
+
+    clearSay();
+    $('btnPull').disabled = true;
+    $('tally').innerHTML = '';
+    $('pullOut').innerHTML = '<div class="result">Asking the courier...</div>';
+
+    post('/api/courier/sync', { id: id, from: from, to: to })
+      .then(function(d){
+        $('btnPull').disabled = false;
+        $('pullOut').innerHTML =
+          '<div class="result good">\u2713 ' + esc(d.account) + ' \u00b7 ' +
+          nf(d.pulled) + ' orders came back, ' + nf(d.saved) + ' kept.</div>';
+
+        var t = d.tally || {};
+        var keys = Object.keys(t).sort(function(a, b){ return t[b] - t[a]; });
+        $('tally').innerHTML = keys.map(function(k){
+          return '<div><div class="n">' + nf(t[k]) + '</div>' +
+                 '<div class="l">' + esc(k) + '</div></div>';
+        }).join('');
+
+        loadAccounts();
+      })
+      .catch(function(e){
+        $('btnPull').disabled = false;
+        $('pullOut').innerHTML = '<div class="result bad">\u2717 ' + esc(e.message) + '</div>';
+      });
+  });
+})();
+</script>
+</body>
+</html>
