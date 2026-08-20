@@ -110,8 +110,12 @@ export function mapOrder(row) {
 // shows a body, so both shapes are tried before giving up.
 export async function fetchOrders(token, from, to, statusId) {
   const path = '/services/integration/api/order/v1/get-all-order';
+    // the guide says fromDate/toDate, the live API asks for startDate/endDate.
+  // Sending both keeps either build happy.
   const params = {
     orderStatusID: statusId === undefined || statusId === null ? 0 : statusId,
+    startDate: from,
+    endDate: to,
     fromDate: from,
     toDate: to
   };
