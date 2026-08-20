@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery charges</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+  .step.done{border-color:var(--qbo)}
+
+  .picks{display:flex;flex-wrap:wrap;gap:8px}
+  .pick{border:1px solid var(--line);background:#fff;border-radius:7px;padding:9px 14px;
+    cursor:pointer;font-size:13px;font-family:inherit;transition:.13s;text-align:left}
+  .pick:hover{border-color:var(--qbo)}
+  .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+
+  .crumb{font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--mono)}
+  .crumb b{color:var(--text)}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+  .cols label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  .colnow{border:1px solid var(--line);background:var(--tint);border-radius:8px;
+    padding:12px 15px;margin-bottom:14px;font-size:12.5px;line-height:1.9}
+  .colnow b{font-family:var(--mono);font-weight:500}
+  .colnow .miss{color:var(--warn);font-weight:600}
+  .colnow a{margin-left:8px;font-size:12px}
+
+  .cprs{display:flex;flex-wrap:wrap;gap:9px;align-items:flex-start}
+  .cprCard{border:1px solid var(--line);background:#fff;border-radius:8px;
+    min-width:200px;max-width:330px;overflow:hidden;cursor:pointer;transition:.13s}
+  .cprCard:hover{border-color:var(--qbo)}
+  .cprCard.on{box-shadow:0 0 0 2px var(--qbo)}
+  .cprCard.done{border-color:var(--qbo);background:#F2FAF0}
+  .cprCard .head{padding:10px 14px;font-size:13px}
+  .cprCard .head b{font-weight:600;display:block}
+  .cprCard .head small{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+  .cprCard .tick{color:var(--qbo);font-weight:700;margin-right:4px}
+
+  .entry{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden;
+    margin:16px 0}
+  .entry table{width:100%;border-collapse:collapse;font-size:13px}
+  .entry th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:8px 14px;border-bottom:1px solid var(--line);
+    background:var(--tint)}
+  .entry td{padding:9px 14px;border-bottom:1px solid var(--line)}
+  .entry td.num{text-align:right;font-family:var(--mono)}
+  .entry tr.tot td{font-weight:600;border-bottom:none;background:var(--tint)}
+  .entry select{font-size:12.5px;padding:5px 8px;margin:0;width:100%}
+  .entry input.amt{font-size:12.5px;padding:5px 8px;margin:0;text-align:right;
+    font-family:var(--mono);width:120px}
+
+  .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
+    background:#fff;font-size:13px}
+  .result.good{border-color:var(--qbo);background:#F2FAF0}
+  .result.bad{border-color:var(--bad);background:#FDF3F3}
+  .result.warn{border-color:var(--warn);background:#FFFBF0}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Delivery charges</h1>
+        <div class="sub">Post what the courier kept back as a journal entry in QuickBooks.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Nothing is posted until you have seen the entry.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="step hide" id="stepBrowse">
+          <h2>Pick the sheet</h2>
+          <div class="crumb" id="crumb"></div>
+          <div class="picks" id="browse"></div>
+        </div>
+
+        <div class="step hide" id="stepCols">
+          <h2>Columns</h2>
+          <div class="hint" id="colsHint"></div>
+          <div class="cols" id="colsBox"></div>
+          <div style="margin-top:14px">
+            <button class="solid" id="btnCols">Save and continue</button>
+          </div>
+        </div>
+
+        <div class="step hide" id="stepCpr">
+          <h2>CPRs in this sheet</h2>
+          <div class="colnow" id="colNow"></div>
+          <div class="hint" id="cprHint"></div>
+          <div class="cprs" id="cprList"></div>
+        </div>
+
+        <div class="step hide" id="stepEntry">
+          <h2>The journal entry</h2>
+          <div class="hint" id="entryHint"></div>
+          <div id="warnBox"></div>
+          <div class="entry" id="entryBox"></div>
+          <button class="solid" id="btnPost">Post to QuickBooks</button>
+          <div id="postOut"></div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    root: '', courier: '', trail: [],
+    sheetId: '', excel: false, tab: '',
+    header: [], cols: null, cprs: [],
+    accounts: null, qbAccounts: [],
+    current: null, posted: {}, existing: {}
+  };
+
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
+
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){
+      return r.json().then(function(d){
+        if(d.error){ var e = new Error(d.error); e.data = d; throw e; }
+        return d;
+      });
+    });
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    get('/api/charges/qb-accounts')
+      .then(function(d){ S.qbAccounts = d.accounts || []; })
+      .catch(function(){});
+
+    get('/api/cpr/root').then(function(d){
+      if(!d.folderId){
+        say('bad', '<b>Set the CPR folder on the Receive payments page first.</b>');
+        return;
+      }
+      S.root = d.folderId;
+      openCouriers();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  /* ---------- browsing, same folders as the payments page ---------- */
+
+  function hideFrom(step){
+    var order = ['stepBrowse','stepCols','stepCpr','stepEntry'];
+    var i = order.indexOf(step);
+    order.slice(i).forEach(function(id){ $(id).classList.add('hide'); });
+  }
+
+  function drawCrumb(){
+    var bits = ['Root'];
+    S.trail.forEach(function(t){ bits.push(t.name); });
+    $('crumb').innerHTML = bits.map(function(b, i){
+      return i === bits.length - 1 ? '<b>' + esc(b) + '</b>' : esc(b);
+    }).join(' / ');
+  }
+
+  function openCouriers(){
+    hideFrom('stepBrowse');
+    S.trail = [];
+    $('stepBrowse').classList.remove('hide');
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading Drive...</span>';
+
+    get('/api/cpr/couriers').then(function(d){
+      paint(d.folders || [], [], function(f){
+        S.courier = f.name;
+        openFolder(f);
+      });
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function openFolder(folder){
+    hideFrom('stepCols');
+    S.trail.push(folder);
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading...</span>';
+
+    get('/api/cpr/folder?id=' + encodeURIComponent(folder.id)).then(function(d){
+      if(!d.folders.length && !d.sheets.length){
+        $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Nothing in there. ' +
+          '<a href="#" id="back">Go back</a></span>';
+        $('back').addEventListener('click', function(e){ e.preventDefault(); goBack(); });
+        return;
+      }
+      paint(d.folders, d.sheets, openFolder, openSheet);
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function goBack(){
+    S.trail.pop();
+    if(!S.trail.length){ openCouriers(); return; }
+    var last = S.trail.pop();
+    openFolder(last);
+  }
+
+  function paint(folders, sheets, onFolder, onSheet){
+    var box = $('browse');
+    box.innerHTML = '';
+
+    if(S.trail.length){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      b.textContent = '\u2190 Back';
+      b.addEventListener('click', goBack);
+      box.appendChild(b);
+    }
+
+    folders.forEach(function(f){
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.textContent = '\u{1F4C1} ' + f.name;
+      e.addEventListener('click', function(){ onFolder(f); });
+      box.appendChild(e);
+    });
+
+    (sheets || []).forEach(function(f){
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+        (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
+      e.addEventListener('click', function(){
+        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+        e.classList.add('on');
+        onSheet(f);
+      });
+      box.appendChild(e);
+    });
+  }
+
+  /* ---------- open the sheet ---------- */
+
+  function openSheet(file){
+    hideFrom('stepCols');
+    S.sheetId = file.id;
+    S.excel = !!file.excel;
+    S.posted = {};
+    S.existing = {};
+    S.current = null;
+    clearSay();
+    say('', 'Reading the sheet...');
+
+    var u = '/api/charges/open?sheetId=' + encodeURIComponent(file.id) +
+            '&courier=' + encodeURIComponent(S.courier) +
+            (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(d){
+      clearSay();
+      soak(d);
+      if(d.remembered && d.cols.charges >= 0){
+        showCprs();
+      } else {
+        showCols();
+      }
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function soak(d){
+    S.tab = d.tab;
+    S.header = d.header;
+    S.cols = d.cols;
+    S.cprs = d.cprs || [];
+    S.skipped = d.skippedTotals || 0;
+    if(d.accounts) S.accounts = d.accounts;
+  }
+
+  /* ---------- columns ---------- */
+
+  var FIELDS = [
+    ['cpr',     'CPR number'],
+    ['cprDate', 'CPR date'],
+    ['charges', 'Delivery charges'],
+    ['wht',     'Withholding income tax'],
+    ['wst',     'Withholding sales tax']
+  ];
+
+  function showCols(){
+    hideFrom('stepCols');
+    $('stepCols').classList.remove('hide');
+    $('colsHint').textContent = S.header.length + ' columns found in "' + S.tab +
+      '". Check these are right - they will be remembered for ' + S.courier + '.';
+
+    var box = $('colsBox');
+    box.innerHTML = '';
+    FIELDS.forEach(function(f){
+      var wrap = document.createElement('div');
+      var lab = document.createElement('label');
+      lab.textContent = f[1];
+      var sel = document.createElement('select');
+      sel.id = 'col_' + f[0];
+
+      var none = document.createElement('option');
+      none.value = '-1';
+      none.textContent = '- none -';
+      sel.appendChild(none);
+
+      S.header.forEach(function(h, i){
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = (h || '(column ' + (i + 1) + ')');
+        sel.appendChild(o);
+      });
+
+      sel.value = String(S.cols[f[0]] === undefined ? -1 : S.cols[f[0]]);
+      wrap.appendChild(lab);
+      wrap.appendChild(sel);
+      box.appendChild(wrap);
+    });
+  }
+
+  $('btnCols').addEventListener('click', function(){
+    var cols = {};
+    FIELDS.forEach(function(f){ cols[f[0]] = Number($('col_' + f[0]).value); });
+
+    if(cols.charges < 0 && cols.wht < 0 && cols.wst < 0){
+      return say('bad', '<b>Pick at least one of the three charge columns.</b>');
+    }
+
+    clearSay();
+    $('btnCols').disabled = true;
+
+    post('/api/charges/columns', { courier: S.courier, cols: cols }).then(function(){
+      return get('/api/charges/open?sheetId=' + encodeURIComponent(S.sheetId) +
+                 '&courier=' + encodeURIComponent(S.courier) +
+                 '&tab=' + encodeURIComponent(S.tab) +
+                 (S.excel ? '&excel=1' : ''));
+    }).then(function(d){
+      $('btnCols').disabled = false;
+      $('stepCols').classList.add('done');
+      soak(d);
+      showCprs();
+    }).catch(function(e){
+      $('btnCols').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  /* ---------- the CPR list ---------- */
+
+  function showCprs(){
+    hideFrom('stepCpr');
+    $('stepCpr').classList.remove('hide');
+    drawColNow();
+
+    var withMoney = S.cprs.filter(function(c){ return c.total > 0; });
+    $('cprHint').innerHTML =
+      nf(S.cprs.length) + ' CPRs in this tab, ' + nf(withMoney.length) + ' with charges against them.' +
+      (S.skipped ? ' ' + nf(S.skipped) + ' total lines in the sheet were ignored - ' +
+                   'the rows are added up here instead.' : '');
+
+    drawCprs();
+  }
+
+  // the columns being read, always in view and always changeable
+  function drawColNow(){
+    var box = $('colNow');
+    var bits = FIELDS.map(function(f){
+      var i = S.cols[f[0]];
+      var name = (i >= 0 && S.header[i]) ? S.header[i] : null;
+      return f[1] + ': ' + (name
+        ? '<b>' + esc(name) + '</b>'
+        : '<span class="miss">not used</span>');
+    });
+
+    box.innerHTML = 'Reading from &nbsp;' + bits.join(' &nbsp;\u00b7&nbsp; ') +
+      '<a href="#" id="editCols">change</a>';
+
+    $('editCols').addEventListener('click', function(e){
+      e.preventDefault();
+      showCols();
+      $('stepCols').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function drawCprs(){
+    var box = $('cprList');
+    box.innerHTML = '';
+
+    var list = S.cprs.filter(function(c){ return c.total > 0; });
+    if(!list.length){
+      box.innerHTML = '<span style="font-size:13px;color:var(--muted)">' +
+        'No charges found. Check the columns above.</span>';
+      return;
+    }
+
+    list.forEach(function(c){
+      var done = S.posted[c.key] || S.existing[c.key];
+
+      var card = document.createElement('div');
+      card.className = 'cprCard' +
+        (done ? ' done' : '') +
+        (S.current && S.current.key === c.key ? ' on' : '');
+
+      card.innerHTML =
+        '<div class="head"><b>' + (done ? '<span class="tick">\u2713</span>' : '') +
+        esc(c.key) + '</b><small>' +
+        (c.cprDate ? esc(c.cprDate) + ' \u00b7 ' : '') +
+        nf(c.rows) + ' rows \u00b7 ' + money(c.total) +
+        (done ? '<br>posted to QuickBooks' : '') +
+        '</small></div>';
+
+      card.addEventListener('click', function(){
+        S.current = c;
+        drawCprs();
+        openEntry(c);
+      });
+
+      box.appendChild(card);
+    });
+  }
+
+  /* ---------- the entry ---------- */
+
+  function openEntry(c){
+    hideFrom('stepEntry');
+    clearSay();
+    $('postOut').innerHTML = '';
+    $('warnBox').innerHTML = '';
+    $('stepEntry').classList.remove('hide');
+
+    $('entryHint').innerHTML =
+      'CPR <b>' + esc(c.key) + '</b>' +
+      (c.cprDate ? ' dated <b>' + esc(c.cprDate) + '</b>' : ' - no date found in the sheet') +
+      ' \u00b7 added up from ' + nf(c.rows) + ' rows.';
+
+    drawEntry(c);
+
+    // has QuickBooks seen this CPR before?
+    get('/api/charges/check?cpr=' + encodeURIComponent(c.cprNumber || c.key))
+      .then(function(d){
+        if(!d.existing) return;
+        S.existing[c.key] = d.existing;
+        drawCprs();
+        $('warnBox').innerHTML =
+          '<div class="result warn">This CPR is already in QuickBooks as journal entry ' +
+          esc(d.existing.id) + ', dated ' + esc(d.existing.date) + ', ' +
+          money(d.existing.amount) + '. Posting again would double it.</div>';
+      })
+      .catch(function(){});
+  }
+
+  function accountSelect(id, chosen, want){
+    var opts = ['<option value="">- pick an account -</option>'];
+    S.qbAccounts.forEach(function(a){
+      opts.push('<option value="' + esc(a.id) + '"' +
+        (String(a.id) === String(chosen) ? ' selected' : '') + '>' +
+        esc(a.name) + ' \u2014 ' + esc(a.type) + '</option>');
+    });
+    return '<select id="' + id + '">' + opts.join('') + '</select>';
+  }
+
+  function drawEntry(c){
+    var a = S.accounts || {};
+    var total = c.total;
+
+    var rows = '';
+
+    rows += '<tr><td>Delivery charges</td>' +
+      '<td>' + accountSelect('acc_charges', a.chargesAccount) + '</td>' +
+      '<td class="num"><input class="amt" id="amt_charges" value="' + c.charges.toFixed(2) + '"></td>' +
+      '<td class="num" style="color:var(--muted)">Debit</td></tr>';
+
+    rows += '<tr><td>Withholding income tax</td>' +
+      '<td>' + accountSelect('acc_wht', a.whtAccount) + '</td>' +
+      '<td class="num"><input class="amt" id="amt_wht" value="' + c.wht.toFixed(2) + '"></td>' +
+      '<td class="num" style="color:var(--muted)">Debit</td></tr>';
+
+    rows += '<tr><td>Withholding sales tax</td>' +
+      '<td>' + accountSelect('acc_wst', a.wstAccount) + '</td>' +
+      '<td class="num"><input class="amt" id="amt_wst" value="' + c.wst.toFixed(2) + '"></td>' +
+      '<td class="num" style="color:var(--muted)">Debit</td></tr>';
+
+    rows += '<tr><td>Bank for ' + esc(S.courier) + '</td>' +
+      '<td>' + accountSelect('acc_bank', a.bankAccount) + '</td>' +
+      '<td class="num" id="creditCell">' + money(total) + '</td>' +
+      '<td class="num" style="color:var(--muted)">Credit</td></tr>';
+
+    rows += '<tr class="tot"><td colspan="2">Total</td>' +
+      '<td class="num" id="totCell">' + money(total) + '</td><td></td></tr>';
+
+    $('entryBox').innerHTML =
+      '<table><thead><tr><th>Line</th><th>Account</th>' +
+      '<th class="num">Amount</th><th class="num">Side</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>';
+
+    ['amt_charges','amt_wht','amt_wst'].forEach(function(id){
+      $(id).addEventListener('input', retotal);
+    });
+  }
+
+  function amt(id){
+    var v = Number(String($(id).value).replace(/[^0-9.\-]/g, ''));
+    return isNaN(v) ? 0 : Math.round(v * 100) / 100;
+  }
+
+  function retotal(){
+    var t = amt('amt_charges') + amt('amt_wht') + amt('amt_wst');
+    t = Math.round(t * 100) / 100;
+    $('creditCell').textContent = money(t);
+    $('totCell').textContent = money(t);
+  }
+
+  $('btnPost').addEventListener('click', function(){
+    var c = S.current;
+    if(!c) return;
+
+    var body = {
+      courier: S.courier,
+      cprNumber: c.cprNumber || c.key,
+      cprDate: c.cprDate,
+      charges: amt('amt_charges'),
+      wht: amt('amt_wht'),
+      wst: amt('amt_wst'),
+      chargesAccount: $('acc_charges').value,
+      whtAccount: $('acc_wht').value,
+      wstAccount: $('acc_wst').value,
+      bankAccount: $('acc_bank').value
+    };
+
+    var total = body.charges + body.wht + body.wst;
+    if(total <= 0) return say('bad', '<b>All three amounts are zero.</b>');
+    if(!body.bankAccount) return say('bad', '<b>Pick the bank account.</b>');
+
+    var msg = 'Post ' + money(total) + ' for CPR ' + body.cprNumber + '?' +
+              (body.cprDate ? '\nDated ' + body.cprDate : '\nNo date found - QuickBooks will use today.');
+    if(S.existing[c.key]) msg += '\n\nThis CPR is already in QuickBooks. Posting again will double it.';
+    if(!confirm(msg)) return;
+
+    clearSay();
+    $('btnPost').disabled = true;
+    $('postOut').innerHTML = '<div class="result">Posting...</div>';
+
+    if(S.existing[c.key]) body.force = true;
+
+    post('/api/charges/post', body).then(function(d){
+      $('btnPost').disabled = false;
+      S.posted[c.key] = d.id;
+      drawCprs();
+      $('postOut').innerHTML =
+        '<div class="result good">\u2713 Journal entry ' + esc(d.id) + ' posted \u00b7 ' +
+        money(d.total) + ' for CPR ' + esc(d.cprNumber) + '</div>';
+      S.accounts = {
+        chargesAccount: body.chargesAccount,
+        whtAccount: body.whtAccount,
+        wstAccount: body.wstAccount,
+        bankAccount: body.bankAccount
+      };
+    }).catch(function(e){
+      $('btnPost').disabled = false;
+      $('postOut').innerHTML = '<div class="result bad">\u2717 ' + esc(e.message) + '</div>';
+    });
+  });
+})();
+</script>
+</body>
+</html>
