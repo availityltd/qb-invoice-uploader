@@ -141,7 +141,7 @@
     sheetId: '', excel: false, tab: '',
     header: [], cols: null, cprs: [],
     accounts: null, qbAccounts: [],
-    current: null, posted: {}, existing: {}
+        current: null, posted: {}, existing: {}, scanning: false
   };
 
   function money(n){
@@ -419,7 +419,51 @@
       (S.skipped ? ' ' + nf(S.skipped) + ' total lines in the sheet were ignored - ' +
                    'the rows are added up here instead.' : '');
 
+        drawCprs();
+    scanAll();
+  }
+
+  // ask QuickBooks about every CPR at once, before anything is clicked
+  function scanAll(){
+    var list = S.cprs.filter(function(c){ return c.total > 0; })
+      .map(function(c){ return { cpr: c.cprNumber || c.key, total: c.total }; });
+    if(!list.length) return;
+
+    S.scanning = true;
     drawCprs();
+
+    post('/api/charges/scan', { cprs: list }).then(function(d){
+      S.scanning = false;
+      S.existing = {};
+      Object.keys(d.cprs || {}).forEach(function(k){
+        var r = d.cprs[k];
+        if(r.state === 'none') return;
+        S.existing[k] = r;
+      });
+      drawCprs();
+      updateHint();
+    }).catch(function(){
+      S.scanning = false;
+      drawCprs();
+    });
+  }
+
+  function updateHint(){
+    var list = S.cprs.filter(function(c){ return c.total > 0; });
+    var done = 0, off = 0;
+    list.forEach(function(c){
+      var e = S.existing[c.cprNumber || c.key];
+      if(!e) return;
+      if(e.state === 'off') off++; else done++;
+    });
+
+    $('cprHint').innerHTML =
+      nf(list.length) + ' CPRs with charges \u00b7 ' +
+      '<span style="color:var(--ok)">' + nf(done) + ' already posted and matching</span> \u00b7 ' +
+      '<span style="color:var(--warn)">' + nf(off) + ' posted but the amount differs</span> \u00b7 ' +
+      nf(list.length - done - off) + ' not posted yet' +
+      (S.skipped ? '<br>' + nf(S.skipped) + ' total lines in the sheet were ignored.' : '');
+  }
   }
 
   // the columns being read, always in view and always changeable
@@ -454,20 +498,34 @@
       return;
     }
 
-    list.forEach(function(c){
-      var done = S.posted[c.key] || S.existing[c.key];
+        list.forEach(function(c){
+      var key = c.cprNumber || c.key;
+      var e = S.existing[key];
+      var justPosted = S.posted[c.key];
+      var state = e ? e.state : (justPosted ? 'done' : 'none');
 
       var card = document.createElement('div');
       card.className = 'cprCard' +
-        (done ? ' done' : '') +
+        (state === 'done' ? ' done' : '') +
+        (state === 'off' ? ' off' : '') +
         (S.current && S.current.key === c.key ? ' on' : '');
 
+      var mark = '';
+      if(state === 'done') mark = '<span class="tick">\u2713</span>';
+      if(state === 'off')  mark = '<span class="warnmark">!</span>';
+
+      var note = '';
+      if(S.scanning) note = '<br>checking QuickBooks...';
+      else if(state === 'off') {
+        note = '<br><span style="color:#8A6100">QuickBooks has ' + money(e.amount) +
+               ', the sheet says ' + money(e.sheetTotal) + '</span>';
+      }
+      else if(state === 'done') note = '<br>posted on ' + esc(e ? e.date : '');
+
       card.innerHTML =
-        '<div class="head"><b>' + (done ? '<span class="tick">\u2713</span>' : '') +
-        esc(c.key) + '</b><small>' +
+        '<div class="head"><b>' + mark + esc(c.key) + '</b><small>' +
         (c.cprDate ? esc(c.cprDate) + ' \u00b7 ' : '') +
-        nf(c.rows) + ' rows \u00b7 ' + money(c.total) +
-        (done ? '<br>posted to QuickBooks' : '') +
+        nf(c.rows) + ' rows \u00b7 ' + money(c.total) + note +
         '</small></div>';
 
       card.addEventListener('click', function(){
@@ -496,18 +554,17 @@
 
     drawEntry(c);
 
-    // has QuickBooks seen this CPR before?
-    get('/api/charges/check?cpr=' + encodeURIComponent(c.cprNumber || c.key))
-      .then(function(d){
-        if(!d.existing) return;
-        S.existing[c.key] = d.existing;
-        drawCprs();
-        $('warnBox').innerHTML =
-          '<div class="result warn">This CPR is already in QuickBooks as journal entry ' +
-          esc(d.existing.id) + ', dated ' + esc(d.existing.date) + ', ' +
-          money(d.existing.amount) + '. Posting again would double it.</div>';
-      })
-      .catch(function(){});
+       var e = S.existing[c.cprNumber || c.key];
+    if(e){
+      $('warnBox').innerHTML =
+        '<div class="result warn">This CPR is already in QuickBooks as journal entry ' +
+        esc(e.id) + ', dated ' + esc(e.date) + ', ' + money(e.amount) + '.' +
+        (e.state === 'off'
+          ? ' That is ' + money(Math.abs(e.gap)) + ' ' + (e.gap > 0 ? 'more' : 'less') +
+            ' than this sheet adds up to.'
+          : ' Posting again would double it.') +
+        '</div>';
+    }
   }
 
   function accountSelect(id, chosen, want){
@@ -594,14 +651,14 @@
 
     var msg = 'Post ' + money(total) + ' for CPR ' + body.cprNumber + '?' +
               (body.cprDate ? '\nDated ' + body.cprDate : '\nNo date found - QuickBooks will use today.');
-    if(S.existing[c.key]) msg += '\n\nThis CPR is already in QuickBooks. Posting again will double it.';
+    if(S.existing[c.cprNumber || c.key]) msg += '\n\nThis CPR is already in QuickBooks. Posting again will double it.';
     if(!confirm(msg)) return;
 
     clearSay();
     $('btnPost').disabled = true;
     $('postOut').innerHTML = '<div class="result">Posting...</div>';
 
-    if(S.existing[c.key]) body.force = true;
+    if(S.existing[c.cprNumber || c.key]) body.force = true;
 
     post('/api/charges/post', body).then(function(d){
       $('btnPost').disabled = false;
