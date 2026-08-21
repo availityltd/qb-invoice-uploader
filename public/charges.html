@@ -60,7 +60,7 @@
   .entry td{padding:9px 14px;border-bottom:1px solid var(--line)}
   .entry td.num{text-align:right;font-family:var(--mono)}
   .entry tr.tot td{font-weight:600;border-bottom:none;background:var(--tint)}
-  .entry select{font-size:12.5px;padding:5px 8px;margin:0;width:100%}
+   .entry input.accfind{font-size:12.5px;padding:5px 8px;margin:0;width:100%}
   .entry input.amt{font-size:12.5px;padding:5px 8px;margin:0;text-align:right;
     font-family:var(--mono);width:120px}
 
@@ -415,7 +415,9 @@
     $('stepCpr').classList.remove('hide');
     drawColNow();
 
-    var withMoney = S.cprs.filter(function(c){ return c.total > 0; });
+       var withMoney = S.cprs.filter(function(c){
+      return c.total > 0 && (c.cprNumber || c.rows >= 5);
+    });
     $('cprHint').innerHTML =
       nf(S.cprs.length) + ' CPRs in this tab, ' + nf(withMoney.length) + ' with charges against them.' +
       (S.skipped ? ' ' + nf(S.skipped) + ' total lines in the sheet were ignored - ' +
@@ -427,7 +429,7 @@
 
   // ask QuickBooks about every CPR at once, before anything is clicked
   function scanAll(){
-    var list = S.cprs.filter(function(c){ return c.total > 0; })
+       var list = S.cprs.filter(function(c){ return c.total > 0 && (c.cprNumber || c.rows >= 5); })
       .map(function(c){ return { cpr: c.cprNumber || c.key, total: c.total }; });
     if(!list.length) return;
 
@@ -451,7 +453,12 @@
   }
 
   function updateHint(){
-    var list = S.cprs.filter(function(c){ return c.total > 0; });
+       // a lone row with no CPR number is the sheet's own total line, not data
+    var list = S.cprs.filter(function(c){
+      if(c.total <= 0) return false;
+      if(!c.cprNumber && c.rows < 5) return false;
+      return true;
+    });
     var done = 0, off = 0;
     list.forEach(function(c){
       var e = S.existing[c.cprNumber || c.key];
@@ -492,7 +499,9 @@
     var box = $('cprList');
     box.innerHTML = '';
 
-    var list = S.cprs.filter(function(c){ return c.total > 0; });
+       var list = S.cprs.filter(function(c){
+      return c.total > 0 && (c.cprNumber || c.rows >= 5);
+    });
     if(!list.length){
       box.innerHTML = '<span style="font-size:13px;color:var(--muted)">' +
         'No charges found. Check the columns above.</span>';
@@ -568,14 +577,33 @@
     }
   }
 
-  function accountSelect(id, chosen, want){
-    var opts = ['<option value="">- pick an account -</option>'];
-    S.qbAccounts.forEach(function(a){
-      opts.push('<option value="' + esc(a.id) + '"' +
-        (String(a.id) === String(chosen) ? ' selected' : '') + '>' +
-        esc(a.name) + ' \u2014 ' + esc(a.type) + '</option>');
+   // a plain select with hundreds of accounts is unusable, so this one filters
+  function accountSelect(id, chosen){
+    var hit = S.qbAccounts.filter(function(a){ return String(a.id) === String(chosen); })[0];
+    return '<input class="accfind" id="' + id + '_find" list="' + id + '_list" ' +
+             'placeholder="type to find an account" value="' + esc(hit ? hit.name : '') + '">' +
+           '<datalist id="' + id + '_list">' +
+             S.qbAccounts.map(function(a){
+               return '<option value="' + esc(a.name) + '">' + esc(a.type) + '</option>';
+             }).join('') +
+           '</datalist>' +
+           '<input type="hidden" id="' + id + '" value="' + esc(chosen || '') + '">';
+  }
+
+  // whatever was typed, turned back into an account id
+  function bindAccountFinders(ids){
+    ids.forEach(function(id){
+      var box = $(id + '_find');
+      if(!box) return;
+      box.addEventListener('input', function(){
+        var name = box.value.trim().toLowerCase();
+        var hit = S.qbAccounts.filter(function(a){
+          return a.name.toLowerCase() === name;
+        })[0];
+        $(id).value = hit ? hit.id : '';
+        box.style.borderColor = hit ? '' : 'var(--warn)';
+      });
     });
-    return '<select id="' + id + '">' + opts.join('') + '</select>';
   }
 
   function drawEntry(c){
@@ -625,9 +653,10 @@
         ) + '">' +
       '</div>';
 
-    ['amt_charges','amt_wht','amt_wst'].forEach(function(id){
+       ['amt_charges','amt_wht','amt_wst'].forEach(function(id){
       $(id).addEventListener('input', retotal);
     });
+    bindAccountFinders(['acc_charges','acc_wht','acc_wst','acc_bank']);
   }
 
   function amt(id){
