@@ -180,18 +180,24 @@ export async function findJournal(realmId, token, cprNumber) {
   const ref = String(cprNumber || '').replace(/'/g, "\\'");
   if (!ref) return null;
 
+  // JournalEntry has no TotalAmt - the amount lives on the lines
   const q = await qbQuery(realmId, token,
-    `SELECT Id, DocNumber, TxnDate, TotalAmt FROM JournalEntry ` +
-    `WHERE DocNumber = '${ref}' MAXRESULTS 5`);
+    `SELECT * FROM JournalEntry WHERE DocNumber = '${ref}' MAXRESULTS 5`);
 
   const j = (q.JournalEntry || [])[0];
   if (!j) return null;
+
+  // add the debit side up - that is what the entry is worth
+  const amount = (j.Line || [])
+    .filter(l => l.JournalEntryLineDetail &&
+                 l.JournalEntryLineDetail.PostingType === 'Debit')
+    .reduce((s, l) => s + Number(l.Amount || 0), 0);
 
   return {
     id: j.Id,
     doc: j.DocNumber,
     date: j.TxnDate,
-    amount: Number(j.TotalAmt || 0)
+    amount: Math.round(amount * 100) / 100
   };
 }
 
