@@ -1597,7 +1597,35 @@ app.get('/api/adv/peek-images', async (req, res) => {
   }
 });
 // ==================== Delivery charges and taxes ====================
+// Daewoo keeps its delivery charges in a folder of their own, apart from the
+// CPR sheets. This is where that folder is remembered.
+app.get('/api/charges/dc-root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ folderId: await getSetting(realmId, 'charges:dcRoot', '') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
+app.post('/api/charges/dc-root', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  let id = String(req.body.folderId || '').trim();
+  const m = id.match(/[-\w]{25,}/);
+  if (m) id = m[0];
+  if (!id) return res.status(400).json({ error: 'Folder link or ID required' });
+
+  try {
+    await setSetting(realmId, 'charges:dcRoot', id);
+    res.json({ ok: true, folderId: id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // open a CPR sheet and add its charge columns up, CPR by CPR
 app.get('/api/charges/open', async (req, res) => {
   const realmId = await requireCompany(req, res);
