@@ -1778,39 +1778,37 @@ app.post('/api/charges/post', async (req, res) => {
       });
     }
 
+    // the same words on every line, as they appear when this is done by hand
+    const note = String(req.body.description || '').trim() ||
+                 [String(cprNumber).slice(0, 21), courier].filter(Boolean).join(' - ');
+
     const lines = [];
-    const debit = (amount, accountId, desc) => {
+    const line = (amount, accountId, side) => {
       lines.push({
         DetailType: 'JournalEntryLineDetail',
         Amount: amount,
-        Description: desc,
+        Description: note,
         JournalEntryLineDetail: {
-          PostingType: 'Debit',
+          PostingType: side,
           AccountRef: { value: String(accountId) }
         }
       });
     };
 
-    if (c > 0) debit(c, chargesAccount, 'Delivery charges');
-    if (i > 0) debit(i, whtAccount, 'Withholding income tax');
-    if (s > 0) debit(s, wstAccount, 'Withholding sales tax');
+    if (c > 0) line(c, chargesAccount, 'Debit');
+    if (i > 0) line(i, whtAccount, 'Debit');
+    if (s > 0) line(s, wstAccount, 'Debit');
+    line(total, bankAccount, 'Credit');
 
-    lines.push({
-      DetailType: 'JournalEntryLineDetail',
-      Amount: total,
-      Description: 'Deducted by ' + (courier || 'courier'),
-      JournalEntryLineDetail: {
-        PostingType: 'Credit',
-        AccountRef: { value: String(bankAccount) }
-      }
-    });
+    const memo = String(req.body.memo || '').trim() ||
+                 `Delivery charges and taxes - CPR ${cprNumber}` +
+                 (courier ? ` - ${courier}` : '') +
+                 (cprDate ? ` dated ${cprDate}` : '');
 
     const payload = {
       DocNumber: String(cprNumber).slice(0, 21),
       Line: lines,
-      PrivateNote: `Delivery charges and taxes\nCPR ${cprNumber}` +
-                   (cprDate ? `\ndated ${cprDate}` : '') +
-                   (courier ? `\n${courier}` : '')
+      PrivateNote: memo
     };
     if (cprDate) payload.TxnDate = cprDate;
 
