@@ -607,10 +607,23 @@
     rows += '<tr class="tot"><td colspan="2">Total</td>' +
       '<td class="num" id="totCell">' + money(total) + '</td><td></td></tr>';
 
+       var who = [c.cprNumber || c.key, S.courier].filter(Boolean).join(' - ');
+
     $('entryBox').innerHTML =
       '<table><thead><tr><th>Line</th><th>Account</th>' +
       '<th class="num">Amount</th><th class="num">Side</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table>';
+      '<tbody>' + rows + '</tbody></table>' +
+      '<div style="padding:14px;border-top:1px solid var(--line)">' +
+        '<label style="display:block;font-size:11px;letter-spacing:.07em;' +
+          'text-transform:uppercase;color:var(--faint);margin-bottom:4px">' +
+          'Description on every line</label>' +
+        '<input id="jDesc" value="' + esc(who) + '" style="margin-bottom:14px">' +
+        '<label style="display:block;font-size:11px;letter-spacing:.07em;' +
+          'text-transform:uppercase;color:var(--faint);margin-bottom:4px">Memo</label>' +
+        '<input id="jMemo" value="' + esc(
+          'Delivery charges - Withholding income , sale tax - ' + who
+        ) + '">' +
+      '</div>';
 
     ['amt_charges','amt_wht','amt_wst'].forEach(function(id){
       $(id).addEventListener('input', retotal);
@@ -642,8 +655,10 @@
       wst: amt('amt_wst'),
       chargesAccount: $('acc_charges').value,
       whtAccount: $('acc_wht').value,
-      wstAccount: $('acc_wst').value,
-      bankAccount: $('acc_bank').value
+           wstAccount: $('acc_wst').value,
+      bankAccount: $('acc_bank').value,
+      description: $('jDesc') ? $('jDesc').value : '',
+      memo: $('jMemo') ? $('jMemo').value : ''
     };
 
     var total = body.charges + body.wht + body.wst;
