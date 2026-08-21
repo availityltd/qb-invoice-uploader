@@ -11,10 +11,11 @@ const HINTS = {
   cpr:     ['cpr', 'cpr no', 'cpr number', 'cpr n', 'invoice_no', 'invoice no',
             'settlement no', 'payment no', 'cpr#'],
   cprDate: ['cpr date', 'cpr d', 'settlement date', 'payment date', 'invoice date', 'cpr_date'],
-   charges: ['shipping_charges', 'shipping charges', 'delivery charges', 'delivery charge',
-            'service charges', 'service charge', 'courier charges', 'charges', 'freight',
-            'fuel surcharge', 'delivery fee', 'transaction fee'],
-  charges2:['gst', 'sales tax on services', 'service tax', 'fed', 'surcharge'],
+    charges: ['shipping_charges', 'shipping charges', 'amount_ti', 'delivery charges',
+            'delivery charge', 'service charges', 'service charge', 'courier charges',
+            'charges', 'freight', 'fuel surcharge', 'delivery fee', 'transaction fee'],
+  charges2:['gst', 'amount_fs', 'sales tax on services', 'service tax', 'fed', 'surcharge'],
+  charges3:['amount_wr', 'weight charges', 'weight charge', 'handling', 'other charges'],
   wht:     ['withholding income tax', 'wht', 'w.h.t', 'income tax', 'wh income tax',
             'withholding tax', 'tax deducted'],
   wst:     ['withholding sale tax', 'withholding sales tax', 'wst', 'sales tax',
@@ -60,7 +61,8 @@ export function detectChargeColumns(header, saved) {
     cpr:      pick('cpr'),
     cprDate:  pick('cprDate'),
     charges:  pick('charges'),
-    charges2: pick('charges2'),      // some couriers split the charge in two
+        charges2: pick('charges2'),      // couriers split the charge across
+    charges3: pick('charges3'),      // as many as three columns
     wht:      pick('wht'),
     wst:      pick('wst')
   };
@@ -109,9 +111,10 @@ export async function loadCharges(sheetId, tab, excel, saved) {
     }
 
     const g = groups.get(key);
-       // the delivery charge can sit in one column or be split across two
+           // the delivery charge can sit in one column or be split across three
     const charges = (cols.charges  >= 0 ? num(raw[cols.charges])  : 0) +
-                    (cols.charges2 >= 0 ? num(raw[cols.charges2]) : 0);
+                    (cols.charges2 >= 0 ? num(raw[cols.charges2]) : 0) +
+                    (cols.charges3 >= 0 ? num(raw[cols.charges3]) : 0);
     const wht     = cols.wht     >= 0 ? num(raw[cols.wht])     : 0;
     const wst     = cols.wst     >= 0 ? num(raw[cols.wst])     : 0;
 
