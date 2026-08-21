@@ -124,8 +124,9 @@
 
       <div id="body" class="hide">
 
-        <div class="step hide" id="stepBrowse">
+               <div class="step hide" id="stepBrowse">
           <h2>Pick the sheet</h2>
+          <div class="hint" id="whichFolder"></div>
           <div class="crumb" id="crumb"></div>
           <div class="picks" id="browse"></div>
         </div>
@@ -182,7 +183,7 @@
   var $ = function(id){ return document.getElementById(id); };
 
   var S = {
-    root: '', courier: '', trail: [],
+        root: '', dcRoot: '', which: 'cpr', courier: '', trail: [],
     sheetId: '', excel: false, tab: '',
     mode: 'columns',                 // or 'summary'
     header: [], cols: null, cprs: [],
@@ -243,14 +244,18 @@
       .then(function(d){ S.qbAccounts = d.accounts || []; })
       .catch(function(){});
 
-    get('/api/cpr/root').then(function(d){
-      if(!d.folderId){
+        Promise.all([
+      get('/api/cpr/root').catch(function(){ return {}; }),
+      get('/api/charges/dc-root').catch(function(){ return {}; })
+    ]).then(function(both){
+      S.root = both[0].folderId || '';
+      S.dcRoot = both[1].folderId || '';
+      if(!S.root){
         say('bad', '<b>Set the CPR folder on the Receive payments page first.</b>');
         return;
       }
-      S.root = d.folderId;
       openCouriers();
-    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+    });
   });
 
   /* ---------- browsing ---------- */
@@ -269,20 +274,81 @@
     }).join(' / ');
   }
 
-  function openCouriers(){
+    function openCouriers(){
     hideFrom('stepBrowse');
     S.trail = [];
     $('stepBrowse').classList.remove('hide');
+    drawWhich();
     drawCrumb();
     $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading Drive...</span>';
 
-    get('/api/cpr/couriers').then(function(d){
-      paint(d.folders || [], [], function(f){
-        S.courier = f.name;
+    var url = S.which === 'dc'
+      ? '/api/void/sheets?id=' + encodeURIComponent(S.dcRoot)
+      : '/api/cpr/couriers';
+
+    get(url).then(function(d){
+      var folders = d.folders || [];
+      var sheets = d.sheets || [];
+
+      if(!folders.length && !sheets.length){
+        $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">' +
+          'Nothing in that folder.</span>';
+        return;
+      }
+
+      paint(folders, sheets, function(f){
+        if(S.which !== 'dc') S.courier = f.name;
         openFolder(f);
-      });
+      }, openSheet);
     }).catch(function(e){
       $('browse').innerHTML = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  // two folders live here: the CPR sheets, and Daewoo's delivery charge sheets
+  function drawWhich(){
+    var box = $('whichFolder');
+    box.innerHTML =
+      '<button class="pick' + (S.which === 'cpr' ? ' on' : '') + '" id="wCpr" ' +
+        'style="margin-right:8px">CPR sheets</button>' +
+      '<button class="pick' + (S.which === 'dc' ? ' on' : '') + '" id="wDc">' +
+        'Delivery charge sheets</button>' +
+      '<a href="#" id="setDc" style="margin-left:12px;font-size:12px">' +
+        (S.dcRoot ? 'change that folder' : 'set the folder') + '</a>';
+
+    $('wCpr').addEventListener('click', function(){
+      S.which = 'cpr';
+      S.courier = '';
+      openCouriers();
+    });
+
+    $('wDc').addEventListener('click', function(){
+      if(!S.dcRoot){ askDcFolder(); return; }
+      S.which = 'dc';
+      S.courier = S.courier || 'Daewoo delivery charges';
+      openCouriers();
+    });
+
+    $('setDc').addEventListener('click', function(e){
+      e.preventDefault();
+      askDcFolder();
+    });
+  }
+
+  function askDcFolder(){
+    var v = prompt('Paste the link to the folder holding the delivery charge sheets:',
+                   S.dcRoot || '');
+    if(v === null) return;
+    v = v.trim();
+    if(!v) return;
+
+    post('/api/charges/dc-root', { folderId: v }).then(function(d){
+      S.dcRoot = d.folderId;
+      S.which = 'dc';
+      S.courier = S.courier || 'Daewoo delivery charges';
+      openCouriers();
+    }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
   }
@@ -293,7 +359,11 @@
     drawCrumb();
     $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading...</span>';
 
-    get('/api/cpr/folder?id=' + encodeURIComponent(folder.id)).then(function(d){
+       var u = S.which === 'dc'
+      ? '/api/void/sheets?id=' + encodeURIComponent(folder.id)
+      : '/api/cpr/folder?id=' + encodeURIComponent(folder.id);
+
+    get(u).then(function(d){
       if(!d.folders.length && !d.sheets.length){
         $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Nothing in there. ' +
           '<a href="#" id="back">Go back</a></span>';
@@ -410,7 +480,8 @@
     ['cpr',      'CPR number'],
     ['cprDate',  'CPR date'],
     ['charges',  'Delivery charges'],
-    ['charges2', 'Plus this column (GST, surcharge)'],
+       ['charges2', 'Plus this column'],
+    ['charges3', 'And this one'],
     ['wht',      'Withholding income tax'],
     ['wst',      'Withholding sales tax']
   ];
@@ -453,7 +524,8 @@
     var cols = {};
     FIELDS.forEach(function(f){ cols[f[0]] = Number($('col_' + f[0]).value); });
 
-    if(cols.charges < 0 && cols.charges2 < 0 && cols.wht < 0 && cols.wst < 0){
+       if(cols.charges < 0 && cols.charges2 < 0 && cols.charges3 < 0 &&
+       cols.wht < 0 && cols.wst < 0){
       return say('bad', '<b>Pick at least one of the charge columns.</b>');
     }
 
