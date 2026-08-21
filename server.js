@@ -39,6 +39,7 @@ import { adapter as postexAdapter } from './postex.js';
 import {
   loadCharges, listAllAccounts, findJournal, postJournal
 } from './journal.js';
+import { loadTraxSummaries, applyLines } from './traxsheet.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1832,6 +1833,166 @@ app.post('/api/charges/post', async (req, res) => {
         charges: c, wht: i, wst: s
       }
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// ---- couriers that write their charges in a summary block, not in columns ----
+
+app.get('/api/charges/summary-open', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, courier } = req.query;
+  const excel = req.query.excel === '1';
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const tabs = await listTabs(sheetId, excel);
+    if (!tabs.length) return res.status(400).json({ error: 'That file has no tabs' });
+    const useTab = tab || tabs[0].title;
+
+    const d = await loadTraxSummaries(sheetId, useTab, excel);
+    const lines = courier
+      ? await getSetting(realmId, `charges:lines:${courier}`, null)
+      : null;
+
+    res.json({
+      tabs,
+      tab: useTab,
+      cprs: d.cprs,
+      names: d.names,
+      lines,
+      headerRow: d.headerRow
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the lines a courier's journal entry is built from - saved once, reused
+app.post('/api/charges/lines', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { courier, lines } = req.body;
+  if (!courier || !Array.isArray(lines)) {
+    return res.status(400).json({ error: 'courier and lines required' });
+  }
+
+  try {
+    await setSetting(realmId, `charges:lines:${courier}`, lines);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// work out what one CPR's entry would look like, without writing anything
+app.post('/api/charges/preview', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { cpr, lines } = req.body;
+  if (!cpr) return res.status(400).json({ error: 'cpr required' });
+
+  try {
+    res.json(applyLines(cpr, lines || []));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// a journal entry built from those lines - any number of debits, one credit
+app.post('/api/charges/post-lines', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const {
+    courier, cprNumber, cprDate, bankAccount,
+    lines = [], description, memo
+  } = req.body;
+
+  if (!cprNumber) return res.status(400).json({ error: 'CPR number required' });
+  if (!bankAccount) return res.status(400).json({ error: 'Pick the bank account' });
+
+  const good = lines
+    .map(l => ({
+      label: String(l.label || '').trim(),
+      account: l.account,
+      amount: Math.round(Number(l.amount || 0) * 100) / 100
+    }))
+    .filter(l => l.amount > 0);
+
+  if (!good.length) return res.status(400).json({ error: 'Every line came to zero' });
+
+  const missing = good.filter(l => !l.account);
+  if (missing.length) {
+    return res.status(400).json({
+      error: 'Pick an account for: ' + missing.map(l => l.label || 'a line').join(', ')
+    });
+  }
+
+  const total = Math.round(good.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    const already = await findJournal(realmId, token, cprNumber);
+    if (already && !req.body.force) {
+      return res.status(409).json({
+        error: `CPR ${cprNumber} was already journalled on ${already.date}`,
+        existing: already
+      });
+    }
+
+    const note = String(description || '').trim() ||
+                 [String(cprNumber).slice(0, 21), courier].filter(Boolean).join(' - ');
+
+    const qbLines = good.map(l => ({
+      DetailType: 'JournalEntryLineDetail',
+      Amount: l.amount,
+      Description: note,
+      JournalEntryLineDetail: {
+        PostingType: 'Debit',
+        AccountRef: { value: String(l.account) }
+      }
+    }));
+
+    qbLines.push({
+      DetailType: 'JournalEntryLineDetail',
+      Amount: total,
+      Description: note,
+      JournalEntryLineDetail: {
+        PostingType: 'Credit',
+        AccountRef: { value: String(bankAccount) }
+      }
+    });
+
+    const payload = {
+      DocNumber: String(cprNumber).slice(0, 21),
+      Line: qbLines,
+      PrivateNote: String(memo || '').trim() ||
+        `Delivery charges and taxes - CPR ${cprNumber}` +
+        (courier ? ` - ${courier}` : '') +
+        (cprDate ? ` dated ${cprDate}` : '')
+    };
+    if (cprDate) payload.TxnDate = cprDate;
+
+    const r = await postJournal(realmId, token, payload);
+    if (!r.ok) return res.status(400).json({ error: r.msg });
+
+    if (courier && bankAccount) {
+      try {
+        const prev = (await getSetting(realmId, `charges:accounts:${courier}`, {})) || {};
+        prev.bankAccount = bankAccount;
+        await setSetting(realmId, `charges:accounts:${courier}`, prev);
+      } catch (e) {}
+    }
+
+    res.json({ ok: true, id: r.id, cprNumber, total, lines: good });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
