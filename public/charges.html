@@ -86,6 +86,11 @@
   .chargeGrid label:hover{border-color:var(--qbo)}
   .chargeGrid label.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
   .chargeGrid label.roll{color:var(--muted);border-style:dashed}
+    .chargeGrid label.minus{border-color:var(--warn);background:#FFFBF0}
+  .chargeGrid .flip{margin-left:6px;border:1px solid var(--line);background:#fff;
+    border-radius:4px;width:20px;height:20px;line-height:1;cursor:pointer;
+    font-family:var(--mono);font-size:12px;padding:0}
+  .chargeGrid .flip:hover{border-color:var(--qbo)}
   .chargeGrid input{width:auto;margin:0}
 
   .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
@@ -186,7 +191,10 @@
     current: null, preview: null,
     posted: {}, existing: {}, scanning: false
   };
-
+  // a charge may be a plain name or a name with a sign
+  function chargeName(c){
+    return typeof c === 'string' ? c : (c && c.name) || '';
+  }
   function money(n){
     var v = Number(n || 0);
     var p = Math.abs(v).toFixed(2).split('.');
@@ -487,10 +495,17 @@
       return !n.rollup && taken.indexOf(n.name.toLowerCase()) < 0;
     }).map(function(n){ return n.name; });
 
+        // an adjustment is stated the other way round, so it comes off by default
+    var signed = function(names){
+      return names.map(function(n){
+        return { name: n, sign: /adjust/i.test(n) ? -1 : 1 };
+      });
+    };
+
     return [
-      { label: 'Delivery charges',       charges: rest, account: '' },
-      { label: 'Withholding income tax', charges: wht,  account: '' },
-      { label: 'Withholding sales tax',  charges: sst,  account: '' }
+      { label: 'Delivery charges',       charges: signed(rest), account: '' },
+      { label: 'Withholding income tax', charges: signed(wht),  account: '' },
+      { label: 'Withholding sales tax',  charges: signed(sst),  account: '' }
     ];
   }
 
@@ -513,13 +528,20 @@
       var row = document.createElement('div');
       row.className = 'lineRow';
 
-      var chips = S.names.map(function(n){
-        var on = (l.charges || []).some(function(c){
-          return String(c).toLowerCase() === n.name.toLowerCase();
-        });
-        return '<label class="' + (on ? 'on' : '') + (n.rollup ? ' roll' : '') + '">' +
+            var chips = S.names.map(function(n){
+        var picked = (l.charges || []).filter(function(c){
+          return chargeName(c).toLowerCase() === n.name.toLowerCase();
+        })[0];
+        var on = !!picked;
+        var minus = picked && picked.sign === -1;
+
+        return '<label class="' + (on ? 'on' : '') + (n.rollup ? ' roll' : '') +
+               (minus ? ' minus' : '') + '">' +
                '<input type="checkbox" data-line="' + i + '" data-name="' + esc(n.name) + '"' +
                (on ? ' checked' : '') + '>' + esc(n.name) +
+               (on ? '<button class="flip" data-flip="' + i + '" ' +
+                     'data-name="' + esc(n.name) + '" title="add or subtract">' +
+                     (minus ? '\u2212' : '+') + '</button>' : '') +
                (n.rollup ? ' <span style="font-size:10px">(a sum of others)</span>' : '') +
                '</label>';
       }).join('');
@@ -539,22 +561,47 @@
       box.appendChild(row);
     });
 
-    box.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      box.querySelectorAll('input[type=checkbox]').forEach(function(cb){
       cb.addEventListener('change', function(){
         var i = Number(cb.getAttribute('data-line'));
         var name = cb.getAttribute('data-name');
         var l = S.lines[i];
         l.charges = l.charges || [];
+
         if(cb.checked){
-          if(!l.charges.some(function(c){ return c.toLowerCase() === name.toLowerCase(); })){
-            l.charges.push(name);
+          if(!l.charges.some(function(c){
+            return chargeName(c).toLowerCase() === name.toLowerCase();
+          })){
+            // adjustments run the other way round, so they start as a subtraction
+            var sign = /adjust/i.test(name) ? -1 : 1;
+            l.charges.push({ name: name, sign: sign });
           }
         } else {
           l.charges = l.charges.filter(function(c){
-            return c.toLowerCase() !== name.toLowerCase();
+            return chargeName(c).toLowerCase() !== name.toLowerCase();
           });
         }
-        cb.parentNode.classList.toggle('on', cb.checked);
+        drawLines();
+      });
+    });
+
+    box.querySelectorAll('button[data-flip]').forEach(function(b){
+      b.addEventListener('click', function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        var i = Number(b.getAttribute('data-flip'));
+        var name = b.getAttribute('data-name');
+        var hit = (S.lines[i].charges || []).filter(function(c){
+          return chargeName(c).toLowerCase() === name.toLowerCase();
+        })[0];
+        if(!hit) return;
+        if(typeof hit === 'string'){
+          var at = S.lines[i].charges.indexOf(hit);
+          S.lines[i].charges[at] = { name: hit, sign: -1 };
+        } else {
+          hit.sign = hit.sign === -1 ? 1 : -1;
+        }
+        drawLines();
       });
     });
 
@@ -686,12 +733,15 @@
   function cprTotal(c){
     if(S.mode === 'columns') return c.total;
     var sum = 0;
-    var wanted = {};
+     var wanted = {};
     S.lines.forEach(function(l){
-      (l.charges || []).forEach(function(n){ wanted[String(n).toLowerCase()] = true; });
+      (l.charges || []).forEach(function(n){
+        wanted[chargeName(n).toLowerCase()] = (typeof n === 'string') ? 1 : (n.sign || 1);
+      });
     });
     (c.charges || []).forEach(function(ch){
-      if(wanted[ch.name.toLowerCase()]) sum += ch.amount;
+      var sign = wanted[ch.name.toLowerCase()];
+      if(sign) sum += ch.amount * sign;
     });
     return Math.round(sum * 100) / 100;
   }
@@ -846,8 +896,10 @@
       S.preview = p;
 
       var rows = p.lines.map(function(l, i){
-        var made = l.found.length
-          ? l.found.join(' + ')
+               var made = l.found.length
+          ? l.found.map(function(f){
+              return (typeof f === 'string' ? f : (f.sign === -1 ? '\u2212 ' : '+ ') + f.name);
+            }).join(' ')
           : '<span style="color:var(--warn)">none of these charges are in this CPR</span>';
         return '<tr><td>' + esc(l.label || 'unnamed') +
                '<span class="made">' + made + '</span></td>' +
