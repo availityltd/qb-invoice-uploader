@@ -44,7 +44,7 @@
   .cprCard:hover{border-color:var(--qbo)}
   .cprCard.on{box-shadow:0 0 0 2px var(--qbo)}
   .cprCard.done{border-color:var(--qbo);background:#F2FAF0}
-    .cprCard.off{border-color:var(--warn);background:#FFFBF0}
+  .cprCard.off{border-color:var(--warn);background:#FFFBF0}
   .cprCard .warnmark{color:var(--warn);font-weight:700;margin-right:4px}
   .cprCard .head{padding:10px 14px;font-size:13px}
   .cprCard .head b{font-weight:600;display:block}
@@ -60,10 +60,33 @@
   .entry td{padding:9px 14px;border-bottom:1px solid var(--line)}
   .entry td.num{text-align:right;font-family:var(--mono)}
   .entry tr.tot td{font-weight:600;border-bottom:none;background:var(--tint)}
-   .entry select{font-size:12.5px;padding:5px 8px;margin:0;width:100%}
-   .entry input.accfind{font-size:12.5px;padding:5px 8px;margin:0;width:100%}
+  .entry select{font-size:12.5px;padding:5px 8px;margin:0;width:100%}
+  .entry input.accfind{font-size:12.5px;padding:5px 8px;margin:0;width:100%}
   .entry input.amt{font-size:12.5px;padding:5px 8px;margin:0;text-align:right;
     font-family:var(--mono);width:120px}
+  .entry #jDesc, .entry #jMemo{width:100%;font-size:12.5px;padding:6px 9px;margin:0}
+  .entry td .made{display:block;font-size:10.5px;color:var(--muted);margin-top:3px;
+    line-height:1.5}
+
+  /* the line builder, for couriers that write a summary block */
+  .lineset{display:flex;flex-direction:column;gap:12px}
+  .lineRow{border:1px solid var(--line);border-radius:8px;background:#fff;padding:14px 16px}
+  .lineRow .top{display:grid;grid-template-columns:1fr 1.4fr auto;gap:12px;
+    align-items:end;margin-bottom:12px}
+  .lineRow label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+  .lineRow input, .lineRow select{margin:0;font-size:12.5px;padding:6px 9px;width:100%}
+  .lineRow .drop{font-size:11.5px;padding:6px 12px;border-radius:6px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;font-family:inherit;white-space:nowrap}
+  .lineRow .drop:hover{border-color:var(--bad);color:var(--bad)}
+  .chargeGrid{display:flex;flex-wrap:wrap;gap:7px}
+  .chargeGrid label{display:flex;align-items:center;gap:6px;font-size:12px;
+    border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;
+    text-transform:none;letter-spacing:0;color:var(--text);margin:0}
+  .chargeGrid label:hover{border-color:var(--qbo)}
+  .chargeGrid label.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .chargeGrid label.roll{color:var(--muted);border-style:dashed}
+  .chargeGrid input{width:auto;margin:0}
 
   .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
     background:#fff;font-size:13px}
@@ -102,12 +125,26 @@
           <div class="picks" id="browse"></div>
         </div>
 
+        <!-- couriers whose charges sit in columns -->
         <div class="step hide" id="stepCols">
           <h2>Columns</h2>
           <div class="hint" id="colsHint"></div>
           <div class="cols" id="colsBox"></div>
           <div style="margin-top:14px">
             <button class="solid" id="btnCols">Save and continue</button>
+          </div>
+        </div>
+
+        <!-- couriers who write a summary block instead -->
+        <div class="step hide" id="stepLines">
+          <h2>How the entry is built</h2>
+          <div class="hint" id="linesHint"></div>
+          <div class="lineset" id="lineSet"></div>
+          <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="solid" id="btnLines">Save and continue</button>
+            <button class="mini" id="btnAddLine" style="font-size:12px;padding:8px 14px;
+              border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer;
+              font-family:inherit">+ Add another line</button>
           </div>
         </div>
 
@@ -142,9 +179,12 @@
   var S = {
     root: '', courier: '', trail: [],
     sheetId: '', excel: false, tab: '',
+    mode: 'columns',                 // or 'summary'
     header: [], cols: null, cprs: [],
+    names: [], lines: [],
     accounts: null, qbAccounts: [],
-        current: null, posted: {}, existing: {}, scanning: false
+    current: null, preview: null,
+    posted: {}, existing: {}, scanning: false
   };
 
   function money(n){
@@ -155,7 +195,8 @@
   function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function esc(s){
     return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
   function say(cls, html){
     $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
@@ -204,10 +245,10 @@
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
 
-  /* ---------- browsing, same folders as the payments page ---------- */
+  /* ---------- browsing ---------- */
 
   function hideFrom(step){
-    var order = ['stepBrowse','stepCols','stepCpr','stepEntry'];
+    var order = ['stepBrowse','stepCols','stepLines','stepCpr','stepEntry'];
     var i = order.indexOf(step);
     order.slice(i).forEach(function(id){ $(id).classList.add('hide'); });
   }
@@ -299,7 +340,7 @@
     });
   }
 
-  /* ---------- open the sheet ---------- */
+  /* ---------- opening a sheet: work out which kind it is ---------- */
 
   function openSheet(file){
     hideFrom('stepCols');
@@ -311,35 +352,53 @@
     clearSay();
     say('', 'Reading the sheet...');
 
-    var u = '/api/charges/open?sheetId=' + encodeURIComponent(file.id) +
-            '&courier=' + encodeURIComponent(S.courier) +
-            (S.excel ? '&excel=1' : '');
+    var qs = 'sheetId=' + encodeURIComponent(file.id) +
+             '&courier=' + encodeURIComponent(S.courier) +
+             (S.excel ? '&excel=1' : '');
 
-    get(u).then(function(d){
-      clearSay();
-      soak(d);
-      if(d.remembered && d.cols.charges >= 0){
-        showCprs();
-      } else {
-        showCols();
+    // a summary block wins, since only some couriers write one
+    get('/api/charges/summary-open?' + qs).then(function(d){
+      if(d.cprs && d.cprs.length){
+        clearSay();
+        S.mode = 'summary';
+        S.tab = d.tab;
+        S.cprs = d.cprs;
+        S.names = d.names || [];
+        S.lines = (d.lines && d.lines.length) ? d.lines : defaultLines();
+        if(d.lines && d.lines.length) showCprs();
+        else showLines();
+        return null;
       }
+      return get('/api/charges/open?' + qs);
+    }).then(function(d){
+      if(!d) return;
+      clearSay();
+      S.mode = 'columns';
+      soakColumns(d);
+      if(d.remembered && d.cols.charges >= 0) showCprs();
+      else showCols();
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
   }
 
-  function soak(d){
+  function soakColumns(d){
     S.tab = d.tab;
     S.header = d.header;
     S.cols = d.cols;
-    S.cprs = d.cprs || [];
+    S.cprs = (d.cprs || []).map(function(c){
+      return {
+        cpr: c.cprNumber, key: c.key, cprDate: c.cprDate, rows: c.rows,
+        charges: c.charges, wht: c.wht, wst: c.wst, total: c.total
+      };
+    });
     S.skipped = d.skippedTotals || 0;
     if(d.accounts) S.accounts = d.accounts;
   }
 
-  /* ---------- columns ---------- */
+  /* ---------- columns, for PostEx and its kind ---------- */
 
-   var FIELDS = [
+  var FIELDS = [
     ['cpr',      'CPR number'],
     ['cprDate',  'CPR date'],
     ['charges',  'Delivery charges'],
@@ -386,8 +445,8 @@
     var cols = {};
     FIELDS.forEach(function(f){ cols[f[0]] = Number($('col_' + f[0]).value); });
 
-       if(cols.charges < 0 && cols.charges2 < 0 && cols.wht < 0 && cols.wst < 0){
-      return say('bad', '<b>Pick at least one of the three charge columns.</b>');
+    if(cols.charges < 0 && cols.charges2 < 0 && cols.wht < 0 && cols.wst < 0){
+      return say('bad', '<b>Pick at least one of the charge columns.</b>');
     }
 
     clearSay();
@@ -401,7 +460,7 @@
     }).then(function(d){
       $('btnCols').disabled = false;
       $('stepCols').classList.add('done');
-      soak(d);
+      soakColumns(d);
       showCprs();
     }).catch(function(e){
       $('btnCols').disabled = false;
@@ -409,29 +468,200 @@
     });
   });
 
+  /* ---------- lines, for Trax and its kind ---------- */
+
+  function defaultLines(){
+    var pick = function(words){
+      return S.names.filter(function(n){
+        if(n.rollup) return false;
+        var s = n.name.toLowerCase();
+        return words.some(function(w){ return s.indexOf(w) >= 0; });
+      }).map(function(n){ return n.name; });
+    };
+
+    var wht = pick(['wht', 'withholding']);
+    var sst = pick(['sst', 'sales tax', 'sale tax']);
+    var taken = wht.concat(sst).map(function(x){ return x.toLowerCase(); });
+
+    var rest = S.names.filter(function(n){
+      return !n.rollup && taken.indexOf(n.name.toLowerCase()) < 0;
+    }).map(function(n){ return n.name; });
+
+    return [
+      { label: 'Delivery charges',       charges: rest, account: '' },
+      { label: 'Withholding income tax', charges: wht,  account: '' },
+      { label: 'Withholding sales tax',  charges: sst,  account: '' }
+    ];
+  }
+
+  function showLines(){
+    hideFrom('stepLines');
+    $('stepLines').classList.remove('hide');
+    $('linesHint').innerHTML =
+      'This sheet writes its charges in a summary block beside each CPR, not in columns. ' +
+      'Say which charges go on which line of the journal entry - this is remembered for <b>' +
+      esc(S.courier) + '</b>.<br>Charges that do not appear in a particular CPR are simply ' +
+      'left out of that entry.';
+    drawLines();
+  }
+
+  function drawLines(){
+    var box = $('lineSet');
+    box.innerHTML = '';
+
+    S.lines.forEach(function(l, i){
+      var row = document.createElement('div');
+      row.className = 'lineRow';
+
+      var chips = S.names.map(function(n){
+        var on = (l.charges || []).some(function(c){
+          return String(c).toLowerCase() === n.name.toLowerCase();
+        });
+        return '<label class="' + (on ? 'on' : '') + (n.rollup ? ' roll' : '') + '">' +
+               '<input type="checkbox" data-line="' + i + '" data-name="' + esc(n.name) + '"' +
+               (on ? ' checked' : '') + '>' + esc(n.name) +
+               (n.rollup ? ' <span style="font-size:10px">(a sum of others)</span>' : '') +
+               '</label>';
+      }).join('');
+
+      row.innerHTML =
+        '<div class="top">' +
+          '<div><label>Line name</label>' +
+            '<input class="lname" data-line="' + i + '" value="' + esc(l.label || '') + '"></div>' +
+          '<div><label>QuickBooks account</label>' +
+            accountFinder('ln_' + i, l.account) + '</div>' +
+          '<button class="drop" data-drop="' + i + '">Remove</button>' +
+        '</div>' +
+        '<label style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;' +
+          'color:var(--faint);margin-bottom:6px;display:block">Charges on this line</label>' +
+        '<div class="chargeGrid">' + chips + '</div>';
+
+      box.appendChild(row);
+    });
+
+    box.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        var i = Number(cb.getAttribute('data-line'));
+        var name = cb.getAttribute('data-name');
+        var l = S.lines[i];
+        l.charges = l.charges || [];
+        if(cb.checked){
+          if(!l.charges.some(function(c){ return c.toLowerCase() === name.toLowerCase(); })){
+            l.charges.push(name);
+          }
+        } else {
+          l.charges = l.charges.filter(function(c){
+            return c.toLowerCase() !== name.toLowerCase();
+          });
+        }
+        cb.parentNode.classList.toggle('on', cb.checked);
+      });
+    });
+
+    box.querySelectorAll('input.lname').forEach(function(inp){
+      inp.addEventListener('input', function(){
+        S.lines[Number(inp.getAttribute('data-line'))].label = inp.value;
+      });
+    });
+
+    box.querySelectorAll('button[data-drop]').forEach(function(b){
+      b.addEventListener('click', function(){
+        S.lines.splice(Number(b.getAttribute('data-drop')), 1);
+        drawLines();
+      });
+    });
+
+    bindFinders(S.lines.map(function(_, i){ return 'ln_' + i; }), function(id, accId){
+      S.lines[Number(id.split('_')[1])].account = accId;
+    });
+  }
+
+  $('btnAddLine').addEventListener('click', function(){
+    S.lines.push({ label: '', charges: [], account: '' });
+    drawLines();
+  });
+
+  $('btnLines').addEventListener('click', function(){
+    var good = S.lines.filter(function(l){
+      return String(l.label || '').trim() && (l.charges || []).length;
+    });
+    if(!good.length) return say('bad', '<b>Give at least one line a name and some charges.</b>');
+
+    clearSay();
+    $('btnLines').disabled = true;
+
+    post('/api/charges/lines', { courier: S.courier, lines: S.lines }).then(function(){
+      $('btnLines').disabled = false;
+      $('stepLines').classList.add('done');
+      showCprs();
+    }).catch(function(e){
+      $('btnLines').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  /* ---------- account finder, shared ---------- */
+
+  function accountFinder(id, chosen){
+    var hit = S.qbAccounts.filter(function(a){ return String(a.id) === String(chosen); })[0];
+    return '<input class="accfind" id="' + id + '_find" list="acclist" ' +
+             'placeholder="type to find an account" value="' + esc(hit ? hit.name : '') + '">' +
+           '<input type="hidden" id="' + id + '" value="' + esc(chosen || '') + '">';
+  }
+
+  function bindFinders(ids, onPick){
+    ensureList();
+    ids.forEach(function(id){
+      var box = $(id + '_find');
+      if(!box) return;
+      box.addEventListener('input', function(){
+        var name = box.value.trim().toLowerCase();
+        var hit = S.qbAccounts.filter(function(a){
+          return a.name.toLowerCase() === name;
+        })[0];
+        $(id).value = hit ? hit.id : '';
+        box.style.borderColor = hit ? '' : 'var(--warn)';
+        if(onPick) onPick(id, hit ? hit.id : '');
+      });
+    });
+  }
+
+  function ensureList(){
+    if($('acclist')) return;
+    var dl = document.createElement('datalist');
+    dl.id = 'acclist';
+    dl.innerHTML = S.qbAccounts.map(function(a){
+      return '<option value="' + esc(a.name) + '">' + esc(a.type) + '</option>';
+    }).join('');
+    document.body.appendChild(dl);
+  }
+
   /* ---------- the CPR list ---------- */
+
+  function liveCprs(){
+    if(S.mode === 'summary') return S.cprs;
+    return S.cprs.filter(function(c){
+      return c.total > 0 && (c.cpr || c.rows >= 5);
+    });
+  }
 
   function showCprs(){
     hideFrom('stepCpr');
     $('stepCpr').classList.remove('hide');
     drawColNow();
 
-       var withMoney = S.cprs.filter(function(c){
-      return c.total > 0 && (c.cprNumber || c.rows >= 5);
-    });
-    $('cprHint').innerHTML =
-      nf(S.cprs.length) + ' CPRs in this tab, ' + nf(withMoney.length) + ' with charges against them.' +
-      (S.skipped ? ' ' + nf(S.skipped) + ' total lines in the sheet were ignored - ' +
-                   'the rows are added up here instead.' : '');
+    var list = liveCprs();
+    $('cprHint').innerHTML = nf(list.length) + ' CPRs found.' +
+      (S.skipped ? ' ' + nf(S.skipped) + ' total lines were ignored - the rows are added up here instead.' : '');
 
-        drawCprs();
+    drawCprs();
     scanAll();
   }
 
-  // ask QuickBooks about every CPR at once, before anything is clicked
   function scanAll(){
-       var list = S.cprs.filter(function(c){ return c.total > 0 && (c.cprNumber || c.rows >= 5); })
-      .map(function(c){ return { cpr: c.cprNumber || c.key, total: c.total }; });
+    var list = liveCprs().map(function(c){
+      return { cpr: c.cpr || c.key, total: cprTotal(c) };
+    });
     if(!list.length) return;
 
     S.scanning = true;
@@ -441,9 +671,8 @@
       S.scanning = false;
       S.existing = {};
       Object.keys(d.cprs || {}).forEach(function(k){
-        var r = d.cprs[k];
-        if(r.state === 'none') return;
-        S.existing[k] = r;
+        if(d.cprs[k].state === 'none') return;
+        S.existing[k] = d.cprs[k];
       });
       drawCprs();
       updateHint();
@@ -453,32 +682,56 @@
     });
   }
 
-  function updateHint(){
-       // a lone row with no CPR number is the sheet's own total line, not data
-    var list = S.cprs.filter(function(c){
-      if(c.total <= 0) return false;
-      if(!c.cprNumber && c.rows < 5) return false;
-      return true;
+  // in summary mode the total depends on the lines, so work it out here
+  function cprTotal(c){
+    if(S.mode === 'columns') return c.total;
+    var sum = 0;
+    var wanted = {};
+    S.lines.forEach(function(l){
+      (l.charges || []).forEach(function(n){ wanted[String(n).toLowerCase()] = true; });
     });
+    (c.charges || []).forEach(function(ch){
+      if(wanted[ch.name.toLowerCase()]) sum += ch.amount;
+    });
+    return Math.round(sum * 100) / 100;
+  }
+
+  function updateHint(){
+    var list = liveCprs();
     var done = 0, off = 0;
     list.forEach(function(c){
-      var e = S.existing[c.cprNumber || c.key];
+      var e = S.existing[c.cpr || c.key];
       if(!e) return;
       if(e.state === 'off') off++; else done++;
     });
 
     $('cprHint').innerHTML =
-      nf(list.length) + ' CPRs with charges \u00b7 ' +
+      nf(list.length) + ' CPRs \u00b7 ' +
       '<span style="color:var(--ok)">' + nf(done) + ' already posted and matching</span> \u00b7 ' +
       '<span style="color:var(--warn)">' + nf(off) + ' posted but the amount differs</span> \u00b7 ' +
-      nf(list.length - done - off) + ' not posted yet' +
-      (S.skipped ? '<br>' + nf(S.skipped) + ' total lines in the sheet were ignored.' : '');
+      nf(list.length - done - off) + ' not posted yet';
   }
 
-  // the columns being read, always in view and always changeable
   function drawColNow(){
     var box = $('colNow');
-    var bits = FIELDS.map(function(f){
+
+    if(S.mode === 'summary'){
+      var bits = S.lines.filter(function(l){ return (l.charges || []).length; })
+        .map(function(l){
+          return '<b>' + esc(l.label || 'unnamed') + '</b> \u2190 ' +
+                 nf((l.charges || []).length) + ' charges';
+        });
+      box.innerHTML = 'Building &nbsp;' + bits.join(' &nbsp;\u00b7&nbsp; ') +
+        '<a href="#" id="editCols">change</a>';
+      $('editCols').addEventListener('click', function(e){
+        e.preventDefault();
+        showLines();
+        $('stepLines').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      return;
+    }
+
+    var parts = FIELDS.map(function(f){
       var i = S.cols[f[0]];
       var name = (i >= 0 && S.header[i]) ? S.header[i] : null;
       return f[1] + ': ' + (name
@@ -486,7 +739,7 @@
         : '<span class="miss">not used</span>');
     });
 
-    box.innerHTML = 'Reading from &nbsp;' + bits.join(' &nbsp;\u00b7&nbsp; ') +
+    box.innerHTML = 'Reading from &nbsp;' + parts.join(' &nbsp;\u00b7&nbsp; ') +
       '<a href="#" id="editCols">change</a>';
 
     $('editCols').addEventListener('click', function(e){
@@ -500,43 +753,37 @@
     var box = $('cprList');
     box.innerHTML = '';
 
-       var list = S.cprs.filter(function(c){
-      return c.total > 0 && (c.cprNumber || c.rows >= 5);
-    });
+    var list = liveCprs();
     if(!list.length){
-      box.innerHTML = '<span style="font-size:13px;color:var(--muted)">' +
-        'No charges found. Check the columns above.</span>';
+      box.innerHTML = '<span style="font-size:13px;color:var(--muted)">Nothing found.</span>';
       return;
     }
 
-        list.forEach(function(c){
-      var key = c.cprNumber || c.key;
+    list.forEach(function(c){
+      var key = c.cpr || c.key;
       var e = S.existing[key];
-      var justPosted = S.posted[c.key];
-      var state = e ? e.state : (justPosted ? 'done' : 'none');
+      var state = e ? e.state : (S.posted[key] ? 'done' : 'none');
+      var total = cprTotal(c);
 
       var card = document.createElement('div');
       card.className = 'cprCard' +
         (state === 'done' ? ' done' : '') +
         (state === 'off' ? ' off' : '') +
-        (S.current && S.current.key === c.key ? ' on' : '');
+        (S.current && (S.current.cpr || S.current.key) === key ? ' on' : '');
 
-      var mark = '';
-      if(state === 'done') mark = '<span class="tick">\u2713</span>';
-      if(state === 'off')  mark = '<span class="warnmark">!</span>';
+      var mark = state === 'done' ? '<span class="tick">\u2713</span>'
+               : state === 'off'  ? '<span class="warnmark">!</span>' : '';
 
       var note = '';
       if(S.scanning) note = '<br>checking QuickBooks...';
-      else if(state === 'off') {
-        note = '<br><span style="color:#8A6100">QuickBooks has ' + money(e.amount) +
-               ', the sheet says ' + money(e.sheetTotal) + '</span>';
-      }
-      else if(state === 'done') note = '<br>posted on ' + esc(e ? e.date : '');
+      else if(state === 'off') note = '<br><span style="color:#8A6100">QuickBooks has ' +
+        money(e.amount) + ', this sheet says ' + money(e.sheetTotal) + '</span>';
+      else if(state === 'done' && e) note = '<br>posted on ' + esc(e.date);
 
       card.innerHTML =
-        '<div class="head"><b>' + mark + esc(c.key) + '</b><small>' +
+        '<div class="head"><b>' + mark + esc(key) + '</b><small>' +
         (c.cprDate ? esc(c.cprDate) + ' \u00b7 ' : '') +
-        nf(c.rows) + ' rows \u00b7 ' + money(c.total) + note +
+        (c.rows ? nf(c.rows) + ' rows \u00b7 ' : '') + money(total) + note +
         '</small></div>';
 
       card.addEventListener('click', function(){
@@ -558,167 +805,236 @@
     $('warnBox').innerHTML = '';
     $('stepEntry').classList.remove('hide');
 
+    var key = c.cpr || c.key;
     $('entryHint').innerHTML =
-      'CPR <b>' + esc(c.key) + '</b>' +
+      'CPR <b>' + esc(key) + '</b>' +
       (c.cprDate ? ' dated <b>' + esc(c.cprDate) + '</b>' : ' - no date found in the sheet') +
-      ' \u00b7 added up from ' + nf(c.rows) + ' rows.';
+      (c.rows ? ' \u00b7 added up from ' + nf(c.rows) + ' rows.' : '');
 
-    drawEntry(c);
-
-       var e = S.existing[c.cprNumber || c.key];
+    var e = S.existing[key];
     if(e){
       $('warnBox').innerHTML =
         '<div class="result warn">This CPR is already in QuickBooks as journal entry ' +
-        esc(e.id) + ', dated ' + esc(e.date) + ', ' + money(e.amount) + '.' +
+        esc(e.id) + (e.date ? ', dated ' + esc(e.date) : '') + ', ' + money(e.amount) + '.' +
         (e.state === 'off'
           ? ' That is ' + money(Math.abs(e.gap)) + ' ' + (e.gap > 0 ? 'more' : 'less') +
             ' than this sheet adds up to.'
           : ' Posting again would double it.') +
         '</div>';
     }
+
+    if(S.mode === 'summary') drawSummaryEntry(c);
+    else drawColumnEntry(c);
   }
 
-   // a plain select with hundreds of accounts is unusable, so this one filters
-  function accountSelect(id, chosen){
-    var hit = S.qbAccounts.filter(function(a){ return String(a.id) === String(chosen); })[0];
-    return '<input class="accfind" id="' + id + '_find" list="' + id + '_list" ' +
-             'placeholder="type to find an account" value="' + esc(hit ? hit.name : '') + '">' +
-           '<datalist id="' + id + '_list">' +
-             S.qbAccounts.map(function(a){
-               return '<option value="' + esc(a.name) + '">' + esc(a.type) + '</option>';
-             }).join('') +
-           '</datalist>' +
-           '<input type="hidden" id="' + id + '" value="' + esc(chosen || '') + '">';
+  function metaFields(c){
+    var who = [(c.cpr || c.key), S.courier].filter(Boolean).join(' - ');
+    return '<div style="padding:14px;border-top:1px solid var(--line)">' +
+      '<label style="display:block;font-size:11px;letter-spacing:.07em;' +
+        'text-transform:uppercase;color:var(--faint);margin-bottom:4px">' +
+        'Description on every line</label>' +
+      '<input id="jDesc" value="' + esc(who) + '" style="margin-bottom:14px">' +
+      '<label style="display:block;font-size:11px;letter-spacing:.07em;' +
+        'text-transform:uppercase;color:var(--faint);margin-bottom:4px">Memo</label>' +
+      '<input id="jMemo" value="' + esc('Delivery charges - Withholding income , sale tax - ' + who) + '">' +
+      '</div>';
   }
 
-  // whatever was typed, turned back into an account id
-  function bindAccountFinders(ids){
-    ids.forEach(function(id){
-      var box = $(id + '_find');
-      if(!box) return;
-      box.addEventListener('input', function(){
-        var name = box.value.trim().toLowerCase();
-        var hit = S.qbAccounts.filter(function(a){
-          return a.name.toLowerCase() === name;
-        })[0];
-        $(id).value = hit ? hit.id : '';
-        box.style.borderColor = hit ? '' : 'var(--warn)';
+  // --- Trax and its kind ---
+  function drawSummaryEntry(c){
+    post('/api/charges/preview', { cpr: c, lines: S.lines }).then(function(p){
+      S.preview = p;
+
+      var rows = p.lines.map(function(l, i){
+        var made = l.found.length
+          ? l.found.join(' + ')
+          : '<span style="color:var(--warn)">none of these charges are in this CPR</span>';
+        return '<tr><td>' + esc(l.label || 'unnamed') +
+               '<span class="made">' + made + '</span></td>' +
+               '<td>' + accountFinder('pa_' + i, l.account) + '</td>' +
+               '<td class="num"><input class="amt" id="pv_' + i + '" value="' +
+                 l.amount.toFixed(2) + '"></td>' +
+               '<td class="num" style="color:var(--muted)">Debit</td></tr>';
+      }).join('');
+
+      var bankRow = '<tr><td>Bank for ' + esc(S.courier) + '</td>' +
+        '<td>' + accountFinder('pa_bank', (S.accounts || {}).bankAccount) + '</td>' +
+        '<td class="num" id="creditCell">' + money(p.total) + '</td>' +
+        '<td class="num" style="color:var(--muted)">Credit</td></tr>';
+
+      var totRow = '<tr class="tot"><td colspan="2">Total</td>' +
+        '<td class="num" id="totCell">' + money(p.total) + '</td><td></td></tr>';
+
+      $('entryBox').innerHTML =
+        '<table><thead><tr><th>Line</th><th>Account</th>' +
+        '<th class="num">Amount</th><th class="num">Side</th></tr></thead>' +
+        '<tbody>' + rows + bankRow + totRow + '</tbody></table>' +
+        metaFields(c);
+
+      p.lines.forEach(function(_, i){
+        $('pv_' + i).addEventListener('input', retotalSummary);
       });
+
+      bindFinders(p.lines.map(function(_, i){ return 'pa_' + i; }).concat(['pa_bank']));
+
+      if(p.unused && p.unused.length){
+        $('warnBox').innerHTML +=
+          '<div class="result warn">' + nf(p.unused.length) + ' charge' +
+          (p.unused.length === 1 ? '' : 's') + ' in this CPR are on no line, so they are ' +
+          'left out: ' + p.unused.map(function(u){
+            return esc(u.name) + ' (' + money(u.amount) + ')';
+          }).join(', ') + '. <a href="#" id="fixLines">add them to a line</a></div>';
+
+        var fix = $('fixLines');
+        if(fix) fix.addEventListener('click', function(ev){
+          ev.preventDefault();
+          showLines();
+          $('stepLines').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
     });
   }
 
-  function drawEntry(c){
-    var a = S.accounts || {};
-    var total = c.total;
+  function retotalSummary(){
+    var t = 0;
+    (S.preview.lines || []).forEach(function(_, i){ t += amt('pv_' + i); });
+    t = Math.round(t * 100) / 100;
+    $('creditCell').textContent = money(t);
+    $('totCell').textContent = money(t);
+  }
 
+  // --- PostEx and its kind ---
+  function drawColumnEntry(c){
+    var a = S.accounts || {};
     var rows = '';
 
     rows += '<tr><td>Delivery charges</td>' +
-      '<td>' + accountSelect('acc_charges', a.chargesAccount) + '</td>' +
+      '<td>' + accountFinder('acc_charges', a.chargesAccount) + '</td>' +
       '<td class="num"><input class="amt" id="amt_charges" value="' + c.charges.toFixed(2) + '"></td>' +
       '<td class="num" style="color:var(--muted)">Debit</td></tr>';
 
     rows += '<tr><td>Withholding income tax</td>' +
-      '<td>' + accountSelect('acc_wht', a.whtAccount) + '</td>' +
+      '<td>' + accountFinder('acc_wht', a.whtAccount) + '</td>' +
       '<td class="num"><input class="amt" id="amt_wht" value="' + c.wht.toFixed(2) + '"></td>' +
       '<td class="num" style="color:var(--muted)">Debit</td></tr>';
 
     rows += '<tr><td>Withholding sales tax</td>' +
-      '<td>' + accountSelect('acc_wst', a.wstAccount) + '</td>' +
+      '<td>' + accountFinder('acc_wst', a.wstAccount) + '</td>' +
       '<td class="num"><input class="amt" id="amt_wst" value="' + c.wst.toFixed(2) + '"></td>' +
       '<td class="num" style="color:var(--muted)">Debit</td></tr>';
 
     rows += '<tr><td>Bank for ' + esc(S.courier) + '</td>' +
-      '<td>' + accountSelect('acc_bank', a.bankAccount) + '</td>' +
-      '<td class="num" id="creditCell">' + money(total) + '</td>' +
+      '<td>' + accountFinder('acc_bank', a.bankAccount) + '</td>' +
+      '<td class="num" id="creditCell">' + money(c.total) + '</td>' +
       '<td class="num" style="color:var(--muted)">Credit</td></tr>';
 
     rows += '<tr class="tot"><td colspan="2">Total</td>' +
-      '<td class="num" id="totCell">' + money(total) + '</td><td></td></tr>';
-
-       var who = [c.cprNumber || c.key, S.courier].filter(Boolean).join(' - ');
+      '<td class="num" id="totCell">' + money(c.total) + '</td><td></td></tr>';
 
     $('entryBox').innerHTML =
       '<table><thead><tr><th>Line</th><th>Account</th>' +
       '<th class="num">Amount</th><th class="num">Side</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table>' +
-      '<div style="padding:14px;border-top:1px solid var(--line)">' +
-        '<label style="display:block;font-size:11px;letter-spacing:.07em;' +
-          'text-transform:uppercase;color:var(--faint);margin-bottom:4px">' +
-          'Description on every line</label>' +
-        '<input id="jDesc" value="' + esc(who) + '" style="margin-bottom:14px">' +
-        '<label style="display:block;font-size:11px;letter-spacing:.07em;' +
-          'text-transform:uppercase;color:var(--faint);margin-bottom:4px">Memo</label>' +
-        '<input id="jMemo" value="' + esc(
-          'Delivery charges - Withholding income , sale tax - ' + who
-        ) + '">' +
-      '</div>';
+      '<tbody>' + rows + '</tbody></table>' + metaFields(c);
 
-       ['amt_charges','amt_wht','amt_wst'].forEach(function(id){
-      $(id).addEventListener('input', retotal);
+    ['amt_charges','amt_wht','amt_wst'].forEach(function(id){
+      $(id).addEventListener('input', retotalColumns);
     });
-    bindAccountFinders(['acc_charges','acc_wht','acc_wst','acc_bank']);
+    bindFinders(['acc_charges','acc_wht','acc_wst','acc_bank']);
   }
 
   function amt(id){
-    var v = Number(String($(id).value).replace(/[^0-9.\-]/g, ''));
+    var el = $(id);
+    if(!el) return 0;
+    var v = Number(String(el.value).replace(/[^0-9.\-]/g, ''));
     return isNaN(v) ? 0 : Math.round(v * 100) / 100;
   }
 
-  function retotal(){
+  function retotalColumns(){
     var t = amt('amt_charges') + amt('amt_wht') + amt('amt_wst');
     t = Math.round(t * 100) / 100;
     $('creditCell').textContent = money(t);
     $('totCell').textContent = money(t);
   }
 
+  /* ---------- posting ---------- */
+
   $('btnPost').addEventListener('click', function(){
     var c = S.current;
     if(!c) return;
+    var key = c.cpr || c.key;
 
     var body = {
       courier: S.courier,
-      cprNumber: c.cprNumber || c.key,
+      cprNumber: key,
       cprDate: c.cprDate,
-      charges: amt('amt_charges'),
-      wht: amt('amt_wht'),
-      wst: amt('amt_wst'),
-      chargesAccount: $('acc_charges').value,
-      whtAccount: $('acc_wht').value,
-           wstAccount: $('acc_wst').value,
-      bankAccount: $('acc_bank').value,
       description: $('jDesc') ? $('jDesc').value : '',
       memo: $('jMemo') ? $('jMemo').value : ''
     };
 
-    var total = body.charges + body.wht + body.wst;
-    if(total <= 0) return say('bad', '<b>All three amounts are zero.</b>');
+    var url, total;
+
+    if(S.mode === 'summary'){
+      body.bankAccount = $('pa_bank').value;
+      body.lines = (S.preview.lines || []).map(function(l, i){
+        return { label: l.label, account: $('pa_' + i).value, amount: amt('pv_' + i) };
+      }).filter(function(l){ return l.amount > 0; });
+      total = body.lines.reduce(function(s, l){ return s + l.amount; }, 0);
+      url = '/api/charges/post-lines';
+    } else {
+      body.charges = amt('amt_charges');
+      body.wht = amt('amt_wht');
+      body.wst = amt('amt_wst');
+      body.chargesAccount = $('acc_charges').value;
+      body.whtAccount = $('acc_wht').value;
+      body.wstAccount = $('acc_wst').value;
+      body.bankAccount = $('acc_bank').value;
+      total = body.charges + body.wht + body.wst;
+      url = '/api/charges/post';
+    }
+
+    total = Math.round(total * 100) / 100;
+    if(total <= 0) return say('bad', '<b>Everything came to zero.</b>');
     if(!body.bankAccount) return say('bad', '<b>Pick the bank account.</b>');
 
-    var msg = 'Post ' + money(total) + ' for CPR ' + body.cprNumber + '?' +
-              (body.cprDate ? '\nDated ' + body.cprDate : '\nNo date found - QuickBooks will use today.');
-    if(S.existing[c.cprNumber || c.key]) msg += '\n\nThis CPR is already in QuickBooks. Posting again will double it.';
+    var msg = 'Post ' + money(total) + ' for CPR ' + key + '?' +
+              (c.cprDate ? '\nDated ' + c.cprDate : '\nNo date found - QuickBooks will use today.');
+    if(S.existing[key]) msg += '\n\nThis CPR is already in QuickBooks. Posting again will double it.';
     if(!confirm(msg)) return;
+
+    if(S.existing[key]) body.force = true;
 
     clearSay();
     $('btnPost').disabled = true;
     $('postOut').innerHTML = '<div class="result">Posting...</div>';
 
-    if(S.existing[c.cprNumber || c.key]) body.force = true;
-
-    post('/api/charges/post', body).then(function(d){
+    post(url, body).then(function(d){
       $('btnPost').disabled = false;
-      S.posted[c.key] = d.id;
+      S.posted[key] = d.id;
+      S.existing[key] = { state: 'done', id: d.id, date: c.cprDate, amount: d.total };
       drawCprs();
+      updateHint();
       $('postOut').innerHTML =
         '<div class="result good">\u2713 Journal entry ' + esc(d.id) + ' posted \u00b7 ' +
         money(d.total) + ' for CPR ' + esc(d.cprNumber) + '</div>';
-      S.accounts = {
-        chargesAccount: body.chargesAccount,
-        whtAccount: body.whtAccount,
-        wstAccount: body.wstAccount,
-        bankAccount: body.bankAccount
-      };
+
+      if(S.mode === 'columns'){
+        S.accounts = {
+          chargesAccount: body.chargesAccount,
+          whtAccount: body.whtAccount,
+          wstAccount: body.wstAccount,
+          bankAccount: body.bankAccount
+        };
+      } else {
+        S.accounts = S.accounts || {};
+        S.accounts.bankAccount = body.bankAccount;
+        S.lines.forEach(function(l, i){
+          var picked = $('pa_' + i);
+          if(picked && picked.value) l.account = picked.value;
+        });
+        post('/api/charges/lines', { courier: S.courier, lines: S.lines }).catch(function(){});
+      }
     }).catch(function(e){
       $('btnPost').disabled = false;
       $('postOut').innerHTML = '<div class="result bad">\u2717 ' + esc(e.message) + '</div>';
