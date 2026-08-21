@@ -18,12 +18,43 @@ const GROUPS = {
   'out for return':             'returning',
   'returned':                   'returned',
   'expired':                    'expired',
-  'un-assigned by me':          'cancelled'
+    'un-assigned by me':          'cancelled',
+  'transferred':                'transferred',
+  'stolen':                     'lost',
+  'damage':                     'damaged',
+  'damaged':                    'damaged',
+  'lost':                       'lost'
 };
 
+// PostEx keeps adding statuses, so an exact match is not enough. When a name
+// is not one we know, the words in it decide where the order belongs.
 function groupOf(status) {
   const s = String(status || '').trim().toLowerCase();
-  return GROUPS[s] || 'other';
+  if (!s) return 'other';
+  if (GROUPS[s]) return GROUPS[s];
+
+  if (s.includes('deliver') && !s.includes('under review') && !s.includes('out for')) {
+    return 'delivered';
+  }
+  if (s.includes('return')) {
+    return s.includes('out for') || s.includes('route') || s.includes('transit')
+      ? 'returning' : 'returned';
+  }
+  if (s.includes('under review'))                      return 'review';
+  if (s.includes('unbook') || s.includes('un-book'))   return 'unbooked';
+  if (s.includes('expire'))                            return 'expired';
+  if (s.includes('cancel') || s.includes('un-assign')) return 'cancelled';
+  if (s.includes('transfer'))                          return 'transferred';
+  if (s.includes('stolen'))                            return 'lost';
+  if (s.includes('lost'))                              return 'lost';
+  if (s.includes('damage'))                            return 'damaged';
+  if (s.includes('warehouse') || s.includes('transit') || s.includes('route') ||
+      s.includes('out for') || s.includes('attempt')  || s.includes('picked')) {
+    return 'transit';
+  }
+  if (s.includes('book'))                              return 'booked';
+
+  return 'other';
 }
 
 function num(v) {
