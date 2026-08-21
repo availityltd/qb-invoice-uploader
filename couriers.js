@@ -111,15 +111,38 @@ export async function markSync(realmId, id, error) {
 // an order seen again is updated, never duplicated
 export async function saveOrders(realmId, accountId, courier, rows) {
   if (!rows.length) return 0;
+
+  // one round trip per hundred orders instead of one per order
+  const CHUNK = 100;
   let saved = 0;
 
-  for (const o of rows) {
-    if (!o.tracking) continue;
+  for (let start = 0; start < rows.length; start += CHUNK) {
+    const slice = rows.slice(start, start + CHUNK).filter(o => o.tracking);
+    if (!slice.length) continue;
+
+    const values = [];
+    const params = [];
+    let n = 1;
+
+    slice.forEach(o => {
+      values.push(
+        `($${n++},$${n++},$${n++},$${n++},$${n++},$${n++},$${n++},` +
+        `$${n++},$${n++},$${n++},$${n++},$${n++},$${n++},$${n++},$${n++}, NOW())`
+      );
+      params.push(
+        realmId, accountId, courier, o.tracking, o.orderRef || null,
+        o.status || null, o.statusGroup || null,
+        o.amount || 0, o.fee || 0, o.tax || 0, o.city || null,
+        o.bookedOn || null, o.pickedOn || null, o.deliveredOn || null,
+        JSON.stringify(o.raw || {})
+      );
+    });
+
     await pool.query(
       `INSERT INTO courier_orders
          (realm_id, account_id, courier, tracking, order_ref, status, status_group,
           amount, fee, tax, city, booked_on, picked_on, delivered_on, raw, seen_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, NOW())
+       VALUES ${values.join(',')}
        ON CONFLICT (realm_id, account_id, tracking) DO UPDATE SET
          status       = EXCLUDED.status,
          status_group = EXCLUDED.status_group,
@@ -131,13 +154,10 @@ export async function saveOrders(realmId, accountId, courier, rows) {
          delivered_on = EXCLUDED.delivered_on,
          raw          = EXCLUDED.raw,
          seen_at      = NOW()`,
-      [realmId, accountId, courier, o.tracking, o.orderRef || null,
-       o.status || null, o.statusGroup || null,
-       o.amount || 0, o.fee || 0, o.tax || 0, o.city || null,
-       o.bookedOn || null, o.pickedOn || null, o.deliveredOn || null,
-       JSON.stringify(o.raw || {})]
+      params
     );
-    saved++;
+
+    saved += slice.length;
   }
 
   return saved;
