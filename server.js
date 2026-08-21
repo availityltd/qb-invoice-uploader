@@ -2124,8 +2124,13 @@ app.post('/api/courier/sync', async (req, res) => {
 
     // a quick count by bucket, so the page can show something straight away
     const tally = {};
+    const unknown = {};
     orders.forEach(o => {
       tally[o.statusGroup] = (tally[o.statusGroup] || 0) + 1;
+      if (o.statusGroup === 'other') {
+        const s = o.status || '(blank)';
+        unknown[s] = (unknown[s] || 0) + 1;
+      }
     });
 
     res.json({
@@ -2133,7 +2138,8 @@ app.post('/api/courier/sync', async (req, res) => {
       account: acc.label,
       pulled: orders.length,
       saved,
-      tally
+      tally,
+      unknown
     });
   } catch (e) {
     try { await markSync(realmId, req.body.id, e.message); } catch (e2) {}
