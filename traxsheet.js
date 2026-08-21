@@ -180,11 +180,15 @@ export function applyLines(cpr, lines) {
     let amount = 0;
     const found = [], missing = [];
 
-    (l.charges || []).forEach(name => {
-      const k = String(name).toLowerCase();
+    (l.charges || []).forEach(entry => {
+      // an entry is either a plain name or a name with a sign of +1 or -1
+      const name = typeof entry === 'string' ? entry : (entry.name || '');
+      const sign = typeof entry === 'string' ? 1 : (entry.sign === -1 ? -1 : 1);
+      const k = name.toLowerCase();
+
       if (byName.has(k)) {
-        amount += byName.get(k);
-        found.push(name);
+        amount += byName.get(k) * sign;
+        found.push({ name, sign });
         used.add(k);
       } else {
         missing.push(name);
