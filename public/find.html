@@ -17,14 +17,40 @@
   .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
   .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
 
-  textarea.nums{width:100%;min-height:150px;border:1px solid var(--line);border-radius:8px;
+  textarea.nums{width:100%;min-height:130px;border:1px solid var(--line);border-radius:8px;
     padding:11px 13px;font-family:var(--mono);font-size:12.5px;resize:vertical;background:#fff}
 
-  .months{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 14px}
-  .months button{border:1px solid var(--line);background:#fff;border-radius:20px;
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px}
+  .tabs button{border:0;background:none;padding:11px 18px;font:inherit;font-size:13px;
+    cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+  .tabs button .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--qbo);margin-left:7px;vertical-align:middle}
+
+  .pane{display:none}
+  .pane.on{display:block}
+
+  .picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;
+    margin-bottom:14px}
+  .picks label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:5px}
+  .picks select{width:100%}
+
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0 14px}
+  .chips button{border:1px solid var(--line);background:#fff;border-radius:20px;
     padding:5px 13px;font:inherit;font-size:12px;cursor:pointer;color:var(--ink)}
-  .months button:hover{border-color:var(--qbo)}
-  .months button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+  .chips button:hover{border-color:var(--qbo)}
+  .chips button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+
+  .found{border:1px solid var(--line);border-radius:9px;background:#fff;margin-bottom:14px;
+    max-height:260px;overflow:auto}
+  .found .co{padding:9px 14px;border-bottom:1px solid var(--line);font-size:12.5px;
+    display:flex;gap:10px;align-items:baseline}
+  .found .co:last-child{border-bottom:0}
+  .found .co b{font-weight:600;min-width:150px}
+  .found .co span{color:var(--muted);font-size:12px}
+  .found .none{padding:14px;font-size:12.5px;color:var(--muted)}
 
   .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
   .row .aside{font-size:12px;color:var(--faint)}
@@ -33,7 +59,7 @@
   .bar span{display:block;height:8px;background:var(--qbo);border-radius:4px;width:0;
     transition:width .3s}
 
-  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px;
     margin-bottom:14px}
   .tile{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff}
   .tile .n{font-family:var(--mono);font-size:21px;font-weight:500;line-height:1.1}
@@ -54,12 +80,12 @@
   .pill.returned{background:#FDECEC;color:#B33A34}
   .pill.transit{background:#E8F1FA;color:#2C6396}
   .pill.cancelled{background:#F0F2F4;color:#69757F}
-  .pill.other,.pill.unknown{background:#F5F0E4;color:#8A7233}
-  .pill.missing{background:#FDECEC;color:#B33A34}
+  .pill.other,.pill.unknown,.pill.expired{background:#F5F0E4;color:#8A7233}
+  .pill.lost,.pill.damaged{background:#FDECEC;color:#8B2F2F}
 
   .log{background:#0F2E24;color:#CFE6D9;border-radius:9px;padding:13px 15px;
     font-family:var(--mono);font-size:11.5px;line-height:1.65;max-height:300px;overflow:auto;
-    white-space:pre-wrap}
+    white-space:pre-wrap;margin-top:10px}
   .log .t{color:#7FA893}
 
   .fold{font-size:12px;color:var(--muted);cursor:pointer;user-select:none;margin-top:12px;
@@ -89,30 +115,91 @@
       <div id="gate" class="gate hide">
         <img src="/logo.svg" alt="">
         <h2>Connect your QuickBooks company</h2>
-        <p>The courier folder is kept per company.</p>
+        <p>The courier folders are kept per company.</p>
         <button class="solid" id="btnConnect">Connect to QuickBooks</button>
       </div>
 
       <div id="body" class="hide">
 
-        <div class="step" id="stepAsk">
+        <div class="step">
           <h2>Order numbers</h2>
           <div class="hint">
-            One per line, or separated by spaces or commas. The hash is ignored, so
-            <b>#91349172</b> and <b>91349172</b> are the same order.
+            One per line, or separated by spaces or commas. The hash makes no
+            difference, so <b>#91349172</b> and <b>91349172</b> are the same order.
           </div>
           <textarea class="nums" id="nums" placeholder="#91349172&#10;#91349171&#10;#91349170"></textarea>
-          <div class="aside" id="count" style="margin-top:7px"></div>
+          <div class="aside" id="count" style="margin-top:7px;font-size:12px;color:var(--faint)"></div>
+        </div>
 
-          <h2 style="margin-top:18px">Months to search</h2>
-          <div class="hint">
-            Nothing picked means every month. Picking a few makes the search much quicker.
+        <div class="step">
+          <div class="tabs">
+            <button class="on" data-pane="cpr">CPR sheets<span class="dot hide" id="dotCpr"></span></button>
+            <button data-pane="ret">Return sheet<span class="dot hide" id="dotRet"></span></button>
           </div>
-          <div class="months" id="months"><span class="aside">Loading the folders…</span></div>
 
+          <!-- ---------- CPR sheets ---------- -->
+          <div class="pane on" id="paneCpr">
+            <div class="hint">
+              Pick a year and one or more months. The sheets that live in those months
+              are listed underneath, so you can see exactly what will be read.
+            </div>
+
+            <div class="picks">
+              <div>
+                <label>Year</label>
+                <select id="year"></select>
+              </div>
+            </div>
+
+            <label style="display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">Months</label>
+            <div class="chips" id="months"><span style="font-size:12px;color:var(--faint)">Reading the folders…</span></div>
+
+            <div class="row" style="margin-bottom:12px">
+              <button id="btnPick">Show the sheets</button>
+              <button id="btnAllMonths">Every month of this year</button>
+              <button id="btnNoMonths">Clear</button>
+            </div>
+
+            <div class="found" id="found"><div class="none">No months picked yet.</div></div>
+          </div>
+
+          <!-- ---------- Return sheet ---------- -->
+          <div class="pane" id="paneRet">
+            <div class="hint">
+              Optional. Whatever the CPR sheets never mention is looked for here, so you
+              can see what came back instead.
+            </div>
+
+            <div class="picks">
+              <div>
+                <label>Workbook</label>
+                <select id="retFile"><option value="">Do not check the return sheet</option></select>
+              </div>
+              <div>
+                <label>From</label>
+                <input type="date" id="retFrom">
+              </div>
+              <div>
+                <label>To</label>
+                <input type="date" id="retTo">
+              </div>
+            </div>
+
+            <label style="display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">Tabs</label>
+            <div class="chips" id="retTabs"><span style="font-size:12px;color:var(--faint)">Pick a workbook first.</span></div>
+
+            <div class="row">
+              <button id="btnRetAll">All tabs</button>
+              <button id="btnRetNone">Clear</button>
+            </div>
+            <div id="retNote" style="font-size:12px;color:var(--faint);margin-top:10px"></div>
+          </div>
+        </div>
+
+        <div class="step">
           <div class="row">
             <button class="solid" id="btnStart">Start the search</button>
-            <span class="aside">The return sheet is checked too, for anything the CPR sheets miss.</span>
+            <span class="aside" id="planLine"></span>
           </div>
           <div id="askOut"></div>
         </div>
@@ -120,7 +207,7 @@
         <div class="step hide" id="stepRun">
           <h2>Searching <span class="aside" id="runState"></span></h2>
           <div class="bar"><span id="barFill"></span></div>
-          <div class="aside" id="runLine"></div>
+          <div class="aside" id="runLine" style="font-size:12px;color:var(--faint)"></div>
 
           <div class="row" style="margin-top:14px">
             <button id="btnStop">Stop</button>
@@ -156,10 +243,15 @@
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
 
-  var picked = {};      // month name -> true
-  var since = 0;
-  var timer = null;
-  var awake = null;
+  var tree = [];          // [{ company, folders:[{id,name,month,year,label}] }]
+  var pickedMonths = {};  // month number -> true
+  var pickedFolders = []; // folder ids
+  var retSheets = [];
+  var pickedTabs = {};
+  var since = 0, timer = null, awake = null;
+
+  var MONTHS = ['', 'January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
 
   function nf(n){ return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function money(v){ return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
@@ -193,9 +285,20 @@
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
+    loadTree();
+    loadReturns();
+    poll();
+  });
 
-    loadMonths();
-    poll();          // a run may already be going
+  /* ---------- tabs ---------- */
+
+  document.querySelectorAll('.tabs button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('.tabs button').forEach(function(x){ x.classList.remove('on'); });
+      document.querySelectorAll('.pane').forEach(function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      $('pane' + (b.dataset.pane === 'cpr' ? 'Cpr' : 'Ret')).classList.add('on');
+    });
   });
 
   /* ---------- the paste box ---------- */
@@ -212,29 +315,221 @@
   }
   $('nums').addEventListener('input', countThem);
 
-  /* ---------- months ---------- */
+  /* ---------- the folder tree ---------- */
 
-  function loadMonths(){
-    get('/api/find/months').then(function(d){
-      var box = $('months');
-      var list = d.months || [];
-      if(!list.length){
-        box.innerHTML = '<span class="aside">No month folders found - the whole folder will be searched.</span>';
-        return;
-      }
-      box.innerHTML = '';
-      list.forEach(function(m){
-        var b = document.createElement('button');
-        b.textContent = m;
-        b.addEventListener('click', function(){
-          if(picked[m]){ delete picked[m]; b.classList.remove('on'); }
-          else { picked[m] = true; b.classList.add('on'); }
-        });
-        box.appendChild(b);
+  function loadTree(){
+    get('/api/find/tree').then(function(d){
+      tree = d.companies || [];
+
+      var years = {};
+      tree.forEach(function(c){
+        c.folders.forEach(function(f){ if(f.year) years[f.year] = 1; });
       });
+
+      var list = Object.keys(years).sort().reverse();
+      var sel = $('year');
+      sel.innerHTML = '';
+      list.forEach(function(y){
+        var o = document.createElement('option');
+        o.value = y; o.textContent = y;
+        sel.appendChild(o);
+      });
+
+      sel.addEventListener('change', drawMonths);
+      drawMonths();
     }).catch(function(e){
-      $('months').innerHTML = '<span class="aside">' + esc(e.message) + '</span>';
+      $('months').innerHTML = '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
     });
+  }
+
+  function drawMonths(){
+    var year = Number($('year').value);
+    var have = {};
+    tree.forEach(function(c){
+      c.folders.forEach(function(f){ if(f.year === year && f.month) have[f.month] = 1; });
+    });
+
+    pickedMonths = {};
+    var box = $('months');
+    box.innerHTML = '';
+
+    var list = Object.keys(have).map(Number).sort(function(a,b){ return a - b; });
+    if(!list.length){
+      box.innerHTML = '<span style="font-size:12px;color:var(--faint)">Nothing filed under that year.</span>';
+      return;
+    }
+
+    list.forEach(function(m){
+      var b = document.createElement('button');
+      b.textContent = MONTHS[m];
+      b.addEventListener('click', function(){
+        if(pickedMonths[m]){ delete pickedMonths[m]; b.classList.remove('on'); }
+        else { pickedMonths[m] = true; b.classList.add('on'); }
+      });
+      box.appendChild(b);
+    });
+
+    $('found').innerHTML = '<div class="none">No months picked yet.</div>';
+    pickedFolders = [];
+    plan();
+  }
+
+  $('btnAllMonths').addEventListener('click', function(){
+    $('months').querySelectorAll('button').forEach(function(b){ b.classList.add('on'); });
+    var year = Number($('year').value);
+    pickedMonths = {};
+    tree.forEach(function(c){
+      c.folders.forEach(function(f){ if(f.year === year && f.month) pickedMonths[f.month] = true; });
+    });
+  });
+
+  $('btnNoMonths').addEventListener('click', function(){
+    $('months').querySelectorAll('button').forEach(function(b){ b.classList.remove('on'); });
+    pickedMonths = {};
+    pickedFolders = [];
+    $('found').innerHTML = '<div class="none">No months picked yet.</div>';
+    plan();
+  });
+
+  $('btnPick').addEventListener('click', function(){
+    var year = Number($('year').value);
+    var want = Object.keys(pickedMonths).map(Number);
+
+    if(!want.length){
+      $('found').innerHTML = '<div class="none">Pick at least one month.</div>';
+      pickedFolders = [];
+      plan();
+      return;
+    }
+
+    var chosen = [];
+    tree.forEach(function(c){
+      c.folders.forEach(function(f){
+        if(f.year === year && want.indexOf(f.month) > -1){
+          chosen.push({ company: c.company, folder: f });
+        }
+      });
+    });
+
+    pickedFolders = chosen.map(function(x){ return x.folder.id; });
+
+    if(!chosen.length){
+      $('found').innerHTML = '<div class="none">No folders match that.</div>';
+      plan();
+      return;
+    }
+
+    $('found').innerHTML = '<div class="none">Looking inside…</div>';
+
+    post('/api/find/sheets', { folderIds: pickedFolders }).then(function(d){
+      var byFolder = {};
+      (d.sheets || []).forEach(function(s){
+        if(!byFolder[s.folderId]) byFolder[s.folderId] = [];
+        byFolder[s.folderId].push(s.name);
+      });
+
+      var html = '';
+      chosen.forEach(function(x){
+        var names = byFolder[x.folder.id] || [];
+        html += '<div class="co"><b>' + esc(x.company) + '</b>' +
+                '<span>' + esc(x.folder.name) + ' \u2192 ' +
+                (names.length ? names.map(esc).join(', ') : 'nothing inside') +
+                '</span></div>';
+      });
+
+      $('found').innerHTML = html;
+      plan();
+    }).catch(function(e){
+      $('found').innerHTML = '<div class="none">' + esc(e.message) + '</div>';
+    });
+  });
+
+  /* ---------- the return sheet ---------- */
+
+  function loadReturns(){
+    get('/api/find/return-sheets').then(function(d){
+      retSheets = d.sheets || [];
+      var sel = $('retFile');
+      retSheets.forEach(function(s, i){
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = s.name;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('change', loadTabs);
+    }).catch(function(e){
+      $('retNote').textContent = e.message;
+    });
+  }
+
+  function loadTabs(){
+    var i = $('retFile').value;
+    pickedTabs = {};
+    $('retTabs').innerHTML = '';
+
+    if(i === ''){
+      $('retTabs').innerHTML = '<span style="font-size:12px;color:var(--faint)">The return sheet will not be checked.</span>';
+      plan();
+      return;
+    }
+
+    var file = retSheets[Number(i)];
+    $('retTabs').innerHTML = '<span style="font-size:12px;color:var(--faint)">Reading the tabs…</span>';
+
+    get('/api/void/tabs?sheetId=' + encodeURIComponent(file.id) + (file.excel ? '&excel=1' : ''))
+      .then(function(d){
+        var box = $('retTabs');
+        box.innerHTML = '';
+        (d.tabs || []).forEach(function(t){
+          var b = document.createElement('button');
+          b.textContent = t.title;
+          b.addEventListener('click', function(){
+            if(pickedTabs[t.title]){ delete pickedTabs[t.title]; b.classList.remove('on'); }
+            else { pickedTabs[t.title] = true; b.classList.add('on'); }
+            plan();
+          });
+          box.appendChild(b);
+        });
+        $('retNote').textContent = 'Nothing picked means every tab.';
+        plan();
+      })
+      .catch(function(e){
+        $('retTabs').innerHTML = '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
+      });
+  }
+
+  $('btnRetAll').addEventListener('click', function(){
+    pickedTabs = {};
+    $('retTabs').querySelectorAll('button').forEach(function(b){
+      b.classList.add('on');
+      pickedTabs[b.textContent] = true;
+    });
+    plan();
+  });
+
+  $('btnRetNone').addEventListener('click', function(){
+    pickedTabs = {};
+    $('retTabs').querySelectorAll('button').forEach(function(b){ b.classList.remove('on'); });
+    plan();
+  });
+
+  /* ---------- what will happen ---------- */
+
+  function plan(){
+    var bits = [];
+    bits.push(pickedFolders.length
+      ? pickedFolders.length + ' CPR folder' + (pickedFolders.length === 1 ? '' : 's')
+      : 'every CPR folder');
+
+    var i = $('retFile').value;
+    if(i !== ''){
+      var n = Object.keys(pickedTabs).length;
+      bits.push('then the return sheet' + (n ? ' (' + n + ' tabs)' : ''));
+    }
+
+    $('planLine').textContent = 'Will read ' + bits.join(', ') + '.';
+    $('dotCpr').classList.toggle('hide', !pickedFolders.length);
+    $('dotRet').classList.toggle('hide', i === '');
   }
 
   /* ---------- running ---------- */
@@ -243,6 +538,24 @@
     var nums = $('nums').value.trim();
     if(!nums) return say('bad', '<b>Paste some order numbers first.</b>');
 
+    var body = {
+      numbers: nums,
+      folderIds: pickedFolders
+    };
+
+    var i = $('retFile').value;
+    if(i !== ''){
+      var file = retSheets[Number(i)];
+      body.returnSheet = {
+        id: file.id,
+        name: file.name,
+        excel: !!file.excel,
+        tabs: Object.keys(pickedTabs),
+        from: $('retFrom').value || null,
+        to: $('retTo').value || null
+      };
+    }
+
     say('', '');
     $('askOut').innerHTML = '';
     $('btnStart').disabled = true;
@@ -250,11 +563,7 @@
     $('log').textContent = '';
     $('stepOut').classList.add('hide');
 
-    post('/api/find/start', {
-      numbers: nums,
-      months: Object.keys(picked),
-      withReturns: true
-    }).then(function(){
+    post('/api/find/start', body).then(function(){
       $('stepRun').classList.remove('hide');
       $('btnStop').classList.remove('hide');
       $('btnClear').classList.add('hide');
@@ -328,6 +637,7 @@
         }
 
         if(job.state === 'running'){
+          $('btnStart').disabled = true;
           timer = setTimeout(poll, 2000);
           return;
         }
@@ -362,6 +672,8 @@
       tile(nf(returned), 'Returned');
 
     var rows = '';
+    var t = { total:0, delivered:0, returned:0, transit:0, cancelled:0, other:0, amount:0 };
+
     r.couriers.forEach(function(c){
       rows += '<tr><td>' + esc(c.courier) + '</td>' +
               '<td class="r">' + nf(c.total) + '</td>' +
@@ -371,23 +683,22 @@
               '<td class="r">' + nf(c.cancelled) + '</td>' +
               '<td class="r">' + nf(c.other) + '</td>' +
               '<td class="r">' + money(c.amount) + '</td></tr>';
-    });
 
-    var t = { total:0, delivered:0, returned:0, transit:0, cancelled:0, other:0, amount:0 };
-    r.couriers.forEach(function(c){
       t.total += c.total; t.delivered += c.delivered; t.returned += c.returned;
       t.transit += c.transit; t.cancelled += c.cancelled; t.other += c.other;
       t.amount += c.amount;
     });
 
-    rows += '<tr class="tot"><td>All couriers</td>' +
-            '<td class="r">' + nf(t.total) + '</td>' +
-            '<td class="r">' + nf(t.delivered) + '</td>' +
-            '<td class="r">' + nf(t.returned) + '</td>' +
-            '<td class="r">' + nf(t.transit) + '</td>' +
-            '<td class="r">' + nf(t.cancelled) + '</td>' +
-            '<td class="r">' + nf(t.other) + '</td>' +
-            '<td class="r">' + money(t.amount) + '</td></tr>';
+    if(r.couriers.length > 1){
+      rows += '<tr class="tot"><td>All couriers</td>' +
+              '<td class="r">' + nf(t.total) + '</td>' +
+              '<td class="r">' + nf(t.delivered) + '</td>' +
+              '<td class="r">' + nf(t.returned) + '</td>' +
+              '<td class="r">' + nf(t.transit) + '</td>' +
+              '<td class="r">' + nf(t.cancelled) + '</td>' +
+              '<td class="r">' + nf(t.other) + '</td>' +
+              '<td class="r">' + money(t.amount) + '</td></tr>';
+    }
 
     $('byCourier').innerHTML =
       '<tr><th>Courier</th><th class="r">Orders</th><th class="r">Delivered</th>' +
@@ -395,7 +706,6 @@
       '<th class="r">Other</th><th class="r">Amount</th></tr>' +
       (rows || '<tr><td colspan="8">Nothing was found.</td></tr>');
 
-    // every order
     var lines = r.rows.map(function(x){
       return '<tr><td class="mono">' + esc(x.invoice) + '</td>' +
              '<td>' + esc(x.courier) + '</td>' +
@@ -410,13 +720,12 @@
 
     $('rowsWrap').innerHTML = '<table class="t">' +
       '<tr><th>Order</th><th>Courier</th><th>Month</th><th>Result</th><th>Sheet says</th>' +
-      '<th class="r">Amount</th><th>CPR</th><th>CPR date</th><th>Sheet</th></tr>' +
+      '<th class="r">Amount</th><th>CPR</th><th>Date</th><th>Sheet</th></tr>' +
       (lines || '<tr><td colspan="9">Nothing.</td></tr>') + '</table>';
 
     if(r.missing.length){
       $('foldMissing').classList.remove('hide');
-      $('missWrap').innerHTML = '<div class="msg bad">' +
-        r.missing.map(esc).join(', ') + '</div>';
+      $('missWrap').innerHTML = '<div class="msg bad">' + r.missing.map(esc).join(', ') + '</div>';
     } else {
       $('foldMissing').classList.add('hide');
     }
