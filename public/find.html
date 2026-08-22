@@ -43,14 +43,19 @@
   .chips button:hover{border-color:var(--qbo)}
   .chips button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
 
-  .found{border:1px solid var(--line);border-radius:9px;background:#fff;margin-bottom:14px;
-    max-height:260px;overflow:auto}
-  .found .co{padding:9px 14px;border-bottom:1px solid var(--line);font-size:12.5px;
-    display:flex;gap:10px;align-items:baseline}
-  .found .co:last-child{border-bottom:0}
-  .found .co b{font-weight:600;min-width:150px}
-  .found .co span{color:var(--muted);font-size:12px}
-  .found .none{padding:14px;font-size:12.5px;color:var(--muted)}
+  .co{border:1px solid var(--line);border-radius:9px;background:#fff;padding:14px 16px;
+    margin-bottom:10px}
+  .co .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+  .co .head b{font-size:13.5px;font-weight:600}
+  .co .head span{font-size:12px;color:var(--muted)}
+  .co .files{font-size:12px;color:var(--faint);margin-bottom:11px}
+  .co .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}
+  .co .cols label{display:block;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+  .co .cols select{width:100%;font-size:12.5px}
+  .co .saved{font-size:11.5px;color:var(--qbo);margin-top:9px}
+  .co .warn{font-size:11.5px;color:var(--bad);margin-top:9px}
+  .co .peek{font-size:11.5px;color:var(--faint);margin-top:9px;font-family:var(--mono)}
 
   .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
   .row .aside{font-size:12px;color:var(--faint)}
@@ -89,7 +94,7 @@
   .log .t{color:#7FA893}
 
   .fold{font-size:12px;color:var(--muted);cursor:pointer;user-select:none;margin-top:12px;
-    display:inline-block}
+    display:inline-block;margin-right:16px}
   .fold:hover{color:var(--ink)}
 
   .msg{padding:13px 15px;border-radius:8px;font-size:12.5px;margin-top:12px}
@@ -128,7 +133,7 @@
             difference, so <b>#91349172</b> and <b>91349172</b> are the same order.
           </div>
           <textarea class="nums" id="nums" placeholder="#91349172&#10;#91349171&#10;#91349170"></textarea>
-          <div class="aside" id="count" style="margin-top:7px;font-size:12px;color:var(--faint)"></div>
+          <div id="count" style="margin-top:7px;font-size:12px;color:var(--faint)"></div>
         </div>
 
         <div class="step">
@@ -140,8 +145,8 @@
           <!-- ---------- CPR sheets ---------- -->
           <div class="pane on" id="paneCpr">
             <div class="hint">
-              Pick a year and one or more months. The sheets that live in those months
-              are listed underneath, so you can see exactly what will be read.
+              Pick a year and one or more months, then say which column holds what.
+              Every courier names them differently, so each is asked once and remembered.
             </div>
 
             <div class="picks">
@@ -154,13 +159,13 @@
             <label style="display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">Months</label>
             <div class="chips" id="months"><span style="font-size:12px;color:var(--faint)">Reading the folders…</span></div>
 
-            <div class="row" style="margin-bottom:12px">
-              <button id="btnPick">Show the sheets</button>
-              <button id="btnAllMonths">Every month of this year</button>
+            <div class="row" style="margin-bottom:14px">
+              <button class="solid" id="btnPick">Show the sheets</button>
+              <button id="btnAllMonths">Every month</button>
               <button id="btnNoMonths">Clear</button>
             </div>
 
-            <div class="found" id="found"><div class="none">No months picked yet.</div></div>
+            <div id="found"></div>
           </div>
 
           <!-- ---------- Return sheet ---------- -->
@@ -205,9 +210,9 @@
         </div>
 
         <div class="step hide" id="stepRun">
-          <h2>Searching <span class="aside" id="runState"></span></h2>
+          <h2>Searching <span class="aside" id="runState" style="font-size:12px;color:var(--faint);font-weight:400"></span></h2>
           <div class="bar"><span id="barFill"></span></div>
-          <div class="aside" id="runLine" style="font-size:12px;color:var(--faint)"></div>
+          <div id="runLine" style="font-size:12px;color:var(--faint)"></div>
 
           <div class="row" style="margin-top:14px">
             <button id="btnStop">Stop</button>
@@ -225,9 +230,8 @@
           <table class="t" id="byCourier"></table>
 
           <span class="fold" id="foldRows">Show every order</span>
-          <div id="rowsWrap" class="hide" style="margin-top:12px"></div>
-
           <span class="fold hide" id="foldMissing">Show what was not found</span>
+          <div id="rowsWrap" class="hide" style="margin-top:12px"></div>
           <div id="missWrap" class="hide" style="margin-top:12px"></div>
         </div>
 
@@ -243,9 +247,12 @@
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
 
-  var tree = [];          // [{ company, folders:[{id,name,month,year,label}] }]
-  var pickedMonths = {};  // month number -> true
-  var pickedFolders = []; // folder ids
+  var tree = [];
+  var pickedMonths = {};
+  var chosen = [];          // [{ company, folder }]
+  var pickedFolders = [];
+  var saved = {};           // company -> { invoice, amount, status }
+  var headers = {};         // company -> header array
   var retSheets = [];
   var pickedTabs = {};
   var since = 0, timer = null, awake = null;
@@ -285,6 +292,8 @@
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
+
+    get('/api/find/columns').then(function(d){ saved = d.cols || {}; }).catch(function(){});
     loadTree();
     loadReturns();
     poll();
@@ -303,17 +312,15 @@
 
   /* ---------- the paste box ---------- */
 
-  function countThem(){
-    var list = $('nums').value.split(/[\s,;]+/).filter(Boolean);
+  $('nums').addEventListener('input', function(){
     var seen = {};
-    list.forEach(function(n){
+    $('nums').value.split(/[\s,;]+/).forEach(function(n){
       var d = String(n).replace(/[^0-9]/g,'').replace(/^0+(?=[0-9])/,'');
       if(d) seen[d] = 1;
     });
     var n = Object.keys(seen).length;
     $('count').textContent = n ? nf(n) + ' order numbers' : '';
-  }
-  $('nums').addEventListener('input', countThem);
+  });
 
   /* ---------- the folder tree ---------- */
 
@@ -326,10 +333,9 @@
         c.folders.forEach(function(f){ if(f.year) years[f.year] = 1; });
       });
 
-      var list = Object.keys(years).sort().reverse();
       var sel = $('year');
       sel.innerHTML = '';
-      list.forEach(function(y){
+      Object.keys(years).sort().reverse().forEach(function(y){
         var o = document.createElement('option');
         o.value = y; o.textContent = y;
         sel.appendChild(o);
@@ -350,6 +356,10 @@
     });
 
     pickedMonths = {};
+    chosen = [];
+    pickedFolders = [];
+    $('found').innerHTML = '';
+
     var box = $('months');
     box.innerHTML = '';
 
@@ -369,15 +379,13 @@
       box.appendChild(b);
     });
 
-    $('found').innerHTML = '<div class="none">No months picked yet.</div>';
-    pickedFolders = [];
     plan();
   }
 
   $('btnAllMonths').addEventListener('click', function(){
-    $('months').querySelectorAll('button').forEach(function(b){ b.classList.add('on'); });
     var year = Number($('year').value);
     pickedMonths = {};
+    $('months').querySelectorAll('button').forEach(function(b){ b.classList.add('on'); });
     tree.forEach(function(c){
       c.folders.forEach(function(f){ if(f.year === year && f.month) pickedMonths[f.month] = true; });
     });
@@ -386,23 +394,24 @@
   $('btnNoMonths').addEventListener('click', function(){
     $('months').querySelectorAll('button').forEach(function(b){ b.classList.remove('on'); });
     pickedMonths = {};
+    chosen = [];
     pickedFolders = [];
-    $('found').innerHTML = '<div class="none">No months picked yet.</div>';
+    $('found').innerHTML = '';
     plan();
   });
+
+  /* ---------- showing the sheets, and asking about columns ---------- */
 
   $('btnPick').addEventListener('click', function(){
     var year = Number($('year').value);
     var want = Object.keys(pickedMonths).map(Number);
 
     if(!want.length){
-      $('found').innerHTML = '<div class="none">Pick at least one month.</div>';
-      pickedFolders = [];
-      plan();
+      $('found').innerHTML = '<div class="msg bad">Pick at least one month.</div>';
       return;
     }
 
-    var chosen = [];
+    chosen = [];
     tree.forEach(function(c){
       c.folders.forEach(function(f){
         if(f.year === year && want.indexOf(f.month) > -1){
@@ -414,35 +423,118 @@
     pickedFolders = chosen.map(function(x){ return x.folder.id; });
 
     if(!chosen.length){
-      $('found').innerHTML = '<div class="none">No folders match that.</div>';
+      $('found').innerHTML = '<div class="msg bad">No folders match that.</div>';
       plan();
       return;
     }
 
-    $('found').innerHTML = '<div class="none">Looking inside…</div>';
+    $('found').innerHTML = '<div style="font-size:12.5px;color:var(--muted)">Looking inside…</div>';
 
     post('/api/find/sheets', { folderIds: pickedFolders }).then(function(d){
       var byFolder = {};
       (d.sheets || []).forEach(function(s){
         if(!byFolder[s.folderId]) byFolder[s.folderId] = [];
-        byFolder[s.folderId].push(s.name);
+        byFolder[s.folderId].push(s);
       });
 
-      var html = '';
+      // one card per company, however many months it has
+      var byCompany = {};
       chosen.forEach(function(x){
-        var names = byFolder[x.folder.id] || [];
-        html += '<div class="co"><b>' + esc(x.company) + '</b>' +
-                '<span>' + esc(x.folder.name) + ' \u2192 ' +
-                (names.length ? names.map(esc).join(', ') : 'nothing inside') +
-                '</span></div>';
+        if(!byCompany[x.company]) byCompany[x.company] = { folders: [], sheets: [] };
+        byCompany[x.company].folders.push(x.folder);
+        (byFolder[x.folder.id] || []).forEach(function(s){
+          byCompany[x.company].sheets.push({ month: x.folder.name, file: s });
+        });
       });
 
-      $('found').innerHTML = html;
+      $('found').innerHTML = '';
+      Object.keys(byCompany).sort().forEach(function(name){
+        drawCompany(name, byCompany[name]);
+      });
+
       plan();
     }).catch(function(e){
-      $('found').innerHTML = '<div class="none">' + esc(e.message) + '</div>';
+      $('found').innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>';
     });
   });
+
+  function drawCompany(name, info){
+    var card = document.createElement('div');
+    card.className = 'co';
+
+    var files = info.sheets.map(function(s){
+      return s.month + ' \u2192 ' + s.file.name;
+    });
+
+    card.innerHTML =
+      '<div class="head"><b>' + esc(name) + '</b>' +
+      '<span>' + info.sheets.length + ' sheet' + (info.sheets.length === 1 ? '' : 's') + '</span></div>' +
+      '<div class="files">' + (files.length ? files.map(esc).join(' \u00b7 ') : 'nothing inside') + '</div>' +
+      '<div class="cols"><span style="font-size:12px;color:var(--faint)">Reading the columns\u2026</span></div>';
+
+    $('found').appendChild(card);
+
+    if(!info.sheets.length) return;
+
+    var first = info.sheets[0].file;
+    get('/api/find/header?sheetId=' + encodeURIComponent(first.id) + (first.excel ? '&excel=1' : ''))
+      .then(function(d){
+        headers[name] = d.header || [];
+        fillCols(card, name, d);
+      })
+      .catch(function(e){
+        card.querySelector('.cols').innerHTML =
+          '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
+      });
+  }
+
+  function fillCols(card, name, d){
+    var header = d.header || [];
+    var have = saved[name] || d.guess || {};
+
+    function box(key, label, note){
+      var opts = '<option value="-1">' + (note || '\u2014 none \u2014') + '</option>';
+      header.forEach(function(h, i){
+        var on = (have[key] !== undefined && Number(have[key]) === i) ? ' selected' : '';
+        opts += '<option value="' + i + '"' + on + '>' + esc(h || ('Column ' + (i + 1))) + '</option>';
+      });
+      return '<div><label>' + label + '</label><select data-key="' + key + '">' + opts + '</select></div>';
+    }
+
+    card.querySelector('.cols').innerHTML =
+      box('invoice', 'Order number') +
+      box('amount',  'Amount') +
+      box('status',  'Status', '\u2014 no status column, all delivered \u2014');
+
+    var note = document.createElement('div');
+    note.className = saved[name] ? 'saved' : 'peek';
+    note.textContent = saved[name]
+      ? 'Remembered from last time.'
+      : 'Guessed from the header - check it before starting.';
+    card.appendChild(note);
+
+    function stash(){
+      var cols = {};
+      card.querySelectorAll('.cols select').forEach(function(s){
+        cols[s.dataset.key] = Number(s.value);
+      });
+      cols.cpr = have.cpr === undefined ? -1 : have.cpr;
+      cols.cprDate = have.cprDate === undefined ? -1 : have.cprDate;
+
+      saved[name] = cols;
+      note.className = 'saved';
+      note.textContent = 'Saved for ' + name + '.';
+
+      post('/api/find/columns', { company: name, cols: cols }).catch(function(){});
+    }
+
+    card.querySelectorAll('.cols select').forEach(function(s){
+      s.addEventListener('change', stash);
+    });
+
+    // whatever was guessed is kept straight away, so nothing is left blank
+    if(!saved[name]) stash();
+  }
 
   /* ---------- the return sheet ---------- */
 
@@ -538,10 +630,7 @@
     var nums = $('nums').value.trim();
     if(!nums) return say('bad', '<b>Paste some order numbers first.</b>');
 
-    var body = {
-      numbers: nums,
-      folderIds: pickedFolders
-    };
+    var body = { numbers: nums, folderIds: pickedFolders, cols: saved };
 
     var i = $('retFile').value;
     if(i !== ''){
