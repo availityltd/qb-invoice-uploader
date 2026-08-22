@@ -46,7 +46,8 @@ import {
 import { loadTraxSummaries, applyLines } from './traxsheet.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 import {
-  startFindJob, stopFindJob, clearFindJob, findSnapshot, listTree, sheetsIn
+  startFindJob, stopFindJob, clearFindJob, findSnapshot,
+  listTree, sheetsIn, peekHeader
 } from './finder.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
