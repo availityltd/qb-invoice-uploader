@@ -309,8 +309,6 @@ async function run(realmId, job) {
 }
 
 async function walkCpr(realmId, job) {
-    // whatever column choices were saved in Receive payments, reused here
-  job.cols = {};
   const root = await getSetting(realmId, 'cpr:root', '');
   if (!root) throw new Error('Set the Drive folder in Receive payments first');
 
