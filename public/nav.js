@@ -9,11 +9,11 @@
       { href:'/convert.html',  label:'Convert',          icon:'shuffle' },
       { href:'/upload.html',   label:'Upload',           icon:'up' }
     ]},
-        { group: 'Payments', items: [
+    { group: 'Payments', items: [
       { href:'/payments.html', label:'Receive payments', icon:'cash' },
       { href:'/advance.html',  label:'Advance payments', icon:'wallet' },
-                { href:'/charges.html',  label:'Delivery charges', icon:'receipt' },
-      { href:'/couriers.html', label:'Couriers',         icon:'truck' }
+      { href:'/charges.html',  label:'Delivery charges', icon:'receipt' },
+      { href:'/couriers.html', label:'Couriers',         icon:'truck', tree:true }
     ]},
     { group: 'Maintenance', items: [
       { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
@@ -28,15 +28,21 @@
     cash:   '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/>',
     truck:  '<path d="M3 16V6h11v10M14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
     copy:   '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/>',
-        ban:    '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
+    ban:    '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14h2"/>',
-        receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>'
+    receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>'
   };
 
   function svg(name){
     return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
            'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
            (ICONS[name] || '') + '</svg>';
+  }
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   var path = location.pathname.replace(/index\.html$/, '') || '/';
@@ -53,6 +59,8 @@
       var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0);
       html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') + '>' +
               svg(it.icon) + it.label + '</a>';
+      // Couriers is not one page but a small tree, filled in further down
+      if(it.tree) html += '<div class="ctree" id="ctree"></div>';
     });
   });
 
@@ -68,6 +76,77 @@
 
   var rail = document.querySelector('.rail');
   if(rail) rail.innerHTML = html;
+
+  /* ---------- the courier tree ---------- */
+
+  (function courierTree(){
+    var box = document.getElementById('ctree');
+    if(!box) return;
+
+    var css = document.createElement('style');
+    css.textContent = [
+      '.ctree{margin:2px 0 8px 0}',
+      '.ctree a{display:block;padding:6px 14px 6px 44px;font-size:12.5px;',
+      '  color:rgba(255,255,255,.62);text-decoration:none;line-height:1.4}',
+      '.ctree a:hover{color:#fff;background:rgba(255,255,255,.05)}',
+      '.ctree a.on{color:#fff;background:rgba(255,255,255,.09);font-weight:600}',
+      '.ctree a.all{font-weight:600;color:rgba(255,255,255,.78)}',
+      '.ctree .grp{padding:9px 14px 3px 34px;font-size:10.5px;letter-spacing:.09em;',
+      '  text-transform:uppercase;color:rgba(255,255,255,.35);font-weight:600}',
+      '.ctree .grp .soon{text-transform:none;letter-spacing:0;font-size:10px;',
+      '  opacity:.7;font-weight:400}',
+      '.ctree a.add{padding-left:56px;color:rgba(255,255,255,.42);font-size:13px}',
+      '.ctree a.add:hover{color:#fff}',
+      '.ctree a.wide{padding-left:34px;margin-top:6px;font-size:12px;',
+      '  border-top:1px solid rgba(255,255,255,.08);padding-top:10px}'
+    ].join('');
+    document.head.appendChild(css);
+
+    var link = box.previousElementSibling;
+    var open = localStorage.getItem('ctreeOpen') !== '0';
+    box.style.display = open ? 'block' : 'none';
+
+    // clicking Couriers while already inside it folds the tree instead of reloading
+    if(link){
+      link.addEventListener('click', function(e){
+        if(path.indexOf('/courier') === 0){
+          e.preventDefault();
+          open = !open;
+          box.style.display = open ? 'block' : 'none';
+          localStorage.setItem('ctreeOpen', open ? '1' : '0');
+        }
+      });
+    }
+
+    var here = location.pathname + location.search;
+
+    fetch('/api/courier/tree', { cache: 'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error) return;
+        var out = '';
+
+        out += '<a class="all' + (here.indexOf('scope=all') > -1 ? ' on' : '') +
+               '" href="/courier-dash.html?scope=all">All courier companies</a>';
+
+        (d.couriers || []).forEach(function(c){
+          out += '<div class="grp">' + esc(c.name) +
+                 (c.ready ? '' : ' <span class="soon">soon</span>') + '</div>';
+
+          c.accounts.forEach(function(a){
+            out += '<a class="acc' + (here.indexOf('account=' + a.id) > -1 ? ' on' : '') +
+                   '" href="/courier-dash.html?account=' + a.id + '">' +
+                   esc(a.label) + '</a>';
+          });
+
+          out += '<a class="add" href="/couriers.html?add=' + esc(c.key) + '">+</a>';
+        });
+
+        out += '<a class="add wide" href="/couriers.html">+ Add courier company</a>';
+        box.innerHTML = out;
+      })
+      .catch(function(){});
+  })();
 
   /* ---------- connection state ---------- */
   window.APP = window.APP || {};
