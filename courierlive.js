@@ -284,3 +284,18 @@ export async function liveOrders(realmId, opts) {
     orders: rows.slice(0, 500)
   };
 }
+// one untouched row, exactly as the courier sent it
+export async function peekRaw(realmId, opts) {
+  const accounts = await accountsFor(realmId, opts);
+  if (!accounts.length) return { error: 'No accounts' };
+
+  const orders = await ordersFor(accounts[0], opts.from, opts.to);
+  const one = opts.status
+    ? orders.find(o => o.status === opts.status)
+    : orders.find(o => o.statusGroup === 'delivered');
+
+  const names = {};
+  orders.forEach(o => { names[o.status] = (names[o.status] || 0) + 1; });
+
+  return { statusNames: names, sample: one ? one.raw : null };
+}
