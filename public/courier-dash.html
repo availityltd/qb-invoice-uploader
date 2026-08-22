@@ -265,20 +265,25 @@
       .catch(function(){});
   }
 
-  function paintToday(){
+   function paintToday(){
     var el = $('todayBox');
     if(!el || !todayData) return;
     var t = todayData.totals;
+
+    // only what was actually created today - PostEx counts it the same way
+    var g = {};
+    (todayData.groups || []).forEach(function(x){ g[x.group] = x; });
+    var unbooked = (g.unbooked || {}).count || 0;
+
     el.innerHTML =
       '<h3>Today\u2019s orders</h3>' +
       '<div class="amt">' + full(t.amount) + '</div>' +
       '<div class="three">' +
         '<div class="a"><b>' + full(t.codPending) + '</b>Pending amount</div>' +
-        '<div class="p"><b>' + n0(t.pendingOrders) + '</b>Pending orders</div>' +
-        '<div class="t"><b>' + n0(t.orders) + '</b>Total orders</div>' +
+        '<div class="p"><b>' + n0(unbooked) + '</b>Waiting to be booked</div>' +
+        '<div class="t"><b>' + n0(t.orders) + '</b>Booked today</div>' +
       '</div>';
   }
-
   /* ---------- the whole page ---------- */
 
   var live = null;
