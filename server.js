@@ -1616,7 +1616,50 @@ app.post('/api/find/sheets', async (req, res) => {
     res.status(400).json({ error: e.message });
   }
 });
+// the column names of one sheet, so the page can ask which is which
+app.get('/api/find/header', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
+  const { sheetId } = req.query;
+  if (!sheetId) return res.status(400).json({ error: 'sheetId required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await peekHeader(sheetId, req.query.excel === '1'));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// the column choices, remembered per company
+app.get('/api/find/columns', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ cols: await getSetting(realmId, 'find:cols', {}) || {} });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/find/columns', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { company, cols } = req.body;
+  if (!company || !cols) return res.status(400).json({ error: 'company and cols required' });
+
+  try {
+    const all = (await getSetting(realmId, 'find:cols', {})) || {};
+    all[company] = cols;
+    await setSetting(realmId, 'find:cols', all);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // the return workbook and its tabs, for the second tab of the page
 app.get('/api/find/return-sheets', async (req, res) => {
   const realmId = await requireCompany(req, res);
