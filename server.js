@@ -31,7 +31,6 @@ import { readDateColumns } from './voidsheet.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
 import { startAdvJob, stopAdvJob, clearAdvJob, advSnapshot } from './advjobs.js';
 import {
-import {
   initCouriers, listAccounts as listCourierAccounts, getAccount as getCourierAccount,
   addAccount as addCourierAccount, removeAccount as removeCourierAccount,
   markSync, saveOrders,
