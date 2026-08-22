@@ -31,12 +31,16 @@ import { readDateColumns } from './voidsheet.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
 import { startAdvJob, stopAdvJob, clearAdvJob, advSnapshot } from './advjobs.js';
 import {
+import {
   initCouriers, listAccounts as listCourierAccounts, getAccount as getCourierAccount,
   addAccount as addCourierAccount, removeAccount as removeCourierAccount,
-  markSync, saveOrders
+  markSync, saveOrders,
+  listCprs, cprOrders, cprProgress
 } from './couriers.js';
 import { adapter as postexAdapter } from './postex.js';
-import { liveStats, liveOrders, trackOne, peekRaw, forget as forgetLive } from './courierlive.js';
+import {
+  liveStats, liveOrders, trackOne, peekRaw, chaseCpr, forget as forgetLive
+} from './courierlive.js';
 import {
   loadCharges, listAllAccounts, findJournal, postJournal
 } from './journal.js';
@@ -2047,7 +2051,84 @@ app.get('/api/courier/live', async (req, res) => {
 });
 
 // one parcel, by its tracking number
+app.get('/api/courier/track', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await trackOne(realmId, req.query.q, req.query.account));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ---------- Cash payment receipts ----------
+
+// the receipts we know of, newest first
+app.get('/api/courier/cprs', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const { account, from, to } = req.query;
+
+    // ask the courier about a few more parcels while the page is being read
+    chaseCpr(realmId, account).catch(() => {});
+
+    const [list, progress] = await Promise.all([
+      listCprs(realmId, { account, from, to }),
+      cprProgress(realmId, account)
+    ]);
+
+    res.json({ cprs: list, progress });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// everything inside one receipt
+app.get('/api/courier/cpr', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const cpr = String(req.query.cpr || '').trim();
+  if (!cpr) return res.status(400).json({ error: 'cpr required' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const orders = await cprOrders(realmId, cpr);
+    const n = v => Math.round(Number(v || 0) * 100) / 100;
+
+    res.json({
+      cpr,
+      count: orders.length,
+      amount: n(orders.reduce((s, x) => s + x.amount, 0)),
+      fee: n(orders.reduce((s, x) => s + x.fee, 0)),
+      tax: n(orders.reduce((s, x) => s + x.tax, 0)),
+      settledOn: orders.length ? orders[0].settledOn : null,
+      orders
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// a nudge, for the button on the page
+app.post('/api/courier/cpr-chase', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.json(await chaseCpr(realmId, req.body.account));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // the orders behind one status
+
 app.get('/api/courier/orders', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
