@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import XLSX from 'xlsx';
 import crypto from 'crypto';
 import {
-  initDb, saveCompany, getCompany, logUpload,
+  pool, initDb, saveCompany, getCompany, logUpload,
   getNegativeItems, setNegativeItems
 } from './db.js';
 import { initMappings, getMappings, saveMapping } from './mappings.js';
