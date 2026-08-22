@@ -116,9 +116,10 @@ export function summarise(orders, from, to) {
   }
 
   // newest first, so the page can show the last few movements
+   // the portal lists money that has actually moved, newest first
   const moved = orders
-    .filter(o => o.deliveredOn || o.bookedOn)
-    .sort((a, b) => String(b.deliveredOn || b.bookedOn).localeCompare(String(a.deliveredOn || a.bookedOn)))
+    .filter(o => o.statusGroup === 'delivered' && o.deliveredOn)
+    .sort((a, b) => String(b.deliveredOn).localeCompare(String(a.deliveredOn)))
     .slice(0, 25)
     .map(o => ({
       tracking: o.tracking,
