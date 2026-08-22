@@ -2039,7 +2039,48 @@ app.get('/api/courier/kinds', async (req, res) => {
     kinds: Object.values(ADAPTERS).map(a => ({ key: a.key, name: a.name }))
   });
 });
+// The sidebar shows every courier we can speak to, whether or not an account
+// has been added yet - so a first account can be added from there.
+app.get('/api/courier/tree', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const accounts = await listCourierAccounts(realmId);
+
+    const tree = Object.values(ADAPTERS).map(a => ({
+      key: a.key,
+      name: a.name,
+      ready: true,
+      accounts: accounts
+        .filter(x => x.courier === a.key)
+        .map(x => ({ id: x.id, label: x.label, lastSync: x.last_sync }))
+    }));
+
+    // couriers we know of but cannot talk to yet
+    const PLANNED = [
+      { key: 'trax',   name: 'Trax' },
+      { key: 'daewoo', name: 'Daewoo' }
+    ];
+
+    PLANNED.forEach(p => {
+      if (tree.some(t => t.key === p.key)) return;
+      tree.push({
+        key: p.key,
+        name: p.name,
+        ready: false,
+        accounts: accounts
+          .filter(x => x.courier === p.key)
+          .map(x => ({ id: x.id, label: x.label, lastSync: x.last_sync }))
+      });
+    });
+
+    res.json({ couriers: tree });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.get('/api/courier/accounts', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
