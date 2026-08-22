@@ -112,7 +112,13 @@ export async function sheetsIn(realmId, folderIds) {
 }
 
 /* ==================== what the sheet's words mean ==================== */
-
+// One courier writes its sheets the same way for every account, so the first
+// word of the folder name is enough to know which columns to use.
+function colsFor(job, company) {
+  if (job.cols[company]) return job.cols[company];
+  const word = String(company || '').trim().split(/[\s\-]+/)[0].toLowerCase();
+  return job.cols[word] || null;
+}
 function bucketOf(status) {
   const s = String(status || '').trim().toLowerCase();
   if (!s) return 'unknown';
@@ -373,8 +379,7 @@ async function walkCpr(realmId, job) {
       let data;
       try {
                        data = await tryThrice(job, `${label} / ${t.title}`,
-          () => loadSheet(item.file.id, t.title, item.file.excel,
-                          job.cols[item.courier] || null));
+                   () => loadSheet(item.file.id, t.title, item.file.excel, colsFor(job, item.courier)));
       } catch (e) {
         tabTrouble++;
         job.skipped.push(`${label} / ${t.title}`);
