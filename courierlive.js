@@ -246,3 +246,41 @@ export async function trackOne(realmId, tracking, accountId) {
 
   return { found: false, tracking: wanted };
 }
+// the orders behind one number on the dashboard
+export async function liveOrders(realmId, opts) {
+  const { from, to, status, group } = opts;
+  const accounts = await accountsFor(realmId, opts);
+
+  const rows = [];
+  for (const acc of accounts) {
+    let orders = [];
+    try { orders = await ordersFor(acc, from, to); } catch (e) { continue; }
+
+    orders.forEach(o => {
+      if (status && o.status !== status) return;
+      if (group && o.statusGroup !== group) return;
+      rows.push({
+        account: acc.label,
+        tracking: o.tracking,
+        orderRef: o.orderRef,
+        status: o.status,
+        statusGroup: o.statusGroup,
+        amount: r2(o.amount),
+        fee: r2(o.fee),
+        tax: r2(o.tax),
+        city: o.city,
+        bookedOn: o.bookedOn,
+        pickedOn: o.pickedOn,
+        deliveredOn: o.deliveredOn
+      });
+    });
+  }
+
+  rows.sort((a, b) => String(b.bookedOn || '').localeCompare(String(a.bookedOn || '')));
+  return {
+    from, to, status: status || null, group: group || null,
+    count: rows.length,
+    amount: r2(rows.reduce((s, x) => s + x.amount, 0)),
+    orders: rows.slice(0, 500)
+  };
+}
