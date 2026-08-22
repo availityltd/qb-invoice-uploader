@@ -36,7 +36,7 @@ import {
   markSync, saveOrders
 } from './couriers.js';
 import { adapter as postexAdapter } from './postex.js';
-import { liveStats, trackOne, forget as forgetLive } from './courierlive.js';
+import { liveStats, liveOrders, trackOne, forget as forgetLive } from './courierlive.js';
 import {
   loadCharges, listAllAccounts, findJournal, postJournal
 } from './journal.js';
@@ -2047,15 +2047,19 @@ app.get('/api/courier/live', async (req, res) => {
 });
 
 // one parcel, by its tracking number
-app.get('/api/courier/track', async (req, res) => {
+// the orders behind one status
+app.get('/api/courier/orders', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
+  const { from, to, account, courier, status, group } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
   try {
     res.setHeader('Cache-Control', 'no-store');
-    res.json(await trackOne(realmId, req.query.q, req.query.account));
+    res.json(await liveOrders(realmId, { from, to, account, courier, status, group }));
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(500).json({ error: e.message });
   }
 });
 app.get('/api/courier/stats', async (req, res) => {
