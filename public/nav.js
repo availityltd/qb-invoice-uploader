@@ -57,8 +57,10 @@
     if(sec.group) html += '<div class="group">' + sec.group + '</div>';
     sec.items.forEach(function(it){
       var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0);
-      html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') + '>' +
-              svg(it.icon) + it.label + '</a>';
+      html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') +
+              (it.tree ? ' id="couriersLink"' : '') + '>' +
+              svg(it.icon) + it.label +
+              (it.tree ? '<span class="tcar" id="couriersCar">\u25B8</span>' : '') + '</a>';
       // Couriers is not one page but a small tree, filled in further down
       if(it.tree) html += '<div class="ctree" id="ctree"></div>';
     });
@@ -128,52 +130,57 @@
 
     var css = document.createElement('style');
     css.textContent = [
-      '.ctree{margin:2px 0 8px 0}',
-      '.ctree a{display:block;padding:6px 14px 6px 44px;font-size:12.5px;',
+      '.tcar{margin-left:auto;font-size:9px;opacity:.5;transition:transform .15s;',
+      '  display:inline-block}',
+      '.tcar.open{transform:rotate(90deg)}',
+      '.ctree{margin:2px 0 8px 0;display:none}',
+      '.ctree.open{display:block}',
+      '.ctree a{display:block;padding:6px 14px 6px 46px;font-size:12.5px;',
       '  color:rgba(255,255,255,.62);text-decoration:none;line-height:1.4}',
       '.ctree a:hover{color:#fff;background:rgba(255,255,255,.05)}',
       '.ctree a.on{color:#fff;background:rgba(255,255,255,.09);font-weight:600}',
-      '.ctree a.all{font-weight:600;color:rgba(255,255,255,.78)}',
-      '.ctree .grp{display:flex;align-items:center;gap:7px;cursor:pointer;',
-      '  padding:8px 14px 8px 34px;font-size:11px;letter-spacing:.06em;',
-      '  text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;user-select:none}',
-      '.ctree .grp:hover{color:rgba(255,255,255,.8)}',
-      '.ctree .grp .car{font-size:8px;transition:transform .15s;display:inline-block;',
-      '  opacity:.7;flex:none}',
+      '.ctree a.all{font-weight:600;color:rgba(255,255,255,.78);padding-left:34px}',
+      '.ctree .grp{display:flex;align-items:center;gap:8px;cursor:pointer;',
+      '  padding:7px 14px 7px 34px;font-size:12px;color:rgba(255,255,255,.62);',
+      '  user-select:none;line-height:1.4}',
+      '.ctree .grp:hover{color:#fff;background:rgba(255,255,255,.05)}',
+      '.ctree .grp .car{font-size:9px;opacity:.55;transition:transform .15s;',
+      '  display:inline-block;flex:none;width:9px}',
+      '.ctree .grp.open{color:#fff}',
       '.ctree .grp.open .car{transform:rotate(90deg)}',
-      '.ctree .grp .soon{text-transform:none;letter-spacing:0;font-size:10px;',
-      '  opacity:.6;font-weight:400}',
+      '.ctree .grp .soon{font-size:10px;opacity:.5}',
       '.ctree .kids{display:none}',
       '.ctree .kids.open{display:block}',
-      '.ctree a.add{padding-left:56px;color:rgba(255,255,255,.42);font-size:13px}',
+      '.ctree a.add{padding-left:58px;color:rgba(255,255,255,.4);font-size:12px}',
       '.ctree a.add:hover{color:#fff}',
       '.ctree a.wide{padding-left:34px;margin-top:6px;font-size:12px;',
       '  border-top:1px solid rgba(255,255,255,.08);padding-top:10px}'
     ].join('');
     document.head.appendChild(css);
 
-    var link = box.previousElementSibling;
-    var open = localStorage.getItem('ctreeOpen') !== '0';
-    box.style.display = open ? 'block' : 'none';
-
-    // clicking Couriers while already inside it folds the tree instead of reloading
-    if(link){
-      link.addEventListener('click', function(e){
-        if(path.indexOf('/courier') === 0){
-          e.preventDefault();
-          open = !open;
-          box.style.display = open ? 'block' : 'none';
-          localStorage.setItem('ctreeOpen', open ? '1' : '0');
-        }
-      });
-    }
-
+    var link = document.getElementById('couriersLink');
+    var car  = document.getElementById('couriersCar');
     var here = location.pathname + location.search;
 
-    // which couriers were left open last time
-    var opened = {};
-    try { opened = JSON.parse(localStorage.getItem('ctreeGroups') || '{}') || {}; }
-    catch(e){ opened = {}; }
+    // nothing is open until it is asked for
+    var onCourierPage = path.indexOf('/courier') === 0;
+    var open = onCourierPage || localStorage.getItem('ctreeOpen') === '1';
+
+    function setOpen(v){
+      open = v;
+      box.classList.toggle('open', v);
+      if(car) car.classList.toggle('open', v);
+      localStorage.setItem('ctreeOpen', v ? '1' : '0');
+    }
+    setOpen(open);
+
+    // Couriers is a folder, not a page - the page is reached from inside it
+    if(link){
+      link.addEventListener('click', function(e){
+        e.preventDefault();
+        setOpen(!open);
+      });
+    }
 
     fetch('/api/courier/tree', { cache: 'no-store' })
       .then(function(r){ return r.json(); })
@@ -185,37 +192,41 @@
                '" href="/courier-dash.html?scope=all">All courier companies</a>';
 
         (d.couriers || []).forEach(function(c){
-          // the courier holding the account we are looking at opens itself
+          // only the company whose account is on screen opens itself
           var mine = c.accounts.some(function(a){
             return here.indexOf('account=' + a.id) > -1;
           });
-          var show = mine || opened[c.key] === true;
 
-          out += '<div class="grp' + (show ? ' open' : '') + '" data-key="' + esc(c.key) + '">' +
-                 '<span class="car">\u25B6</span>' + esc(c.name) +
+          out += '<div class="grp' + (mine ? ' open' : '') + '">' +
+                 '<span class="car">\u25B8</span>' + esc(c.name) +
                  (c.ready ? '' : ' <span class="soon">soon</span>') + '</div>';
 
-          out += '<div class="kids' + (show ? ' open' : '') + '">';
+          out += '<div class="kids' + (mine ? ' open' : '') + '">';
           c.accounts.forEach(function(a){
             out += '<a class="acc' + (here.indexOf('account=' + a.id) > -1 ? ' on' : '') +
                    '" href="/courier-dash.html?account=' + a.id + '">' +
                    esc(a.label) + '</a>';
           });
-          out += '<a class="add" href="/couriers.html?add=' + esc(c.key) + '">+</a>';
+          out += '<a class="add" href="/couriers.html?add=' + esc(c.key) + '">+ add an account</a>';
           out += '</div>';
         });
 
-        out += '<a class="add wide" href="/couriers.html">+ Add courier company</a>';
+        out += '<a class="add wide" href="/couriers.html">Manage courier accounts</a>';
         box.innerHTML = out;
 
         box.querySelectorAll('.grp').forEach(function(g){
           g.addEventListener('click', function(){
             var kids = g.nextElementSibling;
             var now = !g.classList.contains('open');
+
+            // one company open at a time keeps the rail short
+            box.querySelectorAll('.grp').forEach(function(other){
+              other.classList.remove('open');
+              if(other.nextElementSibling) other.nextElementSibling.classList.remove('open');
+            });
+
             g.classList.toggle('open', now);
             if(kids) kids.classList.toggle('open', now);
-            opened[g.getAttribute('data-key')] = now;
-            localStorage.setItem('ctreeGroups', JSON.stringify(opened));
           });
         });
       })
