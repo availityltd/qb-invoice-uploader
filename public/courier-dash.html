@@ -12,52 +12,96 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 <style>
-  .cd-dates{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-  .cd-dates input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
+  .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .bar input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
     font:inherit;font-size:12.5px;background:#fff}
-  .cd-dates button{border:1px solid var(--line);background:#fff;border-radius:7px;
-    padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
-  .cd-dates button:hover{border-color:var(--qbo)}
-  .cd-dates button.go{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
-  .cd-quick{display:flex;gap:6px;margin-right:4px}
+  .bar button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;
+    font:inherit;font-size:12.5px;cursor:pointer}
+  .bar button:hover{border-color:var(--qbo)}
+  .bar button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+  .bar .find{margin-left:auto;display:flex;gap:6px}
+  .bar .find input{border:1px solid var(--line);border-radius:7px;padding:7px 11px;
+    font:inherit;font-size:12.5px;width:190px}
 
-  .cd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px;
-    margin-bottom:16px}
-  .cd-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-  .cd-card .k{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
-  .cd-card .v{font-family:var(--mono);font-size:23px;font-weight:500;margin-top:6px;line-height:1.1}
-  .cd-card .n{font-size:11.5px;color:var(--muted);margin-top:4px}
+  .top{display:grid;grid-template-columns:1.1fr 1.1fr 1.3fr;gap:14px;margin-bottom:14px}
+  @media(max-width:1050px){.top{grid-template-columns:1fr}}
+  .big{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:17px 20px}
+  .big h3{margin:0 0 12px;font-size:13.5px;font-weight:600}
+  .big .amt{font-family:var(--mono);font-size:27px;font-weight:500;line-height:1.1}
+  .big .pill{display:inline-block;background:#EAF3FB;color:#2F6FA8;border-radius:20px;
+    padding:3px 11px;font-size:11.5px;margin-left:9px;vertical-align:middle}
+  .big .sub{font-size:12.5px;color:var(--muted);margin-top:11px}
+  .big .sub b{font-family:var(--mono);font-weight:500;color:var(--ink)}
+  .today{background:linear-gradient(135deg,#3B3A96,#6C5AC4);border:0;color:#fff}
+  .today h3{color:rgba(255,255,255,.85)}
+  .today .amt{color:#fff}
+  .today .three{display:flex;gap:22px;margin-top:14px;flex-wrap:wrap}
+  .today .three div{font-size:11px;color:rgba(255,255,255,.7)}
+  .today .three b{display:block;font-family:var(--mono);font-size:17px;font-weight:500;
+    margin-bottom:2px}
+  .today .three .a b{color:#FFD37A}
+  .today .three .p b{color:#8CE3A8}
+  .today .three .t b{color:#FFC15E}
 
-  .cd-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
-  @media(max-width:1000px){.cd-row{grid-template-columns:1fr}}
-  .cd-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
-  .cd-box h2{margin:0 0 13px;font-size:13.5px;font-weight:600}
+  .row{display:grid;grid-template-columns:1fr 1.35fr;gap:14px;margin-bottom:14px}
+  @media(max-width:1050px){.row{grid-template-columns:1fr}}
+  .row2{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-bottom:14px}
+  @media(max-width:1050px){.row2{grid-template-columns:1fr}}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .box h3{margin:0 0 14px;font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .box h3 .aside{margin-left:auto;font-size:11.5px;color:var(--faint);font-weight:400}
 
-  .cd-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
-  .tile{border:1px solid var(--line);border-radius:8px;padding:11px 13px;background:#fff}
-  .tile .t{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
-  .tile .t i{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
-  .tile .c{font-family:var(--mono);font-size:19px;font-weight:500;margin-top:5px;line-height:1.1}
-  .tile .a{font-size:11.5px;color:var(--faint);margin-top:2px}
+  .tx{display:flex;flex-direction:column}
+  .tx a{display:grid;grid-template-columns:1fr auto;gap:8px;padding:10px 0;
+    border-bottom:1px solid var(--line);text-decoration:none;color:inherit}
+  .tx a:last-child{border-bottom:0}
+  .tx a:hover .tk{text-decoration:underline}
+  .tx .tk{font-family:var(--mono);font-size:12.5px;color:#2F6FA8}
+  .tx .rf{font-size:11.5px;color:var(--faint);margin-top:2px}
+  .tx .am{font-family:var(--mono);font-size:12.5px;text-align:right}
+  .tx .dt{font-size:11px;color:var(--faint);text-align:right;margin-top:2px}
 
-  table.cd{width:100%;border-collapse:collapse;font-size:12.5px}
-  table.cd th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  @media(max-width:620px){.grid{grid-template-columns:repeat(2,1fr)}}
+  .cell{border:1px solid var(--line);border-radius:9px;padding:13px 14px;background:#fff;
+    cursor:pointer;text-align:left;font:inherit;width:100%}
+  .cell:hover{border-color:var(--qbo);background:#FAFDF9}
+  .cell .l{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+    line-height:1.35;min-height:26px}
+  .cell .n{font-family:var(--mono);font-size:23px;font-weight:500;margin-top:5px;line-height:1.1}
+  .cell .m{font-size:11px;color:var(--faint);margin-top:3px}
+  .cell.tot{background:#F3F7FB;border-color:#DCE7F1}
+
+  .rings{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .ring{text-align:center}
+  .ring .cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+    margin-bottom:8px}
+  .ring .leg{font-size:11.5px;color:var(--muted);margin-top:6px}
+  .ring .leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12px}
+  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
     color:var(--faint);border-bottom:1px solid var(--line);padding:7px 8px;font-weight:600}
-  table.cd td{padding:9px 8px;border-bottom:1px solid var(--line);}
-  table.cd td.r,table.cd th.r{text-align:right;font-family:var(--mono)}
-  table.cd tr:last-child td{border-bottom:0}
+  table.t td{padding:8px;border-bottom:1px solid var(--line)}
+  table.t td.r,table.t th.r{text-align:right;font-family:var(--mono)}
+  table.t td.mono{font-family:var(--mono);font-size:11.5px}
+  table.t tr:last-child td{border-bottom:0}
 
-  .bars{display:flex;flex-direction:column;gap:8px}
-  .bars .b{display:grid;grid-template-columns:130px 1fr 56px;align-items:center;gap:10px;
-    font-size:12px}
-  .bars .track{display:block;background:var(--line);border-radius:4px;height:9px;overflow:hidden}
-  .bars .fill{display:block;background:#2F7DD1;height:9px;border-radius:4px}
-  .bars .num{text-align:right;font-family:var(--mono);font-size:12px}
+  .drawer{position:fixed;inset:0;background:rgba(12,24,20,.45);display:none;z-index:60}
+  .drawer.open{display:block}
+  .drawer .panel{position:absolute;right:0;top:0;bottom:0;width:min(940px,96vw);background:#fff;
+    box-shadow:-8px 0 28px rgba(0,0,0,.18);display:flex;flex-direction:column}
+  .drawer .hd{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
+    align-items:center;gap:12px}
+  .drawer .hd b{font-size:14px}
+  .drawer .hd .x{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:7px;
+    width:30px;height:30px;cursor:pointer;font-size:15px;line-height:1}
+  .drawer .bd{overflow:auto;padding:6px 20px 24px}
 
-  .cd-note{font-size:11.5px;color:var(--faint);margin-top:11px}
-  .cd-msg{padding:13px 15px;border-radius:8px;background:#FDF3F3;border:1px solid var(--bad);
+  .note{font-size:11.5px;color:var(--faint);margin-top:11px}
+  .msg{padding:13px 15px;border-radius:8px;background:#FDF3F3;border:1px solid var(--bad);
     color:var(--bad);font-size:12.5px}
-  .cd-load{color:var(--muted);font-size:12.5px;padding:22px 0}
+  .loading{color:var(--muted);font-size:12.5px;padding:22px 0}
 </style>
 </head>
 <body>
@@ -78,25 +122,35 @@
       <div id="gate" class="gate hide">
         <img src="/logo.svg" alt="">
         <h2>Connect your QuickBooks company</h2>
-        <p>Courier orders are kept per company.</p>
+        <p>Courier accounts are kept per company.</p>
         <button class="solid" id="btnConnect">Connect to QuickBooks</button>
       </div>
 
       <div id="body" class="hide">
-        <div class="cd-dates">
-          <div class="cd-quick">
-            <button data-days="0">Today</button>
-            <button data-days="6">7 days</button>
-            <button data-days="29">30 days</button>
-          </div>
+        <div class="bar">
+          <button data-days="0">Today</button>
+          <button data-days="6" class="on">7 days</button>
+          <button data-days="29">30 days</button>
           <input type="date" id="from">
           <input type="date" id="to">
-          <button class="go" id="go">Show</button>
+          <button class="on" id="go">Show</button>
+          <div class="find">
+            <input id="track" placeholder="Tracking number">
+            <button id="btnTrack">Find</button>
+          </div>
         </div>
-        <div id="out"><div class="cd-load">Loading…</div></div>
+        <div id="out"><div class="loading">Asking the courier…</div></div>
       </div>
 
     </div>
+  </div>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="panel">
+    <div class="hd"><b id="dTitle">Orders</b><span class="note" id="dNote"></span>
+      <button class="x" id="dClose">&times;</button></div>
+    <div class="bd" id="dBody"></div>
   </div>
 </div>
 
@@ -116,21 +170,13 @@
     review:'#C98B1E', transferred:'#4AA3C7', lost:'#8B2F2F', damaged:'#8B2F6B',
     other:'#B6C1CC'
   };
-  var LABEL = {
-    delivered:'Delivered', returned:'Returned', returning:'Out for return',
-    transit:'In transit', booked:'Booked', unbooked:'Unbooked',
-    cancelled:'Cancelled', expired:'Expired', review:'Under review',
-    transferred:'Transferred', lost:'Lost', damaged:'Damaged', other:'Other'
-  };
-  var ORDER = ['delivered','transit','booked','returning','returned','review',
-               'transferred','unbooked','cancelled','expired','lost','damaged','other'];
 
   function esc(s){
     return String(s == null ? '' : s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
   function n0(v){ return Number(v||0).toLocaleString('en-US'); }
-  function full(v){ return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
+  function full(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function money(v){
     var x = Number(v||0);
     if(Math.abs(x) >= 1000000) return (x/1000000).toFixed(2)+'M';
@@ -138,15 +184,8 @@
     return x.toFixed(0);
   }
   function iso(d){ return d.toISOString().slice(0,10); }
-  function nextDay(s){
-    var d = new Date(s+'T00:00:00Z');
-    d.setUTCDate(d.getUTCDate()+1);
-    return d.toISOString().slice(0,10);
-  }
-  function short(day){
-    var p = String(day).split('-');
-    return p[2]+'/'+p[1];
-  }
+  function today(){ return iso(new Date()); }
+  function short(day){ var p = String(day).split('-'); return p[2]+'/'+p[1]; }
 
   var fromEl = $('from'), toEl = $('to');
 
@@ -156,6 +195,15 @@
     fromEl.value = iso(f); toEl.value = iso(t);
   }
 
+  function params(extra){
+    var p = new URLSearchParams();
+    p.set('from', fromEl.value); p.set('to', toEl.value);
+    if(account) p.set('account', account);
+    if(courier) p.set('courier', courier);
+    Object.keys(extra||{}).forEach(function(k){ if(extra[k]) p.set(k, extra[k]); });
+    return p.toString();
+  }
+
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
 
   window.APP.ready.then(function(s){
@@ -163,225 +211,392 @@
     $('body').classList.remove('hide');
 
     var sf = localStorage.getItem('cdFrom'), st = localStorage.getItem('cdTo');
-    if(sf && st){ fromEl.value = sf; toEl.value = st; } else setRange(9);
+    if(sf && st){ fromEl.value = sf; toEl.value = st; } else setRange(6);
 
-    Array.prototype.forEach.call(document.querySelectorAll('.cd-quick button'), function(b){
-      b.addEventListener('click', function(){ setRange(Number(b.getAttribute('data-days'))); load(); });
+    Array.prototype.forEach.call(document.querySelectorAll('.bar button[data-days]'), function(b){
+      b.addEventListener('click', function(){
+        Array.prototype.forEach.call(document.querySelectorAll('.bar button[data-days]'),
+          function(x){ x.classList.remove('on'); });
+        b.classList.add('on');
+        setRange(Number(b.getAttribute('data-days')));
+        load();
+      });
     });
     $('go').addEventListener('click', load);
+    $('btnTrack').addEventListener('click', findOne);
+    $('track').addEventListener('keydown', function(e){ if(e.key === 'Enter') findOne(); });
 
     head();
     load();
+    loadToday();
   });
 
   function head(){
     var p = new URLSearchParams();
     if(account) p.set('account', account);
     if(courier) p.set('courier', courier);
-
     fetch('/api/courier/scope?'+p.toString(), { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error) return;
         $('ttl').textContent = d.title || 'Courier dashboard';
-        var s = d.sub || '';
-        if(d.lastSync) s += ' \u00b7 last pulled ' + new Date(d.lastSync).toLocaleString();
-        $('sub').textContent = s;
+        $('sub').textContent = d.sub || '';
       })
       .catch(function(){});
   }
 
-  function load(){
-    localStorage.setItem('cdFrom', fromEl.value);
-    localStorage.setItem('cdTo', toEl.value);
+  /* ---------- today's own strip, always live ---------- */
 
-    $('out').innerHTML = '<div class="cd-load">Loading…</div>';
+  var todayData = null;
 
+  function loadToday(){
     var p = new URLSearchParams();
-    p.set('from', fromEl.value); p.set('to', toEl.value);
+    p.set('from', today()); p.set('to', today());
     if(account) p.set('account', account);
     if(courier) p.set('courier', courier);
 
-    fetch('/api/courier/stats?'+p.toString(), { cache:'no-store' })
+    fetch('/api/courier/live?'+p.toString(), { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
-        if(d.error){ $('out').innerHTML = '<div class="cd-msg">'+esc(d.error)+'</div>'; return; }
+        if(d.error) return;
+        todayData = d;
+        paintToday();
+      })
+      .catch(function(){});
+  }
+
+  function paintToday(){
+    var el = $('todayBox');
+    if(!el || !todayData) return;
+    var t = todayData.totals;
+    el.innerHTML =
+      '<h3>Today\u2019s orders</h3>' +
+      '<div class="amt">' + full(t.amount) + '</div>' +
+      '<div class="three">' +
+        '<div class="a"><b>' + full(t.codPending) + '</b>Pending amount</div>' +
+        '<div class="p"><b>' + n0(t.pendingOrders) + '</b>Pending orders</div>' +
+        '<div class="t"><b>' + n0(t.orders) + '</b>Total orders</div>' +
+      '</div>';
+  }
+
+  /* ---------- the whole page ---------- */
+
+  var live = null;
+
+  function load(){
+    localStorage.setItem('cdFrom', fromEl.value);
+    localStorage.setItem('cdTo', toEl.value);
+    $('out').innerHTML = '<div class="loading">Asking the courier\u2026</div>';
+
+    fetch('/api/courier/live?'+params(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('out').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+        live = d;
         draw(d);
+        paintToday();
       })
       .catch(function(e){
-        $('out').innerHTML = '<div class="cd-msg">'+esc(e.message)+'</div>';
+        $('out').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
       });
   }
 
-  function pick(groups, name){
-    for(var i=0;i<groups.length;i++) if(groups[i].group === name) return groups[i];
-    return { group:name, count:0, amount:0 };
+  function donut(done, total, colDone, colRest){
+    var R = 46, C = 2*Math.PI*R;
+    var part = total ? C * (done/total) : 0;
+    return '<svg width="130" height="130" viewBox="0 0 130 130">' +
+      '<circle cx="65" cy="65" r="'+R+'" fill="none" stroke="'+colRest+'" stroke-width="19"></circle>' +
+      (part ? '<circle cx="65" cy="65" r="'+R+'" fill="none" stroke="'+colDone+'" stroke-width="19" ' +
+        'stroke-dasharray="'+part.toFixed(2)+' '+(C-part).toFixed(2)+'" ' +
+        'transform="rotate(-90 65 65)"></circle>' : '') +
+      '<text x="65" y="63" text-anchor="middle" font-size="18" font-weight="600" fill="#123">' +
+        n0(done) + '</text>' +
+      '<text x="65" y="80" text-anchor="middle" font-size="10" fill="#8A99A8">of ' + n0(total) + '</text>' +
+      '</svg>';
   }
 
-  function donut(parts, centerTop, centerSub){
-    var total = 0;
-    parts.forEach(function(p){ total += p.value; });
-    if(!total) return '<div class="cd-note">Nothing in this range.</div>';
+  function lineChart(daily){
+    if(!daily.length) return '<div class="note">No days in this range.</div>';
 
-    var R = 62, C = 2*Math.PI*R, off = 0, ring = '';
-    parts.forEach(function(p){
-      if(!p.value) return;
-      var len = C * (p.value/total);
-      ring += '<circle cx="80" cy="80" r="'+R+'" fill="none" stroke="'+p.color+'" stroke-width="26" '+
-              'stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" '+
-              'stroke-dashoffset="'+(-off).toFixed(2)+'" transform="rotate(-90 80 80)"></circle>';
-      off += len;
-    });
-
-    var legend = '';
-    parts.forEach(function(p){
-      if(!p.value) return;
-      legend += '<div class="b"><span style="display:flex;align-items:center;gap:7px">'+
-                '<i style="width:8px;height:8px;border-radius:50%;background:'+p.color+';display:inline-block;flex:none"></i>'+
-                esc(p.label)+'</span><span></span>'+
-                '<span class="num">'+(100*p.value/total).toFixed(1)+'%</span></div>';
-    });
-
-    return '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">'+
-             '<svg width="160" height="160" viewBox="0 0 160 160" style="flex:none">'+ring+
-               '<text x="80" y="77" text-anchor="middle" font-size="23" font-weight="600" fill="#123">'+esc(centerTop)+'</text>'+
-               '<text x="80" y="96" text-anchor="middle" font-size="11" fill="#8A99A8">'+esc(centerSub)+'</text>'+
-             '</svg>'+
-             '<div class="bars" style="flex:1;min-width:170px">'+legend+'</div>'+
-           '</div>';
-  }
-
-  function dailyChart(daily){
-    if(!daily.length) return '<div class="cd-note">No days in this range.</div>';
-
-    // days with no orders still get a slot, so the dates do not jump
-    var have = {};
-    daily.forEach(function(d){ have[d.day] = d; });
-    var filled = [], cur = fromEl.value, guard = 0;
-    while(cur <= toEl.value && guard < 400){
-      filled.push(have[cur] || { day:cur, orders:0, delivered:0, amount:0 });
-      cur = nextDay(cur); guard++;
-    }
-    daily = filled;
-
-    var W = 640, H = 220, PL = 46, PR = 12, PT = 12, PB = 30;
+    var W = 640, H = 230, PL = 44, PR = 14, PT = 14, PB = 30;
     var iw = W-PL-PR, ih = H-PT-PB;
     var max = 0;
-    daily.forEach(function(d){ if(d.orders > max) max = d.orders; });
+    daily.forEach(function(d){ if(d.delivered > max) max = d.delivered; });
     if(!max) max = 1;
 
-    var bw = iw/daily.length, g = Math.min(9, bw*0.28);
-    var svg = '';
+    var step = daily.length > 1 ? iw/(daily.length-1) : 0;
+    var pts = daily.map(function(d, i){
+      return [PL + i*step, PT + ih - ih*(d.delivered/max)];
+    });
 
+    var svg = '';
     for(var i=0;i<=4;i++){
       var y = PT + ih - (ih*i/4);
       svg += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="#EEF3F8"></line>';
       svg += '<text x="'+(PL-8)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" font-size="10" fill="#9AA8B6">'+n0(Math.round(max*i/4))+'</text>';
     }
 
-    daily.forEach(function(d, i){
-      var x = PL + i*bw + g/2, w = bw - g;
-      var ho = ih * (d.orders/max), hd = ih * (d.delivered/max);
-      svg += '<rect x="'+x.toFixed(1)+'" y="'+(PT+ih-ho).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+ho.toFixed(1)+'" fill="#DBE7F4" rx="2"><title>'+esc(d.day)+' \u00b7 '+n0(d.orders)+' booked</title></rect>';
-      svg += '<rect x="'+x.toFixed(1)+'" y="'+(PT+ih-hd).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+hd.toFixed(1)+'" fill="#1F9D5A" rx="2"><title>'+esc(d.day)+' \u00b7 '+n0(d.delivered)+' delivered</title></rect>';
-      if(daily.length <= 16 || i % 2 === 0){
-        svg += '<text x="'+(x+w/2).toFixed(1)+'" y="'+(H-10)+'" text-anchor="middle" font-size="10" fill="#9AA8B6">'+esc(short(d.day))+'</text>';
+    var d = pts.map(function(p, i){ return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ');
+    var area = d + ' L' + pts[pts.length-1][0].toFixed(1) + ' ' + (PT+ih) +
+               ' L' + pts[0][0].toFixed(1) + ' ' + (PT+ih) + ' Z';
+
+    svg += '<path d="'+area+'" fill="#DFF3EA"></path>';
+    svg += '<path d="'+d+'" fill="none" stroke="#1F9D5A" stroke-width="2.2" stroke-linejoin="round"></path>';
+
+    pts.forEach(function(p, i){
+      svg += '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3" fill="#1F9D5A">' +
+             '<title>'+esc(daily[i].day)+' \u00b7 '+n0(daily[i].delivered)+' delivered</title></circle>';
+      if(daily.length <= 16 || i % 3 === 0){
+        svg += '<text x="'+p[0].toFixed(1)+'" y="'+(H-10)+'" text-anchor="middle" font-size="10" fill="#9AA8B6">'+esc(short(daily[i].day))+'</text>';
       }
     });
 
-    return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+svg+'</svg>'+
-           '<div class="cd-note"><span style="color:#DBE7F4">\u25AE</span> booked &nbsp; '+
-           '<span style="color:#1F9D5A">\u25AE</span> delivered</div>';
-  }
-
-  function card(k, v, n){
-    return '<div class="cd-card"><div class="k">'+esc(k)+'</div>'+
-           '<div class="v">'+esc(v)+'</div><div class="n">'+esc(n)+'</div></div>';
+    return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+svg+'</svg>';
   }
 
   function draw(d){
-    var t = d.totals || {}, groups = d.groups || [], accts = d.accounts || [],
-        daily = d.daily || [], cities = d.cities || [];
+    var t = d.totals, st = d.statuses || [], cities = d.cities || [];
 
-    var delivered = pick(groups,'delivered'), returned = pick(groups,'returned'),
-        returning = pick(groups,'returning'), transit = pick(groups,'transit'),
-        booked = pick(groups,'booked'), unbooked = pick(groups,'unbooked');
+    var g = {};
+    (d.groups || []).forEach(function(x){ g[x.group] = x; });
+    var gc = function(k){ return (g[k] || {}).count || 0; };
 
-    var closed = delivered.count + returned.count;
-    var rate = closed ? (100*delivered.count/closed) : 0;
+    var html = '';
 
-    var html = '<div class="cd-cards">';
-    html += card('Orders', n0(t.orders), 'booked in this range');
-    html += card('Order value', full(t.amount), 'PKR');
-    html += card('Delivered value', full(delivered.amount), n0(delivered.count)+' orders');
-    html += card('Delivery rate', rate.toFixed(1)+'%', 'of settled orders');
-    html += card('Courier fee', full(t.fee), 'plus tax '+full(t.tax));
+    /* --- top strip --- */
+    html += '<div class="top">';
+
+    html += '<div class="big"><h3>Cash on delivery</h3>' +
+            '<div class="amt">' + full(t.deliveredAmount) +
+            '<span class="pill">' + n0(gc('delivered')) + ' orders</span></div>' +
+            '<div class="sub"><b>' + n0(t.pendingOrders) + '</b> orders pending \u00b7 ' +
+            'worth <b>' + full(t.codPending) + '</b></div></div>';
+
+    html += '<div class="big"><h3>Courier charges</h3>' +
+            '<div class="amt">' + full(t.fee) + '</div>' +
+            '<div class="sub">plus tax <b>' + full(t.tax) + '</b> \u00b7 ' +
+            'booked value <b>' + full(t.amount) + '</b></div></div>';
+
+    html += '<div class="big today" id="todayBox"><h3>Today\u2019s orders</h3>' +
+            '<div class="amt">\u2026</div></div>';
+
     html += '</div>';
 
-    html += '<div class="cd-row">';
-    html += '<div class="cd-box"><h2>Where the orders stand</h2>'+
-            donut([
-              {label:'Delivered', value:delivered.count, color:COLOR.delivered},
-              {label:'Returned', value:returned.count, color:COLOR.returned},
-              {label:'Out for return', value:returning.count, color:COLOR.returning},
-              {label:'In transit', value:transit.count, color:COLOR.transit},
-              {label:'Booked', value:booked.count, color:COLOR.booked},
-              {label:'Unbooked', value:unbooked.count, color:COLOR.unbooked}
-            ], rate.toFixed(0)+'%', 'delivered')+'</div>';
+    /* --- recent + delivered chart --- */
+    html += '<div class="row">';
 
-    var tiles = '';
-    ORDER.forEach(function(k){
-      var g = pick(groups, k);
-      if(!g.count) return;
-      tiles += '<div class="tile"><div class="t"><i style="background:'+(COLOR[k]||'#B6C1CC')+'"></i>'+
-               esc(LABEL[k]||k)+'</div><div class="c">'+n0(g.count)+'</div>'+
-               '<div class="a">'+money(g.amount)+'</div></div>';
+    var tx = '';
+    (d.recent || []).slice(0, 8).forEach(function(o){
+      tx += '<a href="#" data-find="' + esc(o.tracking) + '">' +
+              '<div><div class="tk">' + esc(o.tracking) + '</div>' +
+              '<div class="rf">' + esc(o.orderRef || '') + '</div></div>' +
+              '<div><div class="am">Rs ' + full(o.amount) + '</div>' +
+              '<div class="dt">' + esc(o.status) + ' \u00b7 ' + esc(o.on || '') + '</div></div>' +
+            '</a>';
     });
-    html += '<div class="cd-box"><h2>Every status</h2><div class="cd-tiles">'+
-            (tiles || '<div class="cd-note">Nothing yet.</div>')+'</div></div>';
+    html += '<div class="box"><h3>Recent transactions<span class="aside">newest first</span></h3>' +
+            '<div class="tx">' + (tx || '<div class="note">Nothing yet.</div>') + '</div></div>';
+
+    html += '<div class="box"><h3>Delivered orders<span class="aside">' +
+            esc(d.from) + ' \u2192 ' + esc(d.to) + '</span></h3>' +
+            lineChart(d.daily || []) + '</div>';
+
     html += '</div>';
 
-    html += '<div class="cd-box" style="margin-bottom:16px"><h2>Day by day</h2>'+dailyChart(daily)+'</div>';
+    /* --- every status + rings --- */
+    html += '<div class="row2">';
 
-    html += '<div class="cd-row">';
+    var cells = '<button class="cell tot" data-group=""><div class="l">Total orders</div>' +
+                '<div class="n">' + n0(t.orders) + '</div>' +
+                '<div class="m">' + money(t.amount) + '</div></button>';
+
+    st.forEach(function(s){
+      cells += '<button class="cell" data-status="' + esc(s.status) + '">' +
+               '<div class="l">' + esc(s.status) + '</div>' +
+               '<div class="n">' + n0(s.count) + '</div>' +
+               '<div class="m">' + money(s.amount) + '</div></button>';
+    });
+
+    html += '<div class="box"><h3>Total orders<span class="aside">click any number</span></h3>' +
+            '<div class="grid">' + cells + '</div></div>';
+
+    var settled = gc('delivered') + gc('returned');
+    var rings =
+      '<div class="ring"><div class="cap">Successful orders</div>' +
+        donut(gc('delivered'), settled || t.orders, '#8CE3A8', '#E8EDF3') +
+        '<div class="leg"><i style="background:#8CE3A8"></i>delivered</div></div>' +
+      '<div class="ring"><div class="cap">Return orders</div>' +
+        donut(gc('returned') + gc('returning'), settled || t.orders, '#F3A5A5', '#E8EDF3') +
+        '<div class="leg"><i style="background:#F3A5A5"></i>returned</div></div>' +
+      '<div class="ring"><div class="cap">Booked orders</div>' +
+        donut(t.orders - gc('unbooked'), t.orders, '#8CE3A8', '#F3A5A5') +
+        '<div class="leg"><i style="background:#8CE3A8"></i>booked &nbsp;' +
+        '<i style="background:#F3A5A5"></i>unbooked</div></div>' +
+      '<div class="ring"><div class="cap">In the middle</div>' +
+        donut(gc('transit') + gc('review'), t.orders, '#9EC9EE', '#E8EDF3') +
+        '<div class="leg"><i style="background:#9EC9EE"></i>on the way</div></div>';
+
+    html += '<div class="box"><h3>How it is going</h3><div class="rings">' + rings + '</div></div>';
+
+    html += '</div>';
+
+    /* --- accounts + cities --- */
+    html += '<div class="row2">';
 
     var rows = '';
-    accts.forEach(function(a){
-      var cl = a.delivered + a.returned;
-      var r = cl ? (100*a.delivered/cl) : 0;
-      rows += '<tr><td><a href="/courier-dash.html?account='+a.id+'">'+esc(a.label)+'</a></td>'+
-              '<td class="r">'+n0(a.orders)+'</td>'+
-              '<td class="r">'+n0(a.delivered)+'</td>'+
-              '<td class="r">'+n0(a.returned)+'</td>'+
-              '<td class="r">'+r.toFixed(1)+'%</td>'+
-              '<td class="r">'+money(a.deliveredAmount)+'</td></tr>';
+    (d.accounts || []).forEach(function(a){
+      rows += '<tr><td><a href="/courier-dash.html?account=' + a.id + '">' + esc(a.label) + '</a></td>' +
+              '<td class="r">' + n0(a.orders) + '</td>' +
+              '<td class="r">' + n0(a.delivered) + '</td>' +
+              '<td class="r">' + n0(a.returned) + '</td>' +
+              '<td class="r">' + a.successRate.toFixed(1) + '%</td>' +
+              '<td class="r">' + money(a.deliveredAmount) + '</td>' +
+              '<td class="r">' + money(a.codPending) + '</td></tr>';
     });
-    html += '<div class="cd-box"><h2>Accounts</h2><table class="cd">'+
-            '<tr><th>Account</th><th class="r">Orders</th><th class="r">Delivered</th>'+
-            '<th class="r">Returned</th><th class="r">Rate</th><th class="r">Delivered value</th></tr>'+
-            (rows || '<tr><td colspan="6" style="color:var(--muted)">No accounts.</td></tr>')+
+    html += '<div class="box"><h3>Accounts</h3><table class="t">' +
+            '<tr><th>Account</th><th class="r">Orders</th><th class="r">Delivered</th>' +
+            '<th class="r">Returned</th><th class="r">Rate</th><th class="r">Collected</th>' +
+            '<th class="r">Pending</th></tr>' +
+            (rows || '<tr><td colspan="7" style="color:var(--muted)">No accounts.</td></tr>') +
             '</table></div>';
 
     var cmax = 0;
     cities.forEach(function(c){ if(c.count > cmax) cmax = c.count; });
     var cb = '';
     cities.forEach(function(c){
-      cb += '<div class="b"><span>'+esc(c.city)+'</span>'+
-            '<span class="track"><span class="fill" style="width:'+
-            (cmax ? 100*c.count/cmax : 0).toFixed(1)+'%"></span></span>'+
-            '<span class="num">'+n0(c.count)+'</span></div>';
+      cb += '<tr><td>' + esc(c.city) + '</td>' +
+            '<td style="width:60%"><span style="display:block;background:var(--line);' +
+            'border-radius:4px;height:8px"><span style="display:block;background:#2F7DD1;height:8px;' +
+            'border-radius:4px;width:' + (cmax ? 100*c.count/cmax : 0).toFixed(1) + '%"></span></span></td>' +
+            '<td class="r">' + n0(c.count) + '</td></tr>';
     });
-    html += '<div class="cd-box"><h2>Busiest cities</h2><div class="bars">'+
-            (cb || '<div class="cd-note">No cities.</div>')+'</div></div>';
+    html += '<div class="box"><h3>Busiest cities</h3><table class="t">' +
+            (cb || '<tr><td>No cities.</td></tr>') + '</table></div>';
 
     html += '</div>';
 
-    if(t.lastSeen){
-      html += '<div class="cd-note">Newest order in the store: '+
-              esc(new Date(t.lastSeen).toLocaleString())+'</div>';
+    if((d.trouble || []).length){
+      html += '<div class="msg">' + d.trouble.map(function(x){
+        return esc(x.label) + ': ' + esc(x.error);
+      }).join('<br>') + '</div>';
     }
 
+    html += '<div class="note">Asked from the courier at ' +
+            esc(new Date(d.pulledAt).toLocaleString()) + '</div>';
+
     $('out').innerHTML = html;
+    paintToday();
+
+    $('out').querySelectorAll('.cell').forEach(function(b){
+      b.addEventListener('click', function(){
+        openList(b.getAttribute('data-status'), b.getAttribute('data-group'));
+      });
+    });
+    $('out').querySelectorAll('[data-find]').forEach(function(a){
+      a.addEventListener('click', function(e){
+        e.preventDefault();
+        $('track').value = a.getAttribute('data-find');
+        findOne();
+      });
+    });
+  }
+
+  /* ---------- the drawer ---------- */
+
+  function openDrawer(title, note, body){
+    $('dTitle').textContent = title;
+    $('dNote').textContent = note || '';
+    $('dBody').innerHTML = body;
+    $('drawer').classList.add('open');
+  }
+  $('dClose').addEventListener('click', function(){ $('drawer').classList.remove('open'); });
+  $('drawer').addEventListener('click', function(e){
+    if(e.target === $('drawer')) $('drawer').classList.remove('open');
+  });
+
+  function openList(status, group){
+    openDrawer(status || 'All orders', '', '<div class="loading">Fetching\u2026</div>');
+
+    fetch('/api/courier/orders?'+params({ status: status, group: group }), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+
+        var rows = (d.orders || []).map(function(o){
+          return '<tr><td class="mono">' + esc(o.orderRef || '') + '</td>' +
+                 '<td class="mono">' + esc(o.tracking) + '</td>' +
+                 '<td>' + esc(o.city || '') + '</td>' +
+                 '<td class="r">' + full(o.amount) + '</td>' +
+                 '<td class="mono">' + esc(o.bookedOn || '') + '</td>' +
+                 '<td class="mono">' + esc(o.deliveredOn || '') + '</td>' +
+                 '<td>' + esc(o.status) + '</td></tr>';
+        }).join('');
+
+        $('dNote').textContent = n0(d.count) + ' orders \u00b7 ' + full(d.amount) +
+          (d.count > d.orders.length ? ' \u00b7 showing first ' + d.orders.length : '');
+
+        $('dBody').innerHTML = '<table class="t">' +
+          '<tr><th>Order ref</th><th>Tracking</th><th>City</th><th class="r">Amount</th>' +
+          '<th>Booked</th><th>Delivered</th><th>Status</th></tr>' +
+          (rows || '<tr><td colspan="7">Nothing here.</td></tr>') + '</table>';
+      })
+      .catch(function(e){
+        $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
+      });
+  }
+
+  function findOne(){
+    var q = $('track').value.trim();
+    if(!q) return;
+
+    openDrawer('Tracking ' + q, '', '<div class="loading">Looking for it\u2026</div>');
+
+    fetch('/api/courier/track?q=' + encodeURIComponent(q) + (account ? '&account='+account : ''),
+          { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+        if(!d.found){
+          $('dBody').innerHTML = '<div class="note">No courier here knows that number.</div>';
+          return;
+        }
+
+        var p = d.payment || {}, o = d.order;
+        var line = function(k, v){
+          return '<tr><td style="color:var(--faint);width:190px">' + esc(k) + '</td>' +
+                 '<td class="mono">' + esc(v == null || v === '' ? '\u2014' : v) + '</td></tr>';
+        };
+
+        var html = '<table class="t" style="margin-top:10px">';
+        html += line('Account', d.account.label);
+        html += line('Tracking number', p.tracking);
+        html += line('Order reference', p.orderRef || (o && o.orderRef));
+        if(o){
+          html += line('Status', o.status);
+          html += line('Amount', full(o.amount));
+          html += line('Courier fee', full(o.fee) + ' + tax ' + full(o.tax));
+          html += line('City', o.city);
+          html += line('Booked on', o.bookedOn);
+          html += line('Picked on', o.pickedOn);
+          html += line('Delivered on', o.deliveredOn);
+        }
+        html += line('Settled', p.settled ? 'yes' : 'not yet');
+        html += line('Settled on', p.settledOn);
+        html += line('CPR number', p.cprNumber);
+        html += line('Upfront payment', p.upfrontOn);
+        html += line('Reserve payment', p.reserveOn);
+        html += '</table>';
+
+        if(!o){
+          html += '<div class="note">Only the payment side is shown \u2014 this parcel is ' +
+                  'outside the dates above.</div>';
+        }
+
+        $('dBody').innerHTML = html;
+      })
+      .catch(function(e){
+        $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
+      });
   }
 })();
 </script>
