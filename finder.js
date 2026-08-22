@@ -254,6 +254,7 @@ export function startFindJob(realmId, opts) {
     sheetsSeen: 0,
     sheetsTotal: 0,
     folderIds: (opts.folderIds || []).map(String).filter(Boolean),
+        cols: opts.cols || {},          // company name -> { invoice, amount, status }
     skipCpr: !!opts.skipCpr,
     returnSheet: opts.returnSheet || null   // { id, name, excel, tabs, from, to }
   };
@@ -302,6 +303,8 @@ async function run(realmId, job) {
 }
 
 async function walkCpr(realmId, job) {
+    // whatever column choices were saved in Receive payments, reused here
+  job.cols = {};
   const root = await getSetting(realmId, 'cpr:root', '');
   if (!root) throw new Error('Set the Drive folder in Receive payments first');
 
@@ -369,8 +372,9 @@ async function walkCpr(realmId, job) {
 
       let data;
       try {
-        data = await tryThrice(job, `${label} / ${t.title}`,
-          () => loadSheet(item.file.id, t.title, item.file.excel, null));
+                       data = await tryThrice(job, `${label} / ${t.title}`,
+          () => loadSheet(item.file.id, t.title, item.file.excel,
+                          job.cols[item.courier] || null));
       } catch (e) {
         tabTrouble++;
         job.skipped.push(`${label} / ${t.title}`);
@@ -392,7 +396,8 @@ async function walkCpr(realmId, job) {
           tab: t.title,
           sheetRow: r.sheetRow,
           status: r.status || '',
-          bucket: hasStatus ? bucketOf(r.status) : 'unknown',
+                    // a sheet with no status column only lists what was delivered
+          bucket: hasStatus ? bucketOf(r.status) : 'delivered',
           amount: r.amount || 0,
           cprNumber: r.cprNumber || '',
           cprDate: r.cprDate || null
@@ -478,4 +483,21 @@ async function walkReturns(job, left) {
                ` (${job.hits.size} of ${job.wanted.size} so far)`);
     }
   }
+}
+// The header of the first tab of one sheet, so the page can ask which column
+// is which. Sheets are written by hand, and every courier names them their
+// own way, so guessing is the wrong habit.
+export async function peekHeader(sheetId, excel) {
+  const tabs = await listTabs(sheetId, excel);
+  if (!tabs.length) throw new Error('That file has no tabs');
+
+  const d = await loadSheet(sheetId, tabs[0].title, excel, null);
+  return {
+    tab: tabs[0].title,
+    header: d.header,
+    guess: d.cols,
+    sample: d.rows.slice(0, 3).map(r => ({
+      invoice: r.invoice, amount: r.amount, status: r.status
+    }))
+  };
 }
