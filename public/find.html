@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find orders</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+
+  textarea.nums{width:100%;min-height:150px;border:1px solid var(--line);border-radius:8px;
+    padding:11px 13px;font-family:var(--mono);font-size:12.5px;resize:vertical;background:#fff}
+
+  .months{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 14px}
+  .months button{border:1px solid var(--line);background:#fff;border-radius:20px;
+    padding:5px 13px;font:inherit;font-size:12px;cursor:pointer;color:var(--ink)}
+  .months button:hover{border-color:var(--qbo)}
+  .months button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .row .aside{font-size:12px;color:var(--faint)}
+
+  .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:14px 0 8px}
+  .bar span{display:block;height:8px;background:var(--qbo);border-radius:4px;width:0;
+    transition:width .3s}
+
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;
+    margin-bottom:14px}
+  .tile{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff}
+  .tile .n{font-family:var(--mono);font-size:21px;font-weight:500;line-height:1.1}
+  .tile .l{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);
+    margin-top:4px}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--faint);border-bottom:1px solid var(--line);padding:8px;font-weight:600}
+  table.t td{padding:9px 8px;border-bottom:1px solid var(--line)}
+  table.t td.r,table.t th.r{text-align:right;font-family:var(--mono)}
+  table.t td.mono{font-family:var(--mono);font-size:12px}
+  table.t tr:last-child td{border-bottom:0}
+  table.t tr.tot td{font-weight:600;background:#FAFCFE}
+
+  .pill{display:inline-block;border-radius:20px;padding:2px 9px;font-size:11px}
+  .pill.delivered{background:#E7F6ED;color:#1B7A45}
+  .pill.returned{background:#FDECEC;color:#B33A34}
+  .pill.transit{background:#E8F1FA;color:#2C6396}
+  .pill.cancelled{background:#F0F2F4;color:#69757F}
+  .pill.other,.pill.unknown{background:#F5F0E4;color:#8A7233}
+  .pill.missing{background:#FDECEC;color:#B33A34}
+
+  .log{background:#0F2E24;color:#CFE6D9;border-radius:9px;padding:13px 15px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.65;max-height:300px;overflow:auto;
+    white-space:pre-wrap}
+  .log .t{color:#7FA893}
+
+  .fold{font-size:12px;color:var(--muted);cursor:pointer;user-select:none;margin-top:12px;
+    display:inline-block}
+  .fold:hover{color:var(--ink)}
+
+  .msg{padding:13px 15px;border-radius:8px;font-size:12.5px;margin-top:12px}
+  .msg.bad{background:#FDF3F3;border:1px solid var(--bad);color:var(--bad)}
+  .msg.good{background:#F2FAF0;border:1px solid var(--qbo)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Find orders</h1>
+        <div class="sub">Paste order numbers and see which courier had each one.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>The courier folder is kept per company.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="step" id="stepAsk">
+          <h2>Order numbers</h2>
+          <div class="hint">
+            One per line, or separated by spaces or commas. The hash is ignored, so
+            <b>#91349172</b> and <b>91349172</b> are the same order.
+          </div>
+          <textarea class="nums" id="nums" placeholder="#91349172&#10;#91349171&#10;#91349170"></textarea>
+          <div class="aside" id="count" style="margin-top:7px"></div>
+
+          <h2 style="margin-top:18px">Months to search</h2>
+          <div class="hint">
+            Nothing picked means every month. Picking a few makes the search much quicker.
+          </div>
+          <div class="months" id="months"><span class="aside">Loading the folders…</span></div>
+
+          <div class="row">
+            <button class="solid" id="btnStart">Start the search</button>
+            <span class="aside">The return sheet is checked too, for anything the CPR sheets miss.</span>
+          </div>
+          <div id="askOut"></div>
+        </div>
+
+        <div class="step hide" id="stepRun">
+          <h2>Searching <span class="aside" id="runState"></span></h2>
+          <div class="bar"><span id="barFill"></span></div>
+          <div class="aside" id="runLine"></div>
+
+          <div class="row" style="margin-top:14px">
+            <button id="btnStop">Stop</button>
+            <button id="btnClear" class="hide">Start over</button>
+            <a id="btnFile" class="hide" href="/api/find/file"><button>Download the answer</button></a>
+          </div>
+
+          <span class="fold" id="foldLog">Show what it is doing</span>
+          <div class="log hide" id="log"></div>
+        </div>
+
+        <div class="step hide" id="stepOut">
+          <h2>What was found</h2>
+          <div class="tiles" id="tiles"></div>
+          <table class="t" id="byCourier"></table>
+
+          <span class="fold" id="foldRows">Show every order</span>
+          <div id="rowsWrap" class="hide" style="margin-top:12px"></div>
+
+          <span class="fold hide" id="foldMissing">Show what was not found</span>
+          <div id="missWrap" class="hide" style="margin-top:12px"></div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var picked = {};      // month name -> true
+  var since = 0;
+  var timer = null;
+  var awake = null;
+
+  function nf(n){ return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function money(v){ return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+
+  function get(url){
+    return fetch(url, { cache:'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    loadMonths();
+    poll();          // a run may already be going
+  });
+
+  /* ---------- the paste box ---------- */
+
+  function countThem(){
+    var list = $('nums').value.split(/[\s,;]+/).filter(Boolean);
+    var seen = {};
+    list.forEach(function(n){
+      var d = String(n).replace(/[^0-9]/g,'').replace(/^0+(?=[0-9])/,'');
+      if(d) seen[d] = 1;
+    });
+    var n = Object.keys(seen).length;
+    $('count').textContent = n ? nf(n) + ' order numbers' : '';
+  }
+  $('nums').addEventListener('input', countThem);
+
+  /* ---------- months ---------- */
+
+  function loadMonths(){
+    get('/api/find/months').then(function(d){
+      var box = $('months');
+      var list = d.months || [];
+      if(!list.length){
+        box.innerHTML = '<span class="aside">No month folders found - the whole folder will be searched.</span>';
+        return;
+      }
+      box.innerHTML = '';
+      list.forEach(function(m){
+        var b = document.createElement('button');
+        b.textContent = m;
+        b.addEventListener('click', function(){
+          if(picked[m]){ delete picked[m]; b.classList.remove('on'); }
+          else { picked[m] = true; b.classList.add('on'); }
+        });
+        box.appendChild(b);
+      });
+    }).catch(function(e){
+      $('months').innerHTML = '<span class="aside">' + esc(e.message) + '</span>';
+    });
+  }
+
+  /* ---------- running ---------- */
+
+  $('btnStart').addEventListener('click', function(){
+    var nums = $('nums').value.trim();
+    if(!nums) return say('bad', '<b>Paste some order numbers first.</b>');
+
+    say('', '');
+    $('askOut').innerHTML = '';
+    $('btnStart').disabled = true;
+    since = 0;
+    $('log').textContent = '';
+    $('stepOut').classList.add('hide');
+
+    post('/api/find/start', {
+      numbers: nums,
+      months: Object.keys(picked),
+      withReturns: true
+    }).then(function(){
+      $('stepRun').classList.remove('hide');
+      $('btnStop').classList.remove('hide');
+      $('btnClear').classList.add('hide');
+      $('btnFile').classList.add('hide');
+      keepAwake(true);
+      poll();
+    }).catch(function(e){
+      $('btnStart').disabled = false;
+      $('askOut').innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>';
+    });
+  });
+
+  $('btnStop').addEventListener('click', function(){
+    post('/api/find/stop').catch(function(){});
+  });
+
+  $('btnClear').addEventListener('click', function(){
+    post('/api/find/clear').then(function(){
+      $('stepRun').classList.add('hide');
+      $('stepOut').classList.add('hide');
+      $('btnStart').disabled = false;
+      since = 0;
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  $('foldLog').addEventListener('click', function(){
+    $('log').classList.toggle('hide');
+    $('foldLog').textContent = $('log').classList.contains('hide')
+      ? 'Show what it is doing' : 'Hide what it is doing';
+  });
+
+  // Render lets a quiet server drop off; a small nudge keeps it listening
+  function keepAwake(on){
+    if(awake){ clearInterval(awake); awake = null; }
+    if(on) awake = setInterval(function(){
+      fetch('/auth/status', { cache:'no-store' }).catch(function(){});
+    }, 120000);
+  }
+
+  function poll(){
+    if(timer) clearTimeout(timer);
+
+    fetch('/api/find/status?since=' + since, { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var job = d.job;
+        if(!job) return;
+
+        $('stepRun').classList.remove('hide');
+        $('runState').textContent = job.state === 'running' ? '' : '\u00b7 ' + job.state;
+
+        var done = job.sheetsTotal ? Math.round(100 * job.sheetsSeen / job.sheetsTotal) : 0;
+        $('barFill').style.width = (job.state === 'running' ? done : 100) + '%';
+
+        $('runLine').textContent =
+          nf(job.matched) + ' of ' + nf(job.asked) + ' found \u00b7 ' +
+          nf(job.sheetsSeen) + ' of ' + nf(job.sheetsTotal) + ' sheets read' +
+          (job.skipped ? ' \u00b7 ' + nf(job.skipped) + ' could not be read' : '');
+
+        if(job.log && job.log.length){
+          var el = $('log');
+          var stuck = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+          job.log.forEach(function(l){
+            var line = document.createElement('div');
+            line.innerHTML = '<span class="t">' +
+              new Date(l.at).toLocaleTimeString() + '</span>  ' + esc(l.text);
+            el.appendChild(line);
+          });
+          since = job.logLength;
+          if(stuck) el.scrollTop = el.scrollHeight;
+        }
+
+        if(job.state === 'running'){
+          timer = setTimeout(poll, 2000);
+          return;
+        }
+
+        keepAwake(false);
+        $('btnStop').classList.add('hide');
+        $('btnClear').classList.remove('hide');
+        $('btnStart').disabled = false;
+
+        if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');
+        if(job.result){
+          $('btnFile').classList.remove('hide');
+          draw(job.result);
+        }
+      })
+      .catch(function(){ timer = setTimeout(poll, 4000); });
+  }
+
+  /* ---------- the answer ---------- */
+
+  function draw(r){
+    $('stepOut').classList.remove('hide');
+
+    var delivered = 0, returned = 0;
+    r.couriers.forEach(function(c){ delivered += c.delivered; returned += c.returned; });
+
+    $('tiles').innerHTML =
+      tile(nf(r.asked), 'Asked about') +
+      tile(nf(r.found), 'Found') +
+      tile(nf(r.missing.length), 'Not found') +
+      tile(nf(delivered), 'Delivered') +
+      tile(nf(returned), 'Returned');
+
+    var rows = '';
+    r.couriers.forEach(function(c){
+      rows += '<tr><td>' + esc(c.courier) + '</td>' +
+              '<td class="r">' + nf(c.total) + '</td>' +
+              '<td class="r">' + nf(c.delivered) + '</td>' +
+              '<td class="r">' + nf(c.returned) + '</td>' +
+              '<td class="r">' + nf(c.transit) + '</td>' +
+              '<td class="r">' + nf(c.cancelled) + '</td>' +
+              '<td class="r">' + nf(c.other) + '</td>' +
+              '<td class="r">' + money(c.amount) + '</td></tr>';
+    });
+
+    var t = { total:0, delivered:0, returned:0, transit:0, cancelled:0, other:0, amount:0 };
+    r.couriers.forEach(function(c){
+      t.total += c.total; t.delivered += c.delivered; t.returned += c.returned;
+      t.transit += c.transit; t.cancelled += c.cancelled; t.other += c.other;
+      t.amount += c.amount;
+    });
+
+    rows += '<tr class="tot"><td>All couriers</td>' +
+            '<td class="r">' + nf(t.total) + '</td>' +
+            '<td class="r">' + nf(t.delivered) + '</td>' +
+            '<td class="r">' + nf(t.returned) + '</td>' +
+            '<td class="r">' + nf(t.transit) + '</td>' +
+            '<td class="r">' + nf(t.cancelled) + '</td>' +
+            '<td class="r">' + nf(t.other) + '</td>' +
+            '<td class="r">' + money(t.amount) + '</td></tr>';
+
+    $('byCourier').innerHTML =
+      '<tr><th>Courier</th><th class="r">Orders</th><th class="r">Delivered</th>' +
+      '<th class="r">Returned</th><th class="r">In transit</th><th class="r">Cancelled</th>' +
+      '<th class="r">Other</th><th class="r">Amount</th></tr>' +
+      (rows || '<tr><td colspan="8">Nothing was found.</td></tr>');
+
+    // every order
+    var lines = r.rows.map(function(x){
+      return '<tr><td class="mono">' + esc(x.invoice) + '</td>' +
+             '<td>' + esc(x.courier) + '</td>' +
+             '<td>' + esc(x.month || '') + '</td>' +
+             '<td><span class="pill ' + esc(x.bucket) + '">' + esc(x.bucket) + '</span></td>' +
+             '<td>' + esc(x.status) + '</td>' +
+             '<td class="r">' + (x.amount ? money(x.amount) : '') + '</td>' +
+             '<td class="mono">' + esc(x.cprNumber || '') + '</td>' +
+             '<td class="mono">' + esc(x.cprDate || '') + '</td>' +
+             '<td class="mono" style="color:var(--faint)">' + esc(x.sheet) + '</td></tr>';
+    }).join('');
+
+    $('rowsWrap').innerHTML = '<table class="t">' +
+      '<tr><th>Order</th><th>Courier</th><th>Month</th><th>Result</th><th>Sheet says</th>' +
+      '<th class="r">Amount</th><th>CPR</th><th>CPR date</th><th>Sheet</th></tr>' +
+      (lines || '<tr><td colspan="9">Nothing.</td></tr>') + '</table>';
+
+    if(r.missing.length){
+      $('foldMissing').classList.remove('hide');
+      $('missWrap').innerHTML = '<div class="msg bad">' +
+        r.missing.map(esc).join(', ') + '</div>';
+    } else {
+      $('foldMissing').classList.add('hide');
+    }
+  }
+
+  function tile(n, l){
+    return '<div class="tile"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>';
+  }
+
+  $('foldRows').addEventListener('click', function(){
+    $('rowsWrap').classList.toggle('hide');
+    $('foldRows').textContent = $('rowsWrap').classList.contains('hide')
+      ? 'Show every order' : 'Hide the list';
+  });
+
+  $('foldMissing').addEventListener('click', function(){
+    $('missWrap').classList.toggle('hide');
+    $('foldMissing').textContent = $('missWrap').classList.contains('hide')
+      ? 'Show what was not found' : 'Hide that list';
+  });
+})();
+</script>
+</body>
+</html>
