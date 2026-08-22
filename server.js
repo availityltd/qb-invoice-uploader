@@ -46,7 +46,7 @@ import {
 import { loadTraxSummaries, applyLines } from './traxsheet.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
 import {
-  startFindJob, stopFindJob, clearFindJob, findSnapshot, listMonths
+  startFindJob, stopFindJob, clearFindJob, findSnapshot, listTree, sheetsIn
 } from './finder.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1592,13 +1592,58 @@ app.post('/api/cpr/receive-clear', async (req, res) => {
 // Paste order numbers, and every CPR sheet is walked looking for them. What is
 // still missing afterwards is looked for in the return sheet.
 
-app.get('/api/find/months', async (req, res) => {
+// every company folder and the month folders inside it
+app.get('/api/find/tree', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
   try {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ months: await listMonths(realmId) });
+    res.json({ companies: await listTree(realmId) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// the sheets sitting in the folders the page picked
+app.post('/api/find/sheets', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.json({ sheets: await sheetsIn(realmId, req.body.folderIds) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// the return workbook and its tabs, for the second tab of the page
+app.get('/api/find/return-sheets', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const id = await getSetting(realmId, 'void:root', '');
+    if (!id) return res.status(400).json({ error: 'Set the return sheet folder in Void invoices first' });
+
+    let folders = [], sheets = [];
+    try {
+      [folders, sheets] = await Promise.all([listFolders(id), listSheetsIn(id)]);
+    } catch (e) { /* not a folder, then */ }
+
+    if (!sheets.length && !folders.length) {
+      const info = await fileInfo(id);
+      if (info && info.mimeType !== 'application/vnd.google-apps.folder') {
+        sheets = [{
+          id: info.id,
+          name: info.name,
+          excel: info.mimeType !== 'application/vnd.google-apps.spreadsheet'
+        }];
+      }
+    }
+
+    res.json({ folders, sheets });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
