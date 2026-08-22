@@ -2073,6 +2073,24 @@ app.get('/api/courier/peek', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// every status the courier knows, with its number
+app.get('/api/courier/status-list', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const acc = await getCourierAccount(realmId, Number(req.query.account));
+    if (!acc) return res.status(404).json({ error: 'No such account' });
+
+    const a = ADAPTERS[acc.courier];
+    if (!a) return res.status(400).json({ error: 'No adapter for ' + acc.courier });
+
+    res.json(await a.testToken(acc.token));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 app.get('/api/courier/stats', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
