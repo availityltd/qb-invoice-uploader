@@ -36,6 +36,7 @@ import {
   markSync, saveOrders
 } from './couriers.js';
 import { adapter as postexAdapter } from './postex.js';
+import { liveStats, trackOne, forget as forgetLive } from './courierlive.js';
 import {
   loadCharges, listAllAccounts, findJournal, postJournal
 } from './journal.js';
@@ -2028,6 +2029,35 @@ app.post('/api/charges/post-lines', async (req, res) => {
 // ==================== Courier accounts ====================
 // Everything the courier dashboard needs, for one account, one courier,
 // or all of them at once. Read from our own table, so it is quick.
+// the dashboard, asked from the courier the moment it is opened
+app.get('/api/courier/live', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account, courier } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.query.fresh === '1' && account) forgetLive(account);
+    res.json(await liveStats(realmId, { from, to, account, courier }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// one parcel, by its tracking number
+app.get('/api/courier/track', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await trackOne(realmId, req.query.q, req.query.account));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
 app.get('/api/courier/stats', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
