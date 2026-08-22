@@ -1,91 +1,120 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Courier dashboard</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 <style>
-  .cd-wrap{padding:18px 22px 60px;max-width:1240px}
-  .cd-head{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
-  .cd-head h1{margin:0;font-size:22px;font-weight:700;color:#0f2a43}
-  .cd-head .sub{color:#6b7c8f;font-size:13px;margin-top:3px}
-  .cd-dates{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .cd-dates input[type=date]{border:1px solid #d5dde5;border-radius:7px;padding:7px 9px;font:inherit;font-size:13px;color:#22384d;background:#fff}
-  .cd-dates button{border:1px solid #d5dde5;background:#fff;border-radius:7px;padding:7px 11px;font:inherit;font-size:13px;cursor:pointer;color:#22384d}
-  .cd-dates button:hover{background:#f3f7fb}
-  .cd-dates button.go{background:#0f7b4f;border-color:#0f7b4f;color:#fff;font-weight:600}
-  .cd-quick{display:flex;gap:6px}
-  .cd-quick b{font-weight:500}
+  .cd-dates{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .cd-dates input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
+    font:inherit;font-size:12.5px;background:#fff}
+  .cd-dates button{border:1px solid var(--line);background:#fff;border-radius:7px;
+    padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+  .cd-dates button:hover{border-color:var(--qbo)}
+  .cd-dates button.go{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+  .cd-quick{display:flex;gap:6px;margin-right:4px}
 
-  .cd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
-  .cd-card{background:#fff;border:1px solid #e3e9ef;border-radius:11px;padding:14px 16px}
-  .cd-card .k{font-size:12px;color:#6b7c8f;letter-spacing:.02em}
-  .cd-card .v{font-size:22px;font-weight:700;color:#0f2a43;margin-top:5px;line-height:1.15}
-  .cd-card .n{font-size:12px;color:#8a99a8;margin-top:3px}
+  .cd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px;
+    margin-bottom:16px}
+  .cd-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .cd-card .k{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .cd-card .v{font-family:var(--mono);font-size:23px;font-weight:500;margin-top:6px;line-height:1.1}
+  .cd-card .n{font-size:11.5px;color:var(--muted);margin-top:4px}
 
   .cd-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
-  @media(max-width:900px){.cd-row{grid-template-columns:1fr}}
-  .cd-box{background:#fff;border:1px solid #e3e9ef;border-radius:11px;padding:15px 17px}
-  .cd-box h2{margin:0 0 12px;font-size:14px;font-weight:700;color:#0f2a43}
+  @media(max-width:1000px){.cd-row{grid-template-columns:1fr}}
+  .cd-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .cd-box h2{margin:0 0 13px;font-size:13.5px;font-weight:600}
 
-  .cd-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-  .tile{border:1px solid #e7edf3;border-radius:9px;padding:11px 12px;background:#fafcfe}
-  .tile .t{font-size:12px;color:#5d6f81;display:flex;align-items:center;gap:6px}
-  .tile .t i{width:9px;height:9px;border-radius:50%;display:inline-block}
-  .tile .c{font-size:19px;font-weight:700;color:#0f2a43;margin-top:4px}
-  .tile .a{font-size:12px;color:#8a99a8}
+  .cd-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .tile{border:1px solid var(--line);border-radius:8px;padding:11px 13px;background:#fff}
+  .tile .t{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .tile .t i{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .tile .c{font-family:var(--mono);font-size:19px;font-weight:500;margin-top:5px;line-height:1.1}
+  .tile .a{font-size:11.5px;color:var(--faint);margin-top:2px}
 
-  table.cd{width:100%;border-collapse:collapse;font-size:13px}
-  table.cd th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#7b8a99;border-bottom:1px solid #e7edf3;padding:7px 8px;font-weight:600}
-  table.cd td{padding:8px;border-bottom:1px solid #f1f5f8;color:#2a3f54}
-  table.cd td.r,table.cd th.r{text-align:right}
+  table.cd{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.cd th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--faint);border-bottom:1px solid var(--line);padding:7px 8px;font-weight:600}
+  table.cd td{padding:9px 8px;border-bottom:1px solid var(--line);}
+  table.cd td.r,table.cd th.r{text-align:right;font-family:var(--mono)}
   table.cd tr:last-child td{border-bottom:0}
 
-  .bars{display:flex;flex-direction:column;gap:7px}
-  .bars .b{display:grid;grid-template-columns:120px 1fr 60px;align-items:center;gap:9px;font-size:12px;color:#2a3f54}
-  .bars .track{background:#eef3f8;border-radius:4px;height:9px;overflow:hidden}
-  .bars .fill{background:#2f7dd1;height:100%;border-radius:4px}
+  .bars{display:flex;flex-direction:column;gap:8px}
+  .bars .b{display:grid;grid-template-columns:130px 1fr 56px;align-items:center;gap:10px;
+    font-size:12px}
+  .bars .track{display:block;background:var(--line);border-radius:4px;height:9px;overflow:hidden}
+  .bars .fill{display:block;background:#2F7DD1;height:9px;border-radius:4px}
+  .bars .num{text-align:right;font-family:var(--mono);font-size:12px}
 
-  .cd-note{font-size:12px;color:#8a99a8;margin-top:10px}
-  .cd-msg{padding:14px;border-radius:9px;background:#fff5f5;border:1px solid #f2caca;color:#a13636;font-size:13px}
-  .cd-load{color:#8a99a8;font-size:13px;padding:20px 0}
+  .cd-note{font-size:11.5px;color:var(--faint);margin-top:11px}
+  .cd-msg{padding:13px 15px;border-radius:8px;background:#FDF3F3;border:1px solid var(--bad);
+    color:var(--bad);font-size:12.5px}
+  .cd-load{color:var(--muted);font-size:12.5px;padding:22px 0}
 </style>
 </head>
 <body>
-<div class="cd-wrap" id="wrap">
-  <div class="cd-head">
-    <div>
-      <h1 id="ttl">Courier dashboard</h1>
-      <div class="sub" id="sub">Loading…</div>
-    </div>
-    <div class="cd-dates">
-      <div class="cd-quick">
-        <button data-days="0"><b>Today</b></button>
-        <button data-days="6"><b>7 days</b></button>
-        <button data-days="29"><b>30 days</b></button>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1 id="ttl">Courier dashboard</h1>
+        <div class="sub" id="sub">Loading…</div>
       </div>
-      <input type="date" id="from">
-      <input type="date" id="to">
-      <button class="go" id="go">Show</button>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Courier orders are kept per company.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+        <div class="cd-dates">
+          <div class="cd-quick">
+            <button data-days="0">Today</button>
+            <button data-days="6">7 days</button>
+            <button data-days="29">30 days</button>
+          </div>
+          <input type="date" id="from">
+          <input type="date" id="to">
+          <button class="go" id="go">Show</button>
+        </div>
+        <div id="out"><div class="cd-load">Loading…</div></div>
+      </div>
+
     </div>
   </div>
-  <div id="body"><div class="cd-load">Loading…</div></div>
 </div>
 
 <script src="/nav.js"></script>
-<script src="/nav-courier.js"></script>
 <script>
 (function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
   var qs = new URLSearchParams(location.search);
   var account = qs.get('account');
   var courier = qs.get('courier');
 
   var COLOR = {
-    delivered:'#1f9d5a', returned:'#c9453f', returning:'#e08a2e', transit:'#2f7dd1',
-    booked:'#6a6fd6', unbooked:'#8a99a8', cancelled:'#95a3b1', expired:'#b07a2e',
-    review:'#c98b1e', transferred:'#4aa3c7', lost:'#8b2f2f', damaged:'#8b2f6b',
-    other:'#b6c1cc'
+    delivered:'#1F9D5A', returned:'#C9453F', returning:'#E08A2E', transit:'#2F7DD1',
+    booked:'#6A6FD6', unbooked:'#8A99A8', cancelled:'#95A3B1', expired:'#B07A2E',
+    review:'#C98B1E', transferred:'#4AA3C7', lost:'#8B2F2F', damaged:'#8B2F6B',
+    other:'#B6C1CC'
   };
   var LABEL = {
     delivered:'Delivered', returned:'Returned', returning:'Out for return',
@@ -96,58 +125,68 @@
   var ORDER = ['delivered','transit','booked','returning','returned','review',
                'transferred','unbooked','cancelled','expired','lost','damaged','other'];
 
-  function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-  function n0(v){return Number(v||0).toLocaleString('en-US');}
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function n0(v){ return Number(v||0).toLocaleString('en-US'); }
+  function full(v){ return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
   function money(v){
     var x = Number(v||0);
     if(Math.abs(x) >= 1000000) return (x/1000000).toFixed(2)+'M';
     if(Math.abs(x) >= 1000)    return (x/1000).toFixed(1)+'K';
     return x.toFixed(0);
   }
-  function full(v){return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});}
-  function iso(d){return d.toISOString().slice(0,10);}
+  function iso(d){ return d.toISOString().slice(0,10); }
+  function nextDay(s){
+    var d = new Date(s+'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate()+1);
+    return d.toISOString().slice(0,10);
+  }
   function short(day){
     var p = String(day).split('-');
     return p[2]+'/'+p[1];
   }
 
-  var fromEl = document.getElementById('from');
-  var toEl   = document.getElementById('to');
+  var fromEl = $('from'), toEl = $('to');
 
   function setRange(days){
-    var t = new Date();
-    var f = new Date(); f.setDate(f.getDate() - days);
+    var t = new Date(), f = new Date();
+    f.setDate(f.getDate() - days);
     fromEl.value = iso(f); toEl.value = iso(t);
   }
 
-  var savedF = localStorage.getItem('cdFrom'), savedT = localStorage.getItem('cdTo');
-  if(savedF && savedT){ fromEl.value = savedF; toEl.value = savedT; } else setRange(9);
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
 
-  Array.prototype.forEach.call(document.querySelectorAll('.cd-quick button'), function(b){
-    b.addEventListener('click', function(){ setRange(Number(b.dataset.days)); load(); });
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    var sf = localStorage.getItem('cdFrom'), st = localStorage.getItem('cdTo');
+    if(sf && st){ fromEl.value = sf; toEl.value = st; } else setRange(9);
+
+    Array.prototype.forEach.call(document.querySelectorAll('.cd-quick button'), function(b){
+      b.addEventListener('click', function(){ setRange(Number(b.getAttribute('data-days'))); load(); });
+    });
+    $('go').addEventListener('click', load);
+
+    head();
+    load();
   });
-  document.getElementById('go').addEventListener('click', load);
-
-  function scopeParams(){
-    var p = new URLSearchParams();
-    p.set('from', fromEl.value); p.set('to', toEl.value);
-    if(account) p.set('account', account);
-    if(courier) p.set('courier', courier);
-    return p.toString();
-  }
 
   function head(){
     var p = new URLSearchParams();
     if(account) p.set('account', account);
     if(courier) p.set('courier', courier);
-    fetch('/api/courier/scope?'+p.toString(), {cache:'no-store'})
-      .then(function(r){return r.json();})
+
+    fetch('/api/courier/scope?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error) return;
-        document.getElementById('ttl').textContent = d.title || 'Courier dashboard';
+        $('ttl').textContent = d.title || 'Courier dashboard';
         var s = d.sub || '';
-        if(d.lastSync) s += ' · last pulled ' + new Date(d.lastSync).toLocaleString();
-        document.getElementById('sub').textContent = s;
+        if(d.lastSync) s += ' \u00b7 last pulled ' + new Date(d.lastSync).toLocaleString();
+        $('sub').textContent = s;
       })
       .catch(function(){});
   }
@@ -155,21 +194,28 @@
   function load(){
     localStorage.setItem('cdFrom', fromEl.value);
     localStorage.setItem('cdTo', toEl.value);
-    document.getElementById('body').innerHTML = '<div class="cd-load">Loading…</div>';
-    fetch('/api/courier/stats?'+scopeParams(), {cache:'no-store'})
-      .then(function(r){return r.json();})
+
+    $('out').innerHTML = '<div class="cd-load">Loading…</div>';
+
+    var p = new URLSearchParams();
+    p.set('from', fromEl.value); p.set('to', toEl.value);
+    if(account) p.set('account', account);
+    if(courier) p.set('courier', courier);
+
+    fetch('/api/courier/stats?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
       .then(function(d){
-        if(d.error){ document.getElementById('body').innerHTML = '<div class="cd-msg">'+esc(d.error)+'</div>'; return; }
+        if(d.error){ $('out').innerHTML = '<div class="cd-msg">'+esc(d.error)+'</div>'; return; }
         draw(d);
       })
       .catch(function(e){
-        document.getElementById('body').innerHTML = '<div class="cd-msg">'+esc(e.message)+'</div>';
+        $('out').innerHTML = '<div class="cd-msg">'+esc(e.message)+'</div>';
       });
   }
 
   function pick(groups, name){
     for(var i=0;i<groups.length;i++) if(groups[i].group === name) return groups[i];
-    return {group:name, count:0, amount:0};
+    return { group:name, count:0, amount:0 };
   }
 
   function donut(parts, centerTop, centerSub){
@@ -190,25 +236,35 @@
     var legend = '';
     parts.forEach(function(p){
       if(!p.value) return;
-      legend += '<div class="b"><span style="display:flex;align-items:center;gap:6px">'+
-                '<i style="width:9px;height:9px;border-radius:50%;background:'+p.color+';display:inline-block"></i>'+
-                esc(p.label)+'</span>'+
-                '<span></span><span style="text-align:right">'+ (100*p.value/total).toFixed(1) +'%</span></div>';
+      legend += '<div class="b"><span style="display:flex;align-items:center;gap:7px">'+
+                '<i style="width:8px;height:8px;border-radius:50%;background:'+p.color+';display:inline-block;flex:none"></i>'+
+                esc(p.label)+'</span><span></span>'+
+                '<span class="num">'+(100*p.value/total).toFixed(1)+'%</span></div>';
     });
 
-    return '<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">'+
-             '<svg width="160" height="160" viewBox="0 0 160 160">'+ring+
-               '<text x="80" y="76" text-anchor="middle" font-size="22" font-weight="700" fill="#0f2a43">'+esc(centerTop)+'</text>'+
-               '<text x="80" y="95" text-anchor="middle" font-size="11" fill="#8a99a8">'+esc(centerSub)+'</text>'+
+    return '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">'+
+             '<svg width="160" height="160" viewBox="0 0 160 160" style="flex:none">'+ring+
+               '<text x="80" y="77" text-anchor="middle" font-size="23" font-weight="600" fill="#123">'+esc(centerTop)+'</text>'+
+               '<text x="80" y="96" text-anchor="middle" font-size="11" fill="#8A99A8">'+esc(centerSub)+'</text>'+
              '</svg>'+
-             '<div class="bars" style="flex:1;min-width:150px">'+legend+'</div>'+
+             '<div class="bars" style="flex:1;min-width:170px">'+legend+'</div>'+
            '</div>';
   }
 
   function dailyChart(daily){
     if(!daily.length) return '<div class="cd-note">No days in this range.</div>';
 
-    var W = 620, H = 210, PL = 44, PR = 12, PT = 12, PB = 28;
+    // days with no orders still get a slot, so the dates do not jump
+    var have = {};
+    daily.forEach(function(d){ have[d.day] = d; });
+    var filled = [], cur = fromEl.value, guard = 0;
+    while(cur <= toEl.value && guard < 400){
+      filled.push(have[cur] || { day:cur, orders:0, delivered:0, amount:0 });
+      cur = nextDay(cur); guard++;
+    }
+    daily = filled;
+
+    var W = 640, H = 220, PL = 46, PR = 12, PT = 12, PB = 30;
     var iw = W-PL-PR, ih = H-PT-PB;
     var max = 0;
     daily.forEach(function(d){ if(d.orders > max) max = d.orders; });
@@ -219,22 +275,28 @@
 
     for(var i=0;i<=4;i++){
       var y = PT + ih - (ih*i/4);
-      svg += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="#eef3f8"></line>';
-      svg += '<text x="'+(PL-7)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" font-size="10" fill="#9aa8b6">'+n0(Math.round(max*i/4))+'</text>';
+      svg += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="#EEF3F8"></line>';
+      svg += '<text x="'+(PL-8)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" font-size="10" fill="#9AA8B6">'+n0(Math.round(max*i/4))+'</text>';
     }
 
     daily.forEach(function(d, i){
       var x = PL + i*bw + g/2, w = bw - g;
       var ho = ih * (d.orders/max), hd = ih * (d.delivered/max);
-      svg += '<rect x="'+x.toFixed(1)+'" y="'+(PT+ih-ho).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+ho.toFixed(1)+'" fill="#dbe7f4" rx="2"><title>'+esc(d.day)+' · '+n0(d.orders)+' orders</title></rect>';
-      svg += '<rect x="'+x.toFixed(1)+'" y="'+(PT+ih-hd).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+hd.toFixed(1)+'" fill="#1f9d5a" rx="2"><title>'+esc(d.day)+' · '+n0(d.delivered)+' delivered</title></rect>';
-      if(daily.length <= 20 || i % 2 === 0){
-        svg += '<text x="'+(x+w/2).toFixed(1)+'" y="'+(H-9)+'" text-anchor="middle" font-size="10" fill="#9aa8b6">'+esc(short(d.day))+'</text>';
+      svg += '<rect x="'+x.toFixed(1)+'" y="'+(PT+ih-ho).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+ho.toFixed(1)+'" fill="#DBE7F4" rx="2"><title>'+esc(d.day)+' \u00b7 '+n0(d.orders)+' booked</title></rect>';
+      svg += '<rect x="'+x.toFixed(1)+'" y="'+(PT+ih-hd).toFixed(1)+'" width="'+w.toFixed(1)+'" height="'+hd.toFixed(1)+'" fill="#1F9D5A" rx="2"><title>'+esc(d.day)+' \u00b7 '+n0(d.delivered)+' delivered</title></rect>';
+      if(daily.length <= 16 || i % 2 === 0){
+        svg += '<text x="'+(x+w/2).toFixed(1)+'" y="'+(H-10)+'" text-anchor="middle" font-size="10" fill="#9AA8B6">'+esc(short(d.day))+'</text>';
       }
     });
 
     return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+svg+'</svg>'+
-           '<div class="cd-note"><span style="color:#2f7dd1">▉</span> booked &nbsp; <span style="color:#1f9d5a">▉</span> delivered</div>';
+           '<div class="cd-note"><span style="color:#DBE7F4">\u25AE</span> booked &nbsp; '+
+           '<span style="color:#1F9D5A">\u25AE</span> delivered</div>';
+  }
+
+  function card(k, v, n){
+    return '<div class="cd-card"><div class="k">'+esc(k)+'</div>'+
+           '<div class="v">'+esc(v)+'</div><div class="n">'+esc(n)+'</div></div>';
   }
 
   function draw(d){
@@ -248,9 +310,7 @@
     var closed = delivered.count + returned.count;
     var rate = closed ? (100*delivered.count/closed) : 0;
 
-    var html = '';
-
-    html += '<div class="cd-cards">';
+    var html = '<div class="cd-cards">';
     html += card('Orders', n0(t.orders), 'booked in this range');
     html += card('Order value', full(t.amount), 'PKR');
     html += card('Delivered value', full(delivered.amount), n0(delivered.count)+' orders');
@@ -259,11 +319,10 @@
     html += '</div>';
 
     html += '<div class="cd-row">';
-
     html += '<div class="cd-box"><h2>Where the orders stand</h2>'+
             donut([
               {label:'Delivered', value:delivered.count, color:COLOR.delivered},
-              {label:'Returned',  value:returned.count,  color:COLOR.returned},
+              {label:'Returned', value:returned.count, color:COLOR.returned},
               {label:'Out for return', value:returning.count, color:COLOR.returning},
               {label:'In transit', value:transit.count, color:COLOR.transit},
               {label:'Booked', value:booked.count, color:COLOR.booked},
@@ -274,12 +333,12 @@
     ORDER.forEach(function(k){
       var g = pick(groups, k);
       if(!g.count) return;
-      tiles += '<div class="tile"><div class="t"><i style="background:'+(COLOR[k]||'#b6c1cc')+'"></i>'+esc(LABEL[k]||k)+'</div>'+
-               '<div class="c">'+n0(g.count)+'</div>'+
+      tiles += '<div class="tile"><div class="t"><i style="background:'+(COLOR[k]||'#B6C1CC')+'"></i>'+
+               esc(LABEL[k]||k)+'</div><div class="c">'+n0(g.count)+'</div>'+
                '<div class="a">'+money(g.amount)+'</div></div>';
     });
-    html += '<div class="cd-box"><h2>Every status</h2><div class="cd-tiles">'+(tiles||'<div class="cd-note">Nothing yet.</div>')+'</div></div>';
-
+    html += '<div class="cd-box"><h2>Every status</h2><div class="cd-tiles">'+
+            (tiles || '<div class="cd-note">Nothing yet.</div>')+'</div></div>';
     html += '</div>';
 
     html += '<div class="cd-box" style="margin-bottom:16px"><h2>Day by day</h2>'+dailyChart(daily)+'</div>';
@@ -290,7 +349,7 @@
     accts.forEach(function(a){
       var cl = a.delivered + a.returned;
       var r = cl ? (100*a.delivered/cl) : 0;
-      rows += '<tr><td><a href="/courier-dash.html?account='+a.id+'" style="color:#2f7dd1;text-decoration:none">'+esc(a.label)+'</a></td>'+
+      rows += '<tr><td><a href="/courier-dash.html?account='+a.id+'">'+esc(a.label)+'</a></td>'+
               '<td class="r">'+n0(a.orders)+'</td>'+
               '<td class="r">'+n0(a.delivered)+'</td>'+
               '<td class="r">'+n0(a.returned)+'</td>'+
@@ -298,34 +357,32 @@
               '<td class="r">'+money(a.deliveredAmount)+'</td></tr>';
     });
     html += '<div class="cd-box"><h2>Accounts</h2><table class="cd">'+
-            '<tr><th>Account</th><th class="r">Orders</th><th class="r">Delivered</th><th class="r">Returned</th><th class="r">Rate</th><th class="r">Delivered value</th></tr>'+
-            (rows || '<tr><td colspan="6" style="color:#8a99a8">No accounts.</td></tr>')+'</table></div>';
+            '<tr><th>Account</th><th class="r">Orders</th><th class="r">Delivered</th>'+
+            '<th class="r">Returned</th><th class="r">Rate</th><th class="r">Delivered value</th></tr>'+
+            (rows || '<tr><td colspan="6" style="color:var(--muted)">No accounts.</td></tr>')+
+            '</table></div>';
 
     var cmax = 0;
     cities.forEach(function(c){ if(c.count > cmax) cmax = c.count; });
     var cb = '';
     cities.forEach(function(c){
       cb += '<div class="b"><span>'+esc(c.city)+'</span>'+
-            '<span class="track"><span class="fill" style="width:'+(cmax?100*c.count/cmax:0).toFixed(1)+'%"></span></span>'+
-            '<span style="text-align:right">'+n0(c.count)+'</span></div>';
+            '<span class="track"><span class="fill" style="width:'+
+            (cmax ? 100*c.count/cmax : 0).toFixed(1)+'%"></span></span>'+
+            '<span class="num">'+n0(c.count)+'</span></div>';
     });
-    html += '<div class="cd-box"><h2>Busiest cities</h2><div class="bars">'+(cb||'<div class="cd-note">No cities.</div>')+'</div></div>';
+    html += '<div class="cd-box"><h2>Busiest cities</h2><div class="bars">'+
+            (cb || '<div class="cd-note">No cities.</div>')+'</div></div>';
 
     html += '</div>';
 
     if(t.lastSeen){
-      html += '<div class="cd-note">Newest order in the store: '+esc(new Date(t.lastSeen).toLocaleString())+'</div>';
+      html += '<div class="cd-note">Newest order in the store: '+
+              esc(new Date(t.lastSeen).toLocaleString())+'</div>';
     }
 
-    document.getElementById('body').innerHTML = html;
+    $('out').innerHTML = html;
   }
-
-  function card(k, v, n){
-    return '<div class="cd-card"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><div class="n">'+esc(n)+'</div></div>';
-  }
-
-  head();
-  load();
 })();
 </script>
 </body>
