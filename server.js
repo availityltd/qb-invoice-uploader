@@ -36,7 +36,7 @@ import {
   markSync, saveOrders
 } from './couriers.js';
 import { adapter as postexAdapter } from './postex.js';
-import { liveStats, liveOrders, trackOne, forget as forgetLive } from './courierlive.js';
+import { liveStats, liveOrders, trackOne, peekRaw, forget as forgetLive } from './courierlive.js';
 import {
   loadCharges, listAllAccounts, findJournal, postJournal
 } from './journal.js';
@@ -2058,6 +2058,17 @@ app.get('/api/courier/orders', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
     res.json(await liveOrders(realmId, { from, to, account, courier, status, group }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// one untouched row, to see what the courier actually sends
+app.get('/api/courier/peek', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await peekRaw(realmId, req.query));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
