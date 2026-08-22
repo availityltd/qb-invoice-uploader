@@ -366,8 +366,8 @@
     /* --- top strip --- */
     html += '<div class="top">';
 
-    html += '<div class="big"><h3>Cash on delivery</h3>' +
-            '<div class="amt">' + full(t.deliveredAmount) +
+        html += '<div class="big"><h3>Cash on delivery</h3>' +
+            '<div class="amt">' + full(t.codPaid) +
             '<span class="pill">' + n0(gc('delivered')) + ' orders</span></div>' +
             '<div class="sub"><b>' + n0(t.pendingOrders) + '</b> orders pending \u00b7 ' +
             'worth <b>' + full(t.codPending) + '</b></div></div>';
