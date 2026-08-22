@@ -1727,7 +1727,7 @@ app.post('/api/find/clear', async (req, res) => {
   res.json({ ok: true });
 });
 
-// the result as a spreadsheet-friendly file
+// the result as a workbook: an overview, the CPRs, each company, and the misses
 app.get('/api/find/file', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -1735,31 +1735,134 @@ app.get('/api/find/file', async (req, res) => {
   const snap = findSnapshot(realmId, 0);
   if (!snap || !snap.result) return res.status(404).json({ error: 'Nothing to download yet' });
 
-  const cell = v => {
-    const s = v == null ? '' : String(v);
-    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
+  const r = snap.result;
+  const wb = XLSX.utils.book_new();
 
-  const rows = [
-    ['Order number', 'Courier', 'Month', 'Sheet', 'Tab', 'Row',
-     'Status', 'Result', 'Amount', 'CPR number', 'CPR date'].join(',')
-  ];
+  // Excel will not take a tab name longer than 31 characters, and a few
+  // punctuation marks are not allowed at all
+  const seenNames = new Set();
+  function tabName(raw) {
+    let s = String(raw || 'Sheet').replace(/[\\\/\?\*\[\]:]/g, ' ').trim().slice(0, 28);
+    if (!s) s = 'Sheet';
+    let n = s, i = 2;
+    while (seenNames.has(n)) { n = s.slice(0, 26) + ' ' + i; i++; }
+    seenNames.add(n);
+    return n;
+  }
 
-  snap.result.rows.forEach(r => {
-    rows.push([
-      r.invoice, r.courier, r.month || '', r.sheet, r.tab, r.sheetRow || '',
-      r.status, r.bucket, r.amount || '', r.cprNumber || '', r.cprDate || ''
-    ].map(cell).join(','));
+  const r2 = v => Math.round(Number(v || 0) * 100) / 100;
+
+  /* ---------- 1. the overview ---------- */
+
+  const overview = [];
+  overview.push(['Order search']);
+  overview.push(['Run at', new Date(snap.startedAt).toLocaleString()]);
+  overview.push([]);
+  overview.push(['Asked about', r.asked]);
+  overview.push(['Found', r.found]);
+  overview.push(['Not found', r.missing.length]);
+  overview.push([]);
+  overview.push(['Company', 'Orders', 'Delivered', 'Returned', 'In transit',
+                 'Cancelled', 'Other', 'Amount']);
+
+  const t = { total: 0, delivered: 0, returned: 0, transit: 0, cancelled: 0, other: 0, amount: 0 };
+  r.couriers.forEach(c => {
+    overview.push([c.courier, c.total, c.delivered, c.returned, c.transit,
+                   c.cancelled, c.other, r2(c.amount)]);
+    t.total += c.total; t.delivered += c.delivered; t.returned += c.returned;
+    t.transit += c.transit; t.cancelled += c.cancelled; t.other += c.other;
+    t.amount += c.amount;
+  });
+  overview.push(['All companies', t.total, t.delivered, t.returned, t.transit,
+                 t.cancelled, t.other, r2(t.amount)]);
+
+  const wsOverview = XLSX.utils.aoa_to_sheet(overview);
+  wsOverview['!cols'] = [{ wch: 34 }, { wch: 11 }, { wch: 11 }, { wch: 11 },
+                         { wch: 11 }, { wch: 11 }, { wch: 10 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsOverview, tabName('Overview'));
+
+  /* ---------- 2. every CPR ---------- */
+
+  const byCpr = new Map();
+  r.rows.forEach(x => {
+    const key = x.courier + '|' + (x.cprNumber || '(no CPR number)');
+    if (!byCpr.has(key)) {
+      byCpr.set(key, {
+        courier: x.courier,
+        cpr: x.cprNumber || '(no CPR number)',
+        date: x.cprDate || '',
+        total: 0, delivered: 0, returned: 0, other: 0, amount: 0
+      });
+    }
+    const g = byCpr.get(key);
+    g.total++;
+    g.amount += x.amount || 0;
+    if (!g.date && x.cprDate) g.date = x.cprDate;
+    if (x.bucket === 'delivered') g.delivered++;
+    else if (x.bucket === 'returned') g.returned++;
+    else g.other++;
   });
 
-  snap.result.missing.forEach(n => {
-    rows.push([n, 'Not found anywhere', '', '', '', '', '', 'missing', '', '', ''].map(cell).join(','));
+  const cprRows = [['Company', 'CPR number', 'CPR date', 'Orders',
+                    'Delivered', 'Returned', 'Other', 'Amount']];
+
+  [...byCpr.values()]
+    .sort((a, b) => String(a.courier).localeCompare(String(b.courier)) ||
+                    String(b.date || '').localeCompare(String(a.date || '')))
+    .forEach(g => {
+      cprRows.push([g.courier, g.cpr, g.date, g.total,
+                    g.delivered, g.returned, g.other, r2(g.amount)]);
+    });
+
+  const wsCpr = XLSX.utils.aoa_to_sheet(cprRows);
+  wsCpr['!cols'] = [{ wch: 34 }, { wch: 22 }, { wch: 12 }, { wch: 9 },
+                    { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsCpr, tabName('By CPR'));
+
+  /* ---------- 3. one tab per company ---------- */
+
+  const byCompany = new Map();
+  r.rows.forEach(x => {
+    if (!byCompany.has(x.courier)) byCompany.set(x.courier, []);
+    byCompany.get(x.courier).push(x);
   });
 
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="order-search.csv"');
-  res.send('\uFEFF' + rows.join('\r\n') + '\r\n');
+  byCompany.forEach((rows, company) => {
+    const out = [['Order number', 'Result', 'Sheet says', 'Amount',
+                  'CPR number', 'CPR date', 'Month', 'Sheet', 'Tab', 'Row']];
+
+    rows
+      .sort((a, b) => String(a.cprNumber || '').localeCompare(String(b.cprNumber || '')) ||
+                      String(a.invoice).localeCompare(String(b.invoice)))
+      .forEach(x => {
+        out.push([x.invoice, x.bucket, x.status, r2(x.amount),
+                  x.cprNumber || '', x.cprDate || '', x.month || '',
+                  x.sheet, x.tab, x.sheetRow || '']);
+      });
+
+    const ws = XLSX.utils.aoa_to_sheet(out);
+    ws['!cols'] = [{ wch: 15 }, { wch: 11 }, { wch: 18 }, { wch: 12 },
+                   { wch: 22 }, { wch: 12 }, { wch: 20 }, { wch: 34 },
+                   { wch: 16 }, { wch: 8 }];
+    XLSX.utils.book_append_sheet(wb, ws, tabName(company));
+  });
+
+  /* ---------- 4. what was never found ---------- */
+
+  const miss = [['Order number']];
+  r.missing.forEach(n => miss.push([n]));
+  const wsMiss = XLSX.utils.aoa_to_sheet(miss);
+  wsMiss['!cols'] = [{ wch: 18 }];
+  XLSX.utils.book_append_sheet(wb, wsMiss, tabName('Not found'));
+
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+  res.setHeader('Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="order-search.xlsx"');
+  res.send(buf);
 });
+
 // Only asks Google what it has. Nothing is changed.
 app.get('/api/adv/peek-images', async (req, res) => {
   const realmId = await requireCompany(req, res);
