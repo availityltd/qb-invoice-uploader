@@ -2038,19 +2038,20 @@ app.get('/api/courier/stats', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
 
-    const where = [`realm_id = $1`, `booked_on >= $2`, `booked_on <= $3`];
+       // the joined query needs the table spelled out; the plain ones do not mind
+    const where = [`o.realm_id = $1`, `o.booked_on >= $2`, `o.booked_on <= $3`];
     const args = [realmId, from, to];
 
-    if (account) { args.push(Number(account)); where.push(`account_id = $${args.length}`); }
-    if (courier) { args.push(String(courier)); where.push(`courier = $${args.length}`); }
+    if (account) { args.push(Number(account)); where.push(`o.account_id = $${args.length}`); }
+    if (courier) { args.push(String(courier)); where.push(`o.courier = $${args.length}`); }
 
     const w = where.join(' AND ');
 
     // the buckets, and what each is worth
     const groups = await pool.query(
       `SELECT status_group, COUNT(*) AS n, COALESCE(SUM(amount),0) AS amount
-         FROM courier_orders WHERE ${w}
-        GROUP BY status_group ORDER BY n DESC`, args);
+                 FROM courier_orders o WHERE ${w}
+        GROUP BY o.status_group ORDER BY n DESC`, args);
 
     // one row per account, so the "all companies" view can list them
     const byAccount = await pool.query(
@@ -2072,27 +2073,27 @@ app.get('/api/courier/stats', async (req, res) => {
         ORDER BY orders DESC`, args);
 
     // day by day, for the line chart
-    const daily = await pool.query(
-      `SELECT booked_on AS day,
+        const daily = await pool.query(
+      `SELECT o.booked_on AS day,
               COUNT(*) AS orders,
-              COUNT(*) FILTER (WHERE status_group = 'delivered') AS delivered,
-              COALESCE(SUM(amount),0) AS amount
-         FROM courier_orders WHERE ${w}
-        GROUP BY booked_on ORDER BY booked_on`, args);
-
+              COUNT(*) FILTER (WHERE o.status_group = 'delivered') AS delivered,
+              COALESCE(SUM(o.amount),0) AS amount
+         FROM courier_orders o WHERE ${w}
+        GROUP BY o.booked_on ORDER BY o.booked_on`, args);
+    
     // where the parcels went
-    const cities = await pool.query(
-      `SELECT city, COUNT(*) AS n
-         FROM courier_orders WHERE ${w} AND city IS NOT NULL AND city <> ''
-        GROUP BY city ORDER BY n DESC LIMIT 12`, args);
+       const cities = await pool.query(
+      `SELECT o.city, COUNT(*) AS n
+         FROM courier_orders o WHERE ${w} AND o.city IS NOT NULL AND o.city <> ''
+        GROUP BY o.city ORDER BY n DESC LIMIT 12`, args);
 
-    const totals = await pool.query(
+        const totals = await pool.query(
       `SELECT COUNT(*) AS orders,
-              COALESCE(SUM(amount),0) AS amount,
-              COALESCE(SUM(fee),0) AS fee,
-              COALESCE(SUM(tax),0) AS tax,
-              MAX(seen_at) AS last_seen
-         FROM courier_orders WHERE ${w}`, args);
+              COALESCE(SUM(o.amount),0) AS amount,
+              COALESCE(SUM(o.fee),0) AS fee,
+              COALESCE(SUM(o.tax),0) AS tax,
+              MAX(o.seen_at) AS last_seen
+         FROM courier_orders o WHERE ${w}`, args);
 
     const num = v => Math.round(Number(v || 0) * 100) / 100;
 
