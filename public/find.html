@@ -476,16 +476,37 @@
 
     if(!info.sheets.length) return;
 
-    var first = info.sheets[0].file;
-    get('/api/find/header?sheetId=' + encodeURIComponent(first.id) + (first.excel ? '&excel=1' : ''))
-      .then(function(d){
-        headers[name] = d.header || [];
-        fillCols(card, name, d);
-      })
-      .catch(function(e){
-        card.querySelector('.cols').innerHTML =
-          '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
-      });
+       var first = info.sheets[0].file;
+    var url = '/api/find/header?sheetId=' + encodeURIComponent(first.id) +
+              (first.excel ? '&excel=1' : '');
+
+    // big workbooks sometimes time out on the first ask; two more tries
+    function ask(left){
+      get(url)
+        .then(function(d){
+          headers[name] = d.header || [];
+          fillCols(card, name, d);
+        })
+        .catch(function(e){
+          if(left > 0){
+            card.querySelector('.cols').innerHTML =
+              '<span style="font-size:12px;color:var(--faint)">Big file - trying again…</span>';
+            setTimeout(function(){ ask(left - 1); }, 3000);
+            return;
+          }
+          card.querySelector('.cols').innerHTML =
+            '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) +
+            ' &nbsp;<button data-retry="1">Try again</button></span>';
+          var b = card.querySelector('[data-retry]');
+          if(b) b.addEventListener('click', function(){
+            card.querySelector('.cols').innerHTML =
+              '<span style="font-size:12px;color:var(--faint)">Reading the columns…</span>';
+            ask(2);
+          });
+        });
+    }
+
+    ask(2);
   }
 
   function fillCols(card, name, d){
