@@ -12,15 +12,15 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 <style>
-  .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-  .bar input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
-    font:inherit;font-size:12.5px;background:#fff}
-  .bar button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;
-    font:inherit;font-size:12.5px;cursor:pointer}
-  .bar button:hover{border-color:var(--qbo)}
-  .bar button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
-  .bar .find{margin-left:auto;display:flex;gap:6px}
-  .bar .find input{border:1px solid var(--line);border-radius:7px;padding:7px 11px;
+   .cdbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .cdbar input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
+    font:inherit;font-size:12.5px;background:#fff;height:auto;width:auto}
+  .cdbar button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;
+    font:inherit;font-size:12.5px;cursor:pointer;width:auto;height:auto;color:var(--ink)}
+  .cdbar button:hover{border-color:var(--qbo)}
+  .cdbar button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+  .cdbar .find{margin-left:auto;display:flex;gap:6px}
+  .cdbar .find input{border:1px solid var(--line);border-radius:7px;padding:7px 11px;
     font:inherit;font-size:12.5px;width:190px}
 
   .top{display:grid;grid-template-columns:1.1fr 1.1fr 1.3fr;gap:14px;margin-bottom:14px}
@@ -127,7 +127,7 @@
       </div>
 
       <div id="body" class="hide">
-        <div class="bar">
+                <div class="cdbar">
           <button data-days="0">Today</button>
           <button data-days="6" class="on">7 days</button>
           <button data-days="29">30 days</button>
@@ -213,9 +213,9 @@
     var sf = localStorage.getItem('cdFrom'), st = localStorage.getItem('cdTo');
     if(sf && st){ fromEl.value = sf; toEl.value = st; } else setRange(6);
 
-    Array.prototype.forEach.call(document.querySelectorAll('.bar button[data-days]'), function(b){
+       Array.prototype.forEach.call(document.querySelectorAll('.cdbar button[data-days]'), function(b){
       b.addEventListener('click', function(){
-        Array.prototype.forEach.call(document.querySelectorAll('.bar button[data-days]'),
+        Array.prototype.forEach.call(document.querySelectorAll('.cdbar button[data-days]'),
           function(x){ x.classList.remove('on'); });
         b.classList.add('on');
         setRange(Number(b.getAttribute('data-days')));
