@@ -693,7 +693,8 @@
       $('stepRun').classList.remove('hide');
       $('btnStop').classList.remove('hide');
       $('btnClear').classList.add('hide');
-      $('btnFile').classList.add('hide');
+       $('btnFile').classList.add('hide');
+      $('btnFile').style.display = 'none';
       keepAwake(true);
       poll();
     }).catch(function(e){
@@ -776,6 +777,7 @@
         if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');
         if(job.result){
           $('btnFile').classList.remove('hide');
+          $('btnFile').style.display = 'flex';
           draw(job.result);
         }
       })
