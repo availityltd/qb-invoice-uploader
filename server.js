@@ -45,6 +45,9 @@ import {
 } from './journal.js';
 import { loadTraxSummaries, applyLines } from './traxsheet.js';
 import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
+import {
+  startFindJob, stopFindJob, clearFindJob, findSnapshot, listMonths
+} from './finder.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -1584,6 +1587,89 @@ app.post('/api/cpr/receive-clear', async (req, res) => {
   const ok = clearPayJob(realmId);
   if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
   res.json({ ok: true });
+});
+// ==================== Find orders in the courier sheets ====================
+// Paste order numbers, and every CPR sheet is walked looking for them. What is
+// still missing afterwards is looked for in the return sheet.
+
+app.get('/api/find/months', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ months: await listMonths(realmId) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/find/start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const id = startFindJob(realmId, req.body);
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/find/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = findSnapshot(realmId, req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/find/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopFindJob(realmId) });
+});
+
+app.post('/api/find/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearFindJob(realmId);
+  if (!ok) return res.status(409).json({ error: 'The search is still running' });
+  res.json({ ok: true });
+});
+
+// the result as a spreadsheet-friendly file
+app.get('/api/find/file', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const snap = findSnapshot(realmId, 0);
+  if (!snap || !snap.result) return res.status(404).json({ error: 'Nothing to download yet' });
+
+  const cell = v => {
+    const s = v == null ? '' : String(v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+
+  const rows = [
+    ['Order number', 'Courier', 'Month', 'Sheet', 'Tab', 'Row',
+     'Status', 'Result', 'Amount', 'CPR number', 'CPR date'].join(',')
+  ];
+
+  snap.result.rows.forEach(r => {
+    rows.push([
+      r.invoice, r.courier, r.month || '', r.sheet, r.tab, r.sheetRow || '',
+      r.status, r.bucket, r.amount || '', r.cprNumber || '', r.cprDate || ''
+    ].map(cell).join(','));
+  });
+
+  snap.result.missing.forEach(n => {
+    rows.push([n, 'Not found anywhere', '', '', '', '', '', 'missing', '', '', ''].map(cell).join(','));
+  });
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="order-search.csv"');
+  res.send('\uFEFF' + rows.join('\r\n') + '\r\n');
 });
 // Only asks Google what it has. Nothing is changed.
 app.get('/api/adv/peek-images', async (req, res) => {
