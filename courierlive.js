@@ -65,7 +65,7 @@ export function summarise(orders, from, to) {
   const cities = {};
   const byDay = {};
 
-  let amount = 0, fee = 0, tax = 0;
+   let amount = 0, fee = 0, tax = 0, payout = 0;
   let codPaid = 0, codPending = 0, pendingOrders = 0;
 
   const SETTLED = { delivered: 1, returned: 1, cancelled: 1, expired: 1, lost: 1, damaged: 1 };
@@ -81,11 +81,13 @@ export function summarise(orders, from, to) {
     statuses[s].count++;
     statuses[s].amount += o.amount;
 
-    amount += o.amount;
+        amount += o.amount;
     fee += o.fee;
     tax += o.tax;
+    payout += o.payout || 0;
 
-    if (g === 'delivered') codPaid += o.amount;
+    // the courier counts what it owes, not what the customer was billed
+    if (g === 'delivered') codPaid += (o.payout || 0);
     else if (!SETTLED[g]) { codPending += o.amount; pendingOrders++; }
 
     if (o.city) cities[o.city] = (cities[o.city] || 0) + 1;
@@ -136,8 +138,9 @@ export function summarise(orders, from, to) {
     totals: {
       orders: orders.length,
       amount: r2(amount),
-      fee: r2(fee),
+            fee: r2(fee),
       tax: r2(tax),
+      payout: r2(payout),
       codPaid: r2(codPaid),
       codPending: r2(codPending),
       pendingOrders,
