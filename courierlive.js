@@ -145,6 +145,7 @@ export function summarise(orders, from, to) {
       codPending: r2(codPending),
       pendingOrders,
       deliveredAmount: r2(delivered.amount),
+      codPaid: r2(codPaid),
       successRate: settledCount ? r2(100 * delivered.count / settledCount) : 0,
       returnRate: settledCount ? r2(100 * returned.count / settledCount) : 0
     },
