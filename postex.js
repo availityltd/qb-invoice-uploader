@@ -18,7 +18,7 @@ const GROUPS = {
   'out for return':             'returning',
   'returned':                   'returned',
   'expired':                    'expired',
-    'un-assigned by me':          'cancelled',
+  'un-assigned by me':          'cancelled',
   'transferred':                'transferred',
   'stolen':                     'lost',
   'damage':                     'damaged',
@@ -153,14 +153,7 @@ export function mapOrder(row) {
   };
 }
 
-// Every order PostEx has for a span of days. The guide calls this GET but
-// shows a body, so both shapes are tried before giving up.
-export async function fetchOrders(token, from, to, statusId) {
-  const path = '/services/integration/api/order/v1/get-all-order';
-    // the guide says fromDate/toDate, the live API asks for startDate/endDate.
-  // Sending both keeps either build happy.
-   // the guide and the live API disagree on spelling, so send every shape
- // PostEx numbers its statuses in the order get-order-status lists them
+// PostEx numbers its statuses in the order get-order-status lists them
 const STATUS_IDS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
 
 async function askOrders(token, from, to, statusId) {
