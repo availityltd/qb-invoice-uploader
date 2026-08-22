@@ -121,12 +121,28 @@ export function mapOrder(row) {
   const o = unwrap(row);
   const status = o.transactionStatus || '';
 
+  // what the merchant is owed - PostEx counts this, not the whole invoice
+  const upfront = num(o.upfrontPayment);
+  const reserve = num(o.reservePayment);
+  const balance = num(o.balancePayment);
+
   return {
     tracking:    String(o.trackingNumber || '').trim(),
     orderRef:    String(o.orderRefNumber || '').trim(),
+    customer:    o.customerName || '',
+    phone:       String(o.customerPhone || '').trim(),
+    address:     o.deliveryAddress || '',
+    detail:      o.orderDetail || '',
+    notes:       o.transactionNotes || '',
+    items:       num(o.items),
+    weight:      num(o.actualWeight) || num(o.bookingWeight),
     status,
     statusGroup: groupOf(status),
     amount:      num(o.invoicePayment),
+    payout:      upfront + reserve,
+    upfront,
+    reserve,
+    balance,
     fee:         num(o.transactionFee) + num(o.reversalFee),
     tax:         num(o.transactionTax) + num(o.reversalTax),
     city:        o.cityName || '',
