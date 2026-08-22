@@ -2026,6 +2026,155 @@ app.post('/api/charges/post-lines', async (req, res) => {
   }
 });
 // ==================== Courier accounts ====================
+// Everything the courier dashboard needs, for one account, one courier,
+// or all of them at once. Read from our own table, so it is quick.
+app.get('/api/courier/stats', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account, courier } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const where = [`realm_id = $1`, `booked_on >= $2`, `booked_on <= $3`];
+    const args = [realmId, from, to];
+
+    if (account) { args.push(Number(account)); where.push(`account_id = $${args.length}`); }
+    if (courier) { args.push(String(courier)); where.push(`courier = $${args.length}`); }
+
+    const w = where.join(' AND ');
+
+    // the buckets, and what each is worth
+    const groups = await pool.query(
+      `SELECT status_group, COUNT(*) AS n, COALESCE(SUM(amount),0) AS amount
+         FROM courier_orders WHERE ${w}
+        GROUP BY status_group ORDER BY n DESC`, args);
+
+    // one row per account, so the "all companies" view can list them
+    const byAccount = await pool.query(
+      `SELECT o.account_id, a.label, a.courier,
+              COUNT(*) AS orders,
+              COUNT(*) FILTER (WHERE o.status_group = 'delivered')  AS delivered,
+              COUNT(*) FILTER (WHERE o.status_group = 'returned')   AS returned,
+              COUNT(*) FILTER (WHERE o.status_group = 'transit')    AS transit,
+              COUNT(*) FILTER (WHERE o.status_group = 'unbooked')   AS unbooked,
+              COUNT(*) FILTER (WHERE o.status_group IN ('lost','damaged')) AS lost,
+              COALESCE(SUM(o.amount),0) AS amount,
+              COALESCE(SUM(o.amount) FILTER (WHERE o.status_group = 'delivered'),0) AS delivered_amount,
+              COALESCE(SUM(o.fee),0) AS fee,
+              COALESCE(SUM(o.tax),0) AS tax
+         FROM courier_orders o
+         JOIN courier_accounts a ON a.id = o.account_id
+        WHERE ${w}
+        GROUP BY o.account_id, a.label, a.courier
+        ORDER BY orders DESC`, args);
+
+    // day by day, for the line chart
+    const daily = await pool.query(
+      `SELECT booked_on AS day,
+              COUNT(*) AS orders,
+              COUNT(*) FILTER (WHERE status_group = 'delivered') AS delivered,
+              COALESCE(SUM(amount),0) AS amount
+         FROM courier_orders WHERE ${w}
+        GROUP BY booked_on ORDER BY booked_on`, args);
+
+    // where the parcels went
+    const cities = await pool.query(
+      `SELECT city, COUNT(*) AS n
+         FROM courier_orders WHERE ${w} AND city IS NOT NULL AND city <> ''
+        GROUP BY city ORDER BY n DESC LIMIT 12`, args);
+
+    const totals = await pool.query(
+      `SELECT COUNT(*) AS orders,
+              COALESCE(SUM(amount),0) AS amount,
+              COALESCE(SUM(fee),0) AS fee,
+              COALESCE(SUM(tax),0) AS tax,
+              MAX(seen_at) AS last_seen
+         FROM courier_orders WHERE ${w}`, args);
+
+    const num = v => Math.round(Number(v || 0) * 100) / 100;
+
+    res.json({
+      from, to,
+      totals: {
+        orders: Number(totals.rows[0].orders || 0),
+        amount: num(totals.rows[0].amount),
+        fee: num(totals.rows[0].fee),
+        tax: num(totals.rows[0].tax),
+        lastSeen: totals.rows[0].last_seen
+      },
+      groups: groups.rows.map(r => ({
+        group: r.status_group || 'other',
+        count: Number(r.n),
+        amount: num(r.amount)
+      })),
+      accounts: byAccount.rows.map(r => ({
+        id: r.account_id,
+        label: r.label,
+        courier: r.courier,
+        orders: Number(r.orders),
+        delivered: Number(r.delivered),
+        returned: Number(r.returned),
+        transit: Number(r.transit),
+        unbooked: Number(r.unbooked),
+        lost: Number(r.lost),
+        amount: num(r.amount),
+        deliveredAmount: num(r.delivered_amount),
+        fee: num(r.fee),
+        tax: num(r.tax)
+      })),
+      daily: daily.rows.map(r => ({
+        day: r.day ? new Date(r.day).toISOString().slice(0, 10) : null,
+        orders: Number(r.orders),
+        delivered: Number(r.delivered),
+        amount: num(r.amount)
+      })).filter(x => x.day),
+      cities: cities.rows.map(r => ({ city: r.city, count: Number(r.n) }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// what this view is called, so the page can head itself properly
+app.get('/api/courier/scope', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const { account, courier } = req.query;
+
+    if (account) {
+      const acc = await getCourierAccount(realmId, Number(account));
+      if (!acc) return res.status(404).json({ error: 'No such account' });
+      const a = ADAPTERS[acc.courier];
+      return res.json({
+        kind: 'account',
+        id: acc.id,
+        title: acc.label,
+        sub: (a ? a.name : acc.courier),
+        lastSync: acc.last_sync,
+        lastError: acc.last_error
+      });
+    }
+
+    if (courier) {
+      const a = ADAPTERS[courier];
+      return res.json({
+        kind: 'courier',
+        title: a ? a.name : courier,
+        sub: 'every account'
+      });
+    }
+
+    return res.json({ kind: 'all', title: 'All courier companies', sub: 'every account' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // One adapter per courier. Adding a courier means adding a file and a line here.
 const ADAPTERS = {
