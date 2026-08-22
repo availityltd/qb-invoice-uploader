@@ -1,10 +1,10 @@
-// Paste a pile of order numbers, and this walks the courier folders looking
-// for each one. It answers a plain question: which courier had it, and what
-// happened to it. Anything the CPR sheets never mention is then looked for in
-// the return sheet. Runs as a background job, so leaving the page is fine.
+// Paste a pile of order numbers, and this walks the courier sheets looking for
+// each one. The page says which folders to open and, if wanted, which tabs of
+// the return sheet to check afterwards. Runs as a background job, so leaving
+// the page changes nothing.
 
-import { listFolders, listSheetsIn, listTabs, fileInfo } from './sheets.js';
-import { loadSheet, digitsOf, clean } from './cpr.js';
+import { listFolders, listSheetsIn, listTabs } from './sheets.js';
+import { loadSheet, digitsOf } from './cpr.js';
 import { readDateColumns } from './voidsheet.js';
 import { getSetting } from './settings.js';
 
@@ -37,7 +37,82 @@ async function tryThrice(job, what, work) {
   throw last;
 }
 
-// what the sheet's own words mean, in plain buckets
+/* ==================== reading folder names ==================== */
+
+// Folder names are written by hand, so the month and year are dug out of
+// whatever was typed: "07-July-2025 - MR-UR done" is July 2025.
+const MONTH_WORDS = [
+  ['jan', 1], ['feb', 2], ['mar', 3], ['apr', 4], ['may', 5], ['jun', 6],
+  ['jul', 7], ['aug', 8], ['sep', 9], ['oct', 10], ['nov', 11], ['dec', 12]
+];
+
+const MONTH_NAMES = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+export function readFolderName(name) {
+  const s = String(name || '').toLowerCase();
+
+  let month = 0;
+  for (const [word, n] of MONTH_WORDS) {
+    if (s.includes(word)) { month = n; break; }
+  }
+
+  const y = s.match(/(20\d{2})/);
+  const year = y ? Number(y[1]) : 0;
+
+  return { month, year };
+}
+
+// The whole folder tree, so the page can offer years, months and sheets.
+export async function listTree(realmId) {
+  const root = await getSetting(realmId, 'cpr:root', '');
+  if (!root) throw new Error('Set the Drive folder in Receive payments first');
+
+  const companies = await listFolders(root);
+  const out = [];
+
+  for (const c of companies) {
+    let months = [];
+    try {
+      months = await listFolders(c.id);
+    } catch (e) {
+      continue;
+    }
+
+    const folders = months.map(m => {
+      const { month, year } = readFolderName(m.name);
+      return {
+        id: m.id,
+        name: m.name,
+        month,
+        year,
+        label: month ? `${MONTH_NAMES[month]} ${year || ''}`.trim() : ''
+      };
+    });
+
+    out.push({ id: c.id, company: c.name, folders });
+  }
+
+  return out;
+}
+
+// the sheets inside the folders the page picked out
+export async function sheetsIn(realmId, folderIds) {
+  const ids = (folderIds || []).map(String).filter(Boolean);
+  const out = [];
+
+  for (const id of ids) {
+    try {
+      const files = await listSheetsIn(id);
+      files.forEach(f => out.push({ folderId: id, id: f.id, name: f.name, excel: f.excel }));
+    } catch (e) { /* skip */ }
+  }
+
+  return out;
+}
+
+/* ==================== what the sheet's words mean ==================== */
+
 function bucketOf(status) {
   const s = String(status || '').trim().toLowerCase();
   if (!s) return 'unknown';
@@ -53,6 +128,8 @@ function bucketOf(status) {
   if (s.includes('book')) return 'booked';
   return 'other';
 }
+
+/* ==================== the answer ==================== */
 
 function summarise(job) {
   const byCourier = {};
@@ -176,8 +253,9 @@ export function startFindJob(realmId, opts) {
     beat: now(),
     sheetsSeen: 0,
     sheetsTotal: 0,
-    months: (opts.months || []).map(x => String(x).toLowerCase()),
-    withReturns: opts.withReturns !== false
+    folderIds: (opts.folderIds || []).map(String).filter(Boolean),
+    skipCpr: !!opts.skipCpr,
+    returnSheet: opts.returnSheet || null   // { id, name, excel, tabs, from, to }
   };
 
   jobs.set(realmId, job);
@@ -191,31 +269,55 @@ export function startFindJob(realmId, opts) {
   return job.id;
 }
 
-// a month folder is wanted if no months were picked, or its name matches one
-function monthWanted(job, name) {
-  if (!job.months.length) return true;
-  const low = String(name || '').toLowerCase();
-  return job.months.some(m => low.includes(m));
+async function run(realmId, job) {
+  say(job, `Looking for ${job.asked} order numbers`);
+
+  if (!job.skipCpr) await walkCpr(realmId, job);
+
+  // whatever the CPR sheets never mentioned may have come back as a return
+  const want = job.returnSheet;
+  if (!job.cancel && want && want.id) {
+    const left = [...job.wanted].filter(d => !job.hits.has(d));
+    if (left.length) {
+      say(job, `${left.length} still unaccounted for - checking the return sheet`);
+      try {
+        await walkReturns(job, new Set(left));
+      } catch (e) {
+        say(job, `The return sheet could not be checked - ${e.message}`);
+      }
+    } else {
+      say(job, 'Nothing was left over, so the return sheet was not needed');
+    }
+  }
+
+  job.state = job.cancel ? 'stopped' : 'done';
+  job.finishedAt = new Date().toISOString();
+
+  if (job.skipped.length) {
+    say(job, `${job.skipped.length} sheet${job.skipped.length === 1 ? '' : 's'} could not be read at all`);
+  }
+  say(job, job.cancel
+    ? `Stopped - ${job.hits.size} of ${job.wanted.size} found`
+    : `Finished - ${job.hits.size} of ${job.wanted.size} found`);
 }
 
-async function run(realmId, job) {
+async function walkCpr(realmId, job) {
   const root = await getSetting(realmId, 'cpr:root', '');
   if (!root) throw new Error('Set the Drive folder in Receive payments first');
 
-  say(job, `Looking for ${job.asked} order numbers`);
+  const companies = await tryThrice(job, 'The Drive folder', () => listFolders(root));
 
-  const couriers = await tryThrice(job, 'The Drive folder', () => listFolders(root));
-  say(job, `${couriers.length} courier folders to walk through`);
-
-  // build the list of files first, so progress can be counted
+  // the page hands over the exact folders it picked; with none, everything goes
+  const only = job.folderIds.length ? new Set(job.folderIds) : null;
   const files = [];
-  for (const c of couriers) {
+
+  for (const c of companies) {
     if (job.cancel) break;
 
     let months = [], loose = [];
     try {
       months = await tryThrice(job, c.name, () => listFolders(c.id));
-      loose  = await tryThrice(job, c.name, () => listSheetsIn(c.id));
+      if (!only) loose = await tryThrice(job, c.name, () => listSheetsIn(c.id));
     } catch (e) {
       say(job, `${c.name}: could not be opened - ${e.message}`);
       job.skipped.push(c.name);
@@ -225,7 +327,7 @@ async function run(realmId, job) {
     loose.forEach(f => files.push({ courier: c.name, month: '', file: f }));
 
     for (const m of months) {
-      if (!monthWanted(job, m.name)) continue;
+      if (only && !only.has(String(m.id))) continue;
       try {
         const inside = await tryThrice(job, `${c.name} / ${m.name}`, () => listSheetsIn(m.id));
         inside.forEach(f => files.push({ courier: c.name, month: m.name, file: f }));
@@ -237,7 +339,7 @@ async function run(realmId, job) {
   }
 
   job.sheetsTotal = files.length;
-  say(job, `${files.length} sheets to read`);
+  say(job, `${files.length} sheet${files.length === 1 ? '' : 's'} to read`);
 
   for (const item of files) {
     if (job.cancel) break;
@@ -310,157 +412,70 @@ async function run(realmId, job) {
       say(job, `${label}: ${tabTrouble} tab${tabTrouble === 1 ? '' : 's'} could not be read`);
     }
   }
-
-  // whatever the CPR sheets never mentioned may have come back as a return
-  if (!job.cancel && job.withReturns) {
-    const left = [...job.wanted].filter(d => !job.hits.has(d));
-    if (left.length) {
-      say(job, `${left.length} still unaccounted for - checking the return sheet`);
-      try {
-        await walkReturns(realmId, job, new Set(left));
-      } catch (e) {
-        say(job, `The return sheet could not be checked - ${e.message}`);
-      }
-    }
-  }
-
-  job.state = job.cancel ? 'stopped' : 'done';
-  job.finishedAt = new Date().toISOString();
-
-  if (job.skipped.length) {
-    say(job, `${job.skipped.length} sheet${job.skipped.length === 1 ? '' : 's'} could not be read at all`);
-  }
-  say(job, job.cancel
-    ? `Stopped - ${job.hits.size} of ${job.wanted.size} found`
-    : `Finished - ${job.hits.size} of ${job.wanted.size} found`);
 }
 
 // The return sheet is a different shape: dated columns, order numbers stacked
-// underneath. Anything found here came back rather than being delivered.
-async function walkReturns(realmId, job, left) {
-  const rootId = await getSetting(realmId, 'void:root', '');
-  if (!rootId) {
-    say(job, 'No return sheet folder is set, so returns were not checked');
-    return;
+// underneath. The page says which workbook, which tabs, and which days.
+async function walkReturns(job, left) {
+  const want = job.returnSheet;
+
+  let tabs = (want.tabs && want.tabs.length) ? want.tabs : null;
+  if (!tabs) {
+    const all = await tryThrice(job, 'The return sheet', () => listTabs(want.id, want.excel));
+    tabs = all.map(t => t.title);
   }
 
-  // the setting holds either a folder or the workbook itself
-  let sheets = [];
-  let folders = [];
+  say(job, `Reading ${tabs.length} tab${tabs.length === 1 ? '' : 's'} of the return sheet`);
 
-  try {
-    folders = await listFolders(rootId);
-    sheets  = await listSheetsIn(rootId);
-  } catch (e) { /* not a folder, then */ }
-
-  if (!sheets.length && !folders.length) {
-    const info = await tryThrice(job, 'The return sheet', () => fileInfo(rootId));
-    if (info && info.mimeType !== 'application/vnd.google-apps.folder') {
-      sheets = [{
-        id: info.id,
-        name: info.name,
-        excel: info.mimeType !== 'application/vnd.google-apps.spreadsheet'
-      }];
-    }
-  }
-
-  // one level of folders, in case the returns are filed by month
-  for (const f of folders) {
-    if (!monthWanted(job, f.name)) continue;
-    try {
-      const inside = await tryThrice(job, f.name, () => listSheetsIn(f.id));
-      inside.forEach(x => sheets.push(x));
-    } catch (e) {
-      say(job, `Return folder ${f.name}: skipped - ${e.message}`);
-      job.skipped.push(`Returns / ${f.name}`);
-    }
-  }
-
-  if (!sheets.length) {
-    say(job, 'No return sheets were found');
-    return;
-  }
-
-  say(job, `${sheets.length} return sheet${sheets.length === 1 ? '' : 's'} to read`);
-
-  for (const file of sheets) {
+  for (const title of tabs) {
     if (job.cancel) break;
     if (!left.size) break;
 
-    let tabs = [];
+    let d;
     try {
-      tabs = await tryThrice(job, file.name, () => listTabs(file.id, file.excel));
+      d = await tryThrice(job, `Returns / ${title}`,
+        () => readDateColumns(want.id, title, want.excel));
     } catch (e) {
-      say(job, `Return sheet ${file.name}: skipped - ${e.message}`);
-      job.skipped.push(`Returns / ${file.name}`);
+      job.skipped.push(`Returns / ${title}`);
       continue;
     }
 
-    for (const t of tabs) {
-      if (job.cancel) break;
-      if (!left.size) break;
+    let foundHere = 0;
 
-      let d;
-      try {
-        d = await tryThrice(job, `${file.name} / ${t.title}`,
-          () => readDateColumns(file.id, t.title, file.excel));
-      } catch (e) {
-        job.skipped.push(`Returns / ${file.name} / ${t.title}`);
-        continue;
-      }
+    (d.days || []).forEach(day => {
+      if (want.from && day.date && day.date < want.from) return;
+      if (want.to   && day.date && day.date > want.to)   return;
 
-      let foundHere = 0;
+      (day.numbers || []).forEach(n => {
+        const key = digitsOf(n);
+        if (!key || !left.has(key) || job.hits.has(key)) return;
 
-      (d.days || []).forEach(day => {
-        (day.numbers || []).forEach(n => {
-          const key = digitsOf(n);
-          if (!key || !left.has(key) || job.hits.has(key)) return;
-
-          job.hits.set(key, {
-            invoice: job.asWritten.get(key) || n,
-            sheetInvoice: n,
-            courier: 'Returned to us',
-            month: '',
-            sheet: file.name,
-            tab: t.title,
-            sheetRow: 0,
-            status: 'On the return sheet',
-            bucket: 'returned',
-            amount: 0,
-            cprNumber: '',
-            cprDate: day.date || null,
-            returnedOn: day.date || null
-          });
-
-          left.delete(key);
-          foundHere++;
+        job.hits.set(key, {
+          invoice: job.asWritten.get(key) || n,
+          sheetInvoice: n,
+          courier: 'Returned to us',
+          month: '',
+          sheet: want.name || 'Return sheet',
+          tab: title,
+          sheetRow: 0,
+          status: 'On the return sheet',
+          bucket: 'returned',
+          amount: 0,
+          cprNumber: '',
+          cprDate: day.date || null,
+          returnedOn: day.date || null
         });
-      });
 
-      if (foundHere) {
-        say(job, `Returns / ${file.name} / ${t.title}: found ${foundHere}` +
-                 ` (${job.hits.size} of ${job.wanted.size} so far)`);
-      }
-    }
+        left.delete(key);
+        foundHere++;
+      });
+    });
 
     job.beat = now();
+
+    if (foundHere) {
+      say(job, `Returns / ${title}: found ${foundHere}` +
+               ` (${job.hits.size} of ${job.wanted.size} so far)`);
+    }
   }
-}
-
-// the month folders that exist, so the page can offer them
-export async function listMonths(realmId) {
-  const root = await getSetting(realmId, 'cpr:root', '');
-  if (!root) throw new Error('Set the Drive folder in Receive payments first');
-
-  const couriers = await listFolders(root);
-  const names = new Set();
-
-  for (const c of couriers) {
-    try {
-      const months = await listFolders(c.id);
-      months.forEach(m => names.add(m.name));
-    } catch (e) { /* skip */ }
-  }
-
-  return [...names].sort();
 }
