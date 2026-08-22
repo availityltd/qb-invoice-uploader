@@ -13,6 +13,7 @@
       { href:'/payments.html', label:'Receive payments', icon:'cash' },
       { href:'/advance.html',  label:'Advance payments', icon:'wallet' },
       { href:'/charges.html',  label:'Delivery charges', icon:'receipt' },
+            { href:'/find.html',     label:'Find orders',      icon:'search' },
       { href:'/couriers.html', label:'Couriers',         icon:'truck', tree:true }
     ]},
     { group: 'Maintenance', items: [
@@ -30,7 +31,8 @@
     copy:   '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/>',
     ban:    '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14h2"/>',
-    receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>'
+    receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>',
+        search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>'
   };
 
   function svg(name){
