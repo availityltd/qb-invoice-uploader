@@ -160,7 +160,14 @@ export async function fetchOrders(token, from, to, statusId) {
     // the guide says fromDate/toDate, the live API asks for startDate/endDate.
   // Sending both keeps either build happy.
    // the guide and the live API disagree on spelling, so send every shape
+ // PostEx numbers its statuses in the order get-order-status lists them
+const STATUS_IDS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
+
+async function askOrders(token, from, to, statusId) {
+  const path = '/services/integration/api/order/v1/get-all-order';
   const sid = statusId === undefined || statusId === null ? 0 : statusId;
+
+  // the guide and the live API disagree on spelling, so send every shape
   const params = {
     orderStatusId: sid,
     orderStatusID: sid,
@@ -169,6 +176,7 @@ export async function fetchOrders(token, from, to, statusId) {
     fromDate: from,
     toDate: to
   };
+
   let json;
   try {
     json = await ask(token, path, params);
@@ -189,9 +197,34 @@ export async function fetchOrders(token, from, to, statusId) {
   }
 
   const list = json.dist || [];
-  if (!Array.isArray(list)) return [];
+  return Array.isArray(list) ? list.map(mapOrder).filter(x => x.tracking) : [];
+}
 
-  return list.map(mapOrder).filter(x => x.tracking);
+// Every order PostEx has for a span of days. Asking for "all" quietly leaves
+// some statuses out, so each one is asked for by name and the answers merged.
+export async function fetchOrders(token, from, to, statusId) {
+  if (statusId) return askOrders(token, from, to, statusId);
+
+  const seen = new Map();
+
+  // the plain call first - it brings back most of them in one go
+  try {
+    (await askOrders(token, from, to, 0)).forEach(o => seen.set(o.tracking, o));
+  } catch (e) { /* the per-status sweep below may still work */ }
+
+  // then each status on its own, four at a time
+  for (let i = 0; i < STATUS_IDS.length; i += 4) {
+    const chunk = STATUS_IDS.slice(i, i + 4);
+    const answers = await Promise.all(
+      chunk.map(id => askOrders(token, from, to, id).catch(() => []))
+    );
+    answers.forEach(list => list.forEach(o => {
+      // a later, more specific answer is the better one to keep
+      seen.set(o.tracking, o);
+    }));
+  }
+
+  return [...seen.values()];
 }
 
 // Settlement and CPR numbers, one order at a time - PostEx offers no bulk call
