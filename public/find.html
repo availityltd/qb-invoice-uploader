@@ -457,7 +457,13 @@
       $('found').innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>';
     });
   });
-
+  // One courier writes its sheets the same way for every account it has, so
+  // "Trax - Elara Beauty" and "Trax CPR Working" share one set of columns.
+  function courierOf(name){
+    var s = String(name || '').trim();
+    var word = s.split(/[\s\-]+/)[0] || s;
+    return word.toLowerCase();
+  }
   function drawCompany(name, info){
     var card = document.createElement('div');
     card.className = 'co';
@@ -510,16 +516,17 @@
   }
 
   function fillCols(card, name, d){
+    var key = courierOf(name);
     var header = d.header || [];
-    var have = saved[name] || d.guess || {};
+    var have = saved[key] || d.guess || {};
 
-    function box(key, label, note){
+    function box(k, label, note){
       var opts = '<option value="-1">' + (note || '\u2014 none \u2014') + '</option>';
       header.forEach(function(h, i){
-        var on = (have[key] !== undefined && Number(have[key]) === i) ? ' selected' : '';
+        var on = (have[k] !== undefined && Number(have[k]) === i) ? ' selected' : '';
         opts += '<option value="' + i + '"' + on + '>' + esc(h || ('Column ' + (i + 1))) + '</option>';
       });
-      return '<div><label>' + label + '</label><select data-key="' + key + '">' + opts + '</select></div>';
+      return '<div><label>' + label + '</label><select data-key="' + k + '">' + opts + '</select></div>';
     }
 
     card.querySelector('.cols').innerHTML =
@@ -528,9 +535,9 @@
       box('status',  'Status', '\u2014 no status column, all delivered \u2014');
 
     var note = document.createElement('div');
-    note.className = saved[name] ? 'saved' : 'peek';
-    note.textContent = saved[name]
-      ? 'Remembered from last time.'
+    note.className = saved[key] ? 'saved' : 'peek';
+    note.textContent = saved[key]
+      ? 'Remembered - the same columns are used for every ' + key + ' account.'
       : 'Guessed from the header - check it before starting.';
     card.appendChild(note);
 
@@ -542,19 +549,28 @@
       cols.cpr = have.cpr === undefined ? -1 : have.cpr;
       cols.cprDate = have.cprDate === undefined ? -1 : have.cprDate;
 
-      saved[name] = cols;
+      saved[key] = cols;
       note.className = 'saved';
-      note.textContent = 'Saved for ' + name + '.';
+      note.textContent = 'Saved - every ' + key + ' account will be read this way.';
 
-      post('/api/find/columns', { company: name, cols: cols }).catch(function(){});
+      post('/api/find/columns', { company: key, cols: cols }).catch(function(){});
+
+      // any other card of the same courier follows along
+      document.querySelectorAll('.co').forEach(function(other){
+        if(other === card) return;
+        var otherName = other.querySelector('.head b');
+        if(!otherName || courierOf(otherName.textContent) !== key) return;
+        other.querySelectorAll('.cols select').forEach(function(s){
+          if(cols[s.dataset.key] !== undefined) s.value = String(cols[s.dataset.key]);
+        });
+      });
     }
 
     card.querySelectorAll('.cols select').forEach(function(s){
       s.addEventListener('change', stash);
     });
 
-    // whatever was guessed is kept straight away, so nothing is left blank
-    if(!saved[name]) stash();
+    if(!saved[key]) stash();
   }
 
   /* ---------- the return sheet ---------- */
