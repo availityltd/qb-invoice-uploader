@@ -77,6 +77,49 @@
   var rail = document.querySelector('.rail');
   if(rail) rail.innerHTML = html;
 
+  /* ---------- back, forward, refresh ---------- */
+
+  (function pageTools(){
+    var top = document.querySelector('.topline');
+    if(!top) return;
+
+    var css = document.createElement('style');
+    css.textContent = [
+      '.ptools{display:flex;gap:6px;margin-left:auto;align-items:center}',
+      '.ptools button{width:30px;height:30px;border:1px solid var(--line);background:#fff;',
+      '  border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;',
+      '  color:var(--muted);padding:0}',
+      '.ptools button:hover{border-color:var(--qbo);color:var(--qbo)}',
+      '.ptools button svg{width:15px;height:15px}',
+      '.ptools button.spin svg{animation:ptspin .7s linear infinite}',
+      '@keyframes ptspin{to{transform:rotate(360deg)}}'
+    ].join('');
+    document.head.appendChild(css);
+
+    function btn(title, body){
+      return '<button title="' + title + '"><svg viewBox="0 0 24 24" fill="none" ' +
+             'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+             'stroke-linejoin="round">' + body + '</svg></button>';
+    }
+
+    var box = document.createElement('div');
+    box.className = 'ptools';
+    box.innerHTML =
+      btn('Back',    '<path d="M15 18l-6-6 6-6"/>') +
+      btn('Forward', '<path d="M9 18l6-6-6-6"/>') +
+      btn('Refresh this page', '<path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6"/>');
+
+    top.appendChild(box);
+
+    var b = box.querySelectorAll('button');
+    b[0].addEventListener('click', function(){ history.back(); });
+    b[1].addEventListener('click', function(){ history.forward(); });
+    b[2].addEventListener('click', function(){
+      b[2].classList.add('spin');
+      location.reload();
+    });
+  })();
+
   /* ---------- the courier tree ---------- */
 
   (function courierTree(){
@@ -91,10 +134,17 @@
       '.ctree a:hover{color:#fff;background:rgba(255,255,255,.05)}',
       '.ctree a.on{color:#fff;background:rgba(255,255,255,.09);font-weight:600}',
       '.ctree a.all{font-weight:600;color:rgba(255,255,255,.78)}',
-      '.ctree .grp{padding:9px 14px 3px 34px;font-size:10.5px;letter-spacing:.09em;',
-      '  text-transform:uppercase;color:rgba(255,255,255,.35);font-weight:600}',
+      '.ctree .grp{display:flex;align-items:center;gap:7px;cursor:pointer;',
+      '  padding:8px 14px 8px 34px;font-size:11px;letter-spacing:.06em;',
+      '  text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:600;user-select:none}',
+      '.ctree .grp:hover{color:rgba(255,255,255,.8)}',
+      '.ctree .grp .car{font-size:8px;transition:transform .15s;display:inline-block;',
+      '  opacity:.7;flex:none}',
+      '.ctree .grp.open .car{transform:rotate(90deg)}',
       '.ctree .grp .soon{text-transform:none;letter-spacing:0;font-size:10px;',
-      '  opacity:.7;font-weight:400}',
+      '  opacity:.6;font-weight:400}',
+      '.ctree .kids{display:none}',
+      '.ctree .kids.open{display:block}',
       '.ctree a.add{padding-left:56px;color:rgba(255,255,255,.42);font-size:13px}',
       '.ctree a.add:hover{color:#fff}',
       '.ctree a.wide{padding-left:34px;margin-top:6px;font-size:12px;',
@@ -120,6 +170,11 @@
 
     var here = location.pathname + location.search;
 
+    // which couriers were left open last time
+    var opened = {};
+    try { opened = JSON.parse(localStorage.getItem('ctreeGroups') || '{}') || {}; }
+    catch(e){ opened = {}; }
+
     fetch('/api/courier/tree', { cache: 'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
@@ -130,20 +185,39 @@
                '" href="/courier-dash.html?scope=all">All courier companies</a>';
 
         (d.couriers || []).forEach(function(c){
-          out += '<div class="grp">' + esc(c.name) +
+          // the courier holding the account we are looking at opens itself
+          var mine = c.accounts.some(function(a){
+            return here.indexOf('account=' + a.id) > -1;
+          });
+          var show = mine || opened[c.key] === true;
+
+          out += '<div class="grp' + (show ? ' open' : '') + '" data-key="' + esc(c.key) + '">' +
+                 '<span class="car">\u25B6</span>' + esc(c.name) +
                  (c.ready ? '' : ' <span class="soon">soon</span>') + '</div>';
 
+          out += '<div class="kids' + (show ? ' open' : '') + '">';
           c.accounts.forEach(function(a){
             out += '<a class="acc' + (here.indexOf('account=' + a.id) > -1 ? ' on' : '') +
                    '" href="/courier-dash.html?account=' + a.id + '">' +
                    esc(a.label) + '</a>';
           });
-
           out += '<a class="add" href="/couriers.html?add=' + esc(c.key) + '">+</a>';
+          out += '</div>';
         });
 
         out += '<a class="add wide" href="/couriers.html">+ Add courier company</a>';
         box.innerHTML = out;
+
+        box.querySelectorAll('.grp').forEach(function(g){
+          g.addEventListener('click', function(){
+            var kids = g.nextElementSibling;
+            var now = !g.classList.contains('open');
+            g.classList.toggle('open', now);
+            if(kids) kids.classList.toggle('open', now);
+            opened[g.getAttribute('data-key')] = now;
+            localStorage.setItem('ctreeGroups', JSON.stringify(opened));
+          });
+        });
       })
       .catch(function(){});
   })();
