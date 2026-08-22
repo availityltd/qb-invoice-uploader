@@ -1,8 +1,12 @@
 // Everything the dashboard shows, asked from the courier at the moment it is
-// asked for. Nothing is written down. A short memory of the last answer keeps
-// a page refresh from making the courier repeat itself.
+// asked for. What comes back is also written down quietly, so the receipts
+// page has something to build on. A short memory of the last answer keeps a
+// page refresh from making the courier repeat itself.
 
-import { listAccounts, getAccount } from './couriers.js';
+import {
+  listAccounts, getAccount, saveOrders,
+  needCpr, savePayments
+} from './couriers.js';
 import { adapter as postexAdapter } from './postex.js';
 
 const ADAPTERS = { postex: postexAdapter };
@@ -30,7 +34,41 @@ async function ordersFor(acc, from, to) {
     recent.delete(oldest[0]);
   }
 
+  // the page does not wait for these - they are only so the receipts can be built
+  if (acc.realm_id) {
+    saveOrders(acc.realm_id, acc.id, acc.courier, orders).catch(() => {});
+    askAboutMoney(acc).catch(() => {});
+  }
+
   return orders;
+}
+
+// The courier names a receipt one parcel at a time, so a batch is asked about
+// on every visit. Nothing is ever asked about twice.
+const asking = new Set();
+
+async function askAboutMoney(acc) {
+  if (asking.has(acc.id)) return;
+  asking.add(acc.id);
+
+  try {
+    const a = ADAPTERS[acc.courier];
+    if (!a || !a.fetchPayment) return;
+
+    const list = await needCpr(acc.realm_id, acc.id, 120);
+    if (!list.length) return;
+
+    // eight at a time is quick without leaning on the courier
+    for (let i = 0; i < list.length; i += 8) {
+      const chunk = list.slice(i, i + 8);
+      const answers = await Promise.all(
+        chunk.map(t => a.fetchPayment(acc.token, t).catch(() => null))
+      );
+      await savePayments(acc.realm_id, acc.id, answers.filter(Boolean));
+    }
+  } finally {
+    asking.delete(acc.id);
+  }
 }
 
 export function forget(accountId) {
@@ -39,15 +77,23 @@ export function forget(accountId) {
   });
 }
 
-// which accounts this view covers
+// which accounts this view covers - always in full, tokens and all
 async function accountsFor(realmId, { account, courier }) {
   if (account) {
     const one = await getAccount(realmId, Number(account));
     return one ? [one] : [];
   }
+
   const all = await listAccounts(realmId);
   const live = all.filter(a => ADAPTERS[a.courier]);
-  return courier ? live.filter(a => a.courier === courier) : live;
+  const wanted = courier ? live.filter(a => a.courier === courier) : live;
+
+  const full = [];
+  for (const a of wanted) {
+    const one = await getAccount(realmId, a.id);
+    if (one) full.push(one);
+  }
+  return full;
 }
 
 const r2 = v => Math.round(Number(v || 0) * 100) / 100;
@@ -65,7 +111,7 @@ export function summarise(orders, from, to) {
   const cities = {};
   const byDay = {};
 
-   let amount = 0, fee = 0, tax = 0, payout = 0;
+  let amount = 0, fee = 0, tax = 0, payout = 0;
   let codPaid = 0, codPending = 0, pendingOrders = 0;
 
   const SETTLED = { delivered: 1, returned: 1, cancelled: 1, expired: 1, lost: 1, damaged: 1 };
@@ -81,7 +127,7 @@ export function summarise(orders, from, to) {
     statuses[s].count++;
     statuses[s].amount += o.amount;
 
-        amount += o.amount;
+    amount += o.amount;
     fee += o.fee;
     tax += o.tax;
     payout += o.payout || 0;
@@ -115,8 +161,7 @@ export function summarise(orders, from, to) {
     cur = nextDay(cur); guard++;
   }
 
-  // newest first, so the page can show the last few movements
-   // the portal lists money that has actually moved, newest first
+  // the portal lists money that has actually moved, newest first
   const moved = orders
     .filter(o => o.statusGroup === 'delivered' && o.deliveredOn)
     .sort((a, b) => String(b.deliveredOn).localeCompare(String(a.deliveredOn)))
@@ -139,14 +184,13 @@ export function summarise(orders, from, to) {
     totals: {
       orders: orders.length,
       amount: r2(amount),
-            fee: r2(fee),
+      fee: r2(fee),
       tax: r2(tax),
       payout: r2(payout),
       codPaid: r2(codPaid),
       codPending: r2(codPending),
       pendingOrders,
       deliveredAmount: r2(delivered.amount),
-      codPaid: r2(codPaid),
       successRate: settledCount ? r2(100 * delivered.count / settledCount) : 0,
       returnRate: settledCount ? r2(100 * returned.count / settledCount) : 0
     },
@@ -169,7 +213,9 @@ export function summarise(orders, from, to) {
 export async function liveStats(realmId, opts) {
   const { from, to } = opts;
   const accounts = await accountsFor(realmId, opts);
-  if (!accounts.length) return { from, to, accounts: [], noAccounts: true, ...summarise([], from, to) };
+  if (!accounts.length) {
+    return { from, to, accounts: [], noAccounts: true, ...summarise([], from, to) };
+  }
 
   const all = [];
   const perAccount = [];
@@ -208,7 +254,7 @@ export async function liveStats(realmId, opts) {
 export async function trackOne(realmId, tracking, accountId) {
   const list = accountId
     ? [await getAccount(realmId, Number(accountId))].filter(Boolean)
-    : (await listAccounts(realmId)).filter(a => ADAPTERS[a.courier]);
+    : await accountsFor(realmId, {});
 
   const wanted = String(tracking || '').trim();
   if (!wanted) throw new Error('Give a tracking number');
@@ -251,6 +297,7 @@ export async function trackOne(realmId, tracking, accountId) {
 
   return { found: false, tracking: wanted };
 }
+
 // the orders behind one number on the dashboard
 export async function liveOrders(realmId, opts) {
   const { from, to, status, group } = opts;
@@ -289,6 +336,7 @@ export async function liveOrders(realmId, opts) {
     orders: rows.slice(0, 500)
   };
 }
+
 // one untouched row, exactly as the courier sent it
 export async function peekRaw(realmId, opts) {
   const accounts = await accountsFor(realmId, opts);
@@ -303,4 +351,13 @@ export async function peekRaw(realmId, opts) {
   orders.forEach(o => { names[o.status] = (names[o.status] || 0) + 1; });
 
   return { statusNames: names, sample: one ? one.raw : null };
+}
+
+// how far along the receipt-gathering is, and a nudge to do some more
+export async function chaseCpr(realmId, accountId) {
+  const accounts = await accountsFor(realmId, { account: accountId });
+  for (const acc of accounts) {
+    askAboutMoney(acc).catch(() => {});
+  }
+  return { started: accounts.length };
 }
