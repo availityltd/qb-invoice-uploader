@@ -485,8 +485,8 @@ async function walkReturns(job, left) {
   }
 }
 // The header of the first tab of one sheet, so the page can ask which column
-// is which. Sheets are written by hand, and every courier names them their
-// own way, so guessing is the wrong habit.
+// is which. Only the top few rows are read - a whole workbook is far too much
+// to move just to see the names.
 export async function peekHeader(sheetId, excel) {
   const tabs = await listTabs(sheetId, excel);
   if (!tabs.length) throw new Error('That file has no tabs');
@@ -495,9 +495,6 @@ export async function peekHeader(sheetId, excel) {
   return {
     tab: tabs[0].title,
     header: d.header,
-    guess: d.cols,
-    sample: d.rows.slice(0, 3).map(r => ({
-      invoice: r.invoice, amount: r.amount, status: r.status
-    }))
+    guess: d.cols
   };
 }
