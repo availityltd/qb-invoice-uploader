@@ -102,6 +102,29 @@
   .msg{padding:13px 15px;border-radius:8px;background:#FDF3F3;border:1px solid var(--bad);
     color:var(--bad);font-size:12.5px}
   .loading{color:var(--muted);font-size:12.5px;padding:22px 0}
+
+  /* ---- backfill drawer content ---- */
+  .bf-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:14px 0}
+  .bf-field label{display:block;font-size:11px;color:var(--faint);margin-bottom:4px}
+  .bf-field input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
+    font:inherit;font-size:12.5px}
+  .bf-chk{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
+  .bf-actions{display:flex;gap:8px;margin:4px 0 16px}
+  .bf-actions button{border:0;border-radius:7px;padding:9px 16px;font:inherit;font-size:12.5px;
+    cursor:pointer}
+  .bf-start{background:var(--qbo);color:#fff}
+  .bf-start:disabled{background:#B9D2C6;cursor:not-allowed}
+  .bf-stop{background:#C9453F;color:#fff}
+  .bf-clear{background:#EEF1F4;color:var(--ink)}
+  .bf-badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
+  .bf-running{background:#EAF3FB;color:#2F6FA8}
+  .bf-done{background:#E6F6EC;color:#1F9D5A}
+  .bf-stopped,.bf-failed{background:#FDF3F3;color:#C9453F}
+  .bf-track{background:var(--line);border-radius:5px;height:8px;overflow:hidden;margin:6px 0 12px}
+  .bf-fill{background:var(--qbo);height:100%;width:0%}
+  .bf-stats{font-size:12px;color:var(--muted);margin-bottom:10px}
+  .bf-log{background:#0F1B17;color:#CFE0D6;font-family:var(--mono);font-size:11.5px;
+    padding:11px;border-radius:7px;height:200px;overflow-y:auto;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -134,6 +157,7 @@
           <input type="date" id="from">
           <input type="date" id="to">
           <button class="on" id="go">Show</button>
+          <button id="btnBackfill">Backfill history</button>
           <div class="find">
             <input id="track" placeholder="Tracking number">
             <button id="btnTrack">Find</button>
@@ -225,6 +249,7 @@
     $('go').addEventListener('click', load);
     $('btnTrack').addEventListener('click', findOne);
     $('track').addEventListener('keydown', function(e){ if(e.key === 'Enter') findOne(); });
+    $('btnBackfill').addEventListener('click', openBackfill);
 
     head();
     load();
@@ -514,9 +539,12 @@
     $('dBody').innerHTML = body;
     $('drawer').classList.add('open');
   }
-  $('dClose').addEventListener('click', function(){ $('drawer').classList.remove('open'); });
+  $('dClose').addEventListener('click', function(){
+    $('drawer').classList.remove('open');
+    stopBackfillPolling();
+  });
   $('drawer').addEventListener('click', function(e){
-    if(e.target === $('drawer')) $('drawer').classList.remove('open');
+    if(e.target === $('drawer')){ $('drawer').classList.remove('open'); stopBackfillPolling(); }
   });
 
   function openList(status, group){
@@ -602,6 +630,180 @@
       .catch(function(e){
         $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
       });
+  }
+
+  /* ---------- backfill, scoped to this account ---------- */
+
+  var bfTimer = null;
+  var bfSinceLog = 0;
+
+  function stopBackfillPolling(){
+    if(bfTimer){ clearInterval(bfTimer); bfTimer = null; }
+  }
+
+  function openBackfill(){
+    if(!account){
+      openDrawer('Backfill history', '',
+        '<div class="msg">Open this from a specific account\u2019s dashboard \u2014 ' +
+        'the URL needs ?account=... for this to know which one to pull.</div>');
+      return;
+    }
+
+    var toStr = today();
+    var fromD = new Date(); fromD.setDate(fromD.getDate() - 90);
+    var fromStr = iso(fromD);
+
+    var body =
+      '<div class="bf-row">' +
+        '<div class="bf-field"><label>From</label><input type="date" id="bfFrom" value="'+fromStr+'"></div>' +
+        '<div class="bf-field"><label>To</label><input type="date" id="bfTo" value="'+toStr+'"></div>' +
+      '</div>' +
+      '<label class="bf-chk"><input type="checkbox" id="bfCpr" checked> ' +
+        'Also fetch payment status (CPR) for delivered orders</label>' +
+      '<div class="bf-actions">' +
+        '<button class="bf-start" id="bfStart">Start backfill</button>' +
+        '<button class="bf-stop" id="bfStop" style="display:none">Stop</button>' +
+        '<button class="bf-clear" id="bfClear" style="display:none">Clear</button>' +
+      '</div>' +
+      '<div id="bfErr" class="msg" style="display:none;margin-bottom:12px"></div>' +
+      '<div id="bfPanel" style="display:none">' +
+        '<span id="bfBadge" class="bf-badge bf-running">running</span>' +
+        '<div class="bf-stats" style="margin-top:8px">' +
+          'Months: <span id="bfMonthsDone">0</span> / <span id="bfMonthsTotal">0</span>' +
+        '</div>' +
+        '<div class="bf-track"><div class="bf-fill" id="bfBar"></div></div>' +
+        '<div class="bf-stats">' +
+          'Orders saved: <span id="bfOrders">0</span> \u00b7 ' +
+          'Payment status checked: <span id="bfAsked">0</span> \u00b7 ' +
+          'Left to check: <span id="bfLeft">0</span>' +
+        '</div>' +
+        '<div class="bf-log" id="bfLog"></div>' +
+      '</div>';
+
+    openDrawer('Backfill history', '', body);
+
+    $('bfStart').addEventListener('click', bfStart);
+    $('bfStop').addEventListener('click', bfStop);
+    $('bfClear').addEventListener('click', bfClear);
+
+    bfResumeIfRunning();
+  }
+
+  function bfShowError(msg){
+    var e = $('bfErr');
+    if(!e) return;
+    e.textContent = msg;
+    e.style.display = 'block';
+  }
+  function bfClearError(){
+    var e = $('bfErr');
+    if(e) e.style.display = 'none';
+  }
+
+  function bfStart(){
+    bfClearError();
+    var from = $('bfFrom').value, to = $('bfTo').value;
+    var withCpr = $('bfCpr').checked;
+
+    if(!from || !to) return bfShowError('Pick a from and to date');
+
+    $('bfStart').disabled = true;
+    fetch('/api/courier/backfill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: account, from: from, to: to, withCpr: withCpr })
+    })
+      .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+      .then(function(res){
+        if(!res.ok) throw new Error(res.d.error || 'Could not start');
+        bfSinceLog = 0;
+        var log = $('bfLog'); if(log) log.textContent = '';
+        $('bfPanel').style.display = 'block';
+        $('bfStop').style.display = 'inline-block';
+        $('bfClear').style.display = 'none';
+        bfPoll();
+      })
+      .catch(function(e){
+        bfShowError(e.message);
+        $('bfStart').disabled = false;
+      });
+  }
+
+  function bfStop(){
+    fetch('/api/courier/backfill-stop', { method: 'POST' });
+  }
+
+  function bfClear(){
+    fetch('/api/courier/backfill-clear', { method: 'POST' })
+      .then(function(r){
+        if(r.ok){
+          $('bfPanel').style.display = 'none';
+          $('bfClear').style.display = 'none';
+          $('bfStart').disabled = false;
+        }
+      });
+  }
+
+  function bfRender(job){
+    if(!$('bfPanel')) return;
+    $('bfPanel').style.display = 'block';
+
+    var badge = $('bfBadge');
+    badge.textContent = job.state;
+    badge.className = 'bf-badge bf-' + job.state;
+
+    $('bfMonthsDone').textContent = job.monthsDone;
+    $('bfMonthsTotal').textContent = job.monthsTotal;
+    var pct = job.monthsTotal ? Math.round(100 * job.monthsDone / job.monthsTotal) : 0;
+    $('bfBar').style.width = pct + '%';
+
+    $('bfOrders').textContent = job.ordersSaved;
+    $('bfAsked').textContent = job.asked;
+    $('bfLeft').textContent = job.cprLeft;
+
+    if(job.log && job.log.length){
+      var box = $('bfLog');
+      var atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
+      job.log.forEach(function(l){ box.textContent += l.text + '\n'; });
+      bfSinceLog = job.logLength;
+      if(atBottom) box.scrollTop = box.scrollHeight;
+    }
+
+    if(job.state !== 'running'){
+      stopBackfillPolling();
+      $('bfStop').style.display = 'none';
+      $('bfClear').style.display = 'inline-block';
+      $('bfStart').disabled = false;
+      if(job.error) bfShowError(job.error);
+    }
+  }
+
+  function bfPoll(){
+    stopBackfillPolling();
+    var tick = function(){
+      fetch('/api/courier/backfill-status?since=' + bfSinceLog, { cache:'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(function(data){ if(data.job && $('bfPanel')) bfRender(data.job); })
+        .catch(function(){});
+    };
+    tick();
+    bfTimer = setInterval(tick, 2000);
+  }
+
+  function bfResumeIfRunning(){
+    fetch('/api/courier/backfill-status?since=0', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(!data.job || !$('bfPanel')) return;
+        if(data.job.state === 'running'){
+          $('bfStart').disabled = true;
+          $('bfStop').style.display = 'inline-block';
+          bfPoll();
+        } else {
+          bfRender(data.job);
+        }
+      })
+      .catch(function(){});
   }
 })();
 </script>
