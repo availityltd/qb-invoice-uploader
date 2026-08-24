@@ -49,6 +49,9 @@ import {
   startFindJob, stopFindJob, clearFindJob, findSnapshot,
   listTree, sheetsIn, peekHeader
 } from './finder.js';
+import {
+  startBackfill, stopBackfill, clearBackfill, backfillSnapshot
+} from './backfill.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -2421,7 +2424,41 @@ app.post('/api/courier/cpr-chase', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ---------- Bringing the history in ----------
 
+app.post('/api/courier/backfill', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const id = startBackfill(realmId, req.body);
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/courier/backfill-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = backfillSnapshot(realmId, req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/courier/backfill-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopBackfill(realmId) });
+});
+
+app.post('/api/courier/backfill-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearBackfill(realmId);
+  if (!ok) return res.status(409).json({ error: 'The backfill is still running' });
+  res.json({ ok: true });
+});
 // the orders behind one status
 
 app.get('/api/courier/orders', async (req, res) => {
