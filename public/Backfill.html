@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Backfill</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #666; margin-bottom: 24px; font-size: 14px; }
+  .row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  label { display: block; font-size: 13px; color: #444; margin-bottom: 4px; }
+  input, select { padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  button { padding: 9px 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  #startBtn { background: #1a73e8; color: #fff; }
+  #startBtn:disabled { background: #99b8e8; cursor: not-allowed; }
+  #stopBtn { background: #d93025; color: #fff; }
+  #clearBtn { background: #eee; color: #333; }
+  .hidden { display: none; }
+  .panel { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin-top: 20px; }
+  .bar-track { background: #eee; border-radius: 5px; height: 10px; overflow: hidden; margin: 6px 0; }
+  .bar-fill { background: #1a73e8; height: 100%; width: 0%; transition: width .3s; }
+  .stat-line { font-size: 13px; color: #333; margin: 4px 0; }
+  .state-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .state-running { background: #e8f0fe; color: #1a73e8; }
+  .state-done { background: #e6f4ea; color: #188038; }
+  .state-stopped { background: #fce8e6; color: #d93025; }
+  .state-failed { background: #fce8e6; color: #d93025; }
+  #log { background: #0d1117; color: #c9d1d9; font-family: ui-monospace, monospace; font-size: 12px;
+         padding: 12px; border-radius: 6px; height: 220px; overflow-y: auto; margin-top: 12px; white-space: pre-wrap; }
+  .err { color: #d93025; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+  <h1>Backfill</h1>
+  <div class="sub">Pull a courier's order history into our own table, once. After this, everything else reads from here.</div>
+
+  <div class="row">
+    <div>
+      <label for="account">Account</label>
+      <select id="account"></select>
+    </div>
+    <div>
+      <label for="from">From</label>
+      <input type="date" id="from">
+    </div>
+    <div>
+      <label for="to">To</label>
+      <input type="date" id="to">
+    </div>
+  </div>
+
+  <div class="row">
+    <label style="display:flex; align-items:center; gap:6px; font-size:14px; color:#333;">
+      <input type="checkbox" id="withCpr" checked style="width:auto;">
+      Also fetch payment status (CPR) for delivered orders
+    </label>
+  </div>
+
+  <div class="row">
+    <button id="startBtn">Start backfill</button>
+    <button id="stopBtn" class="hidden">Stop</button>
+    <button id="clearBtn" class="hidden">Clear</button>
+  </div>
+
+  <div id="err" class="err hidden"></div>
+
+  <div id="panel" class="panel hidden">
+    <div><span id="stateBadge" class="state-badge state-running">running</span>
+      <span id="accountLabel" style="margin-left:8px; color:#555; font-size:13px;"></span></div>
+
+    <div class="stat-line">Months: <span id="monthsDone">0</span> / <span id="monthsTotal">0</span></div>
+    <div class="bar-track"><div id="monthsBar" class="bar-fill"></div></div>
+
+    <div class="stat-line" id="cprStatWrap">
+      Orders saved: <span id="ordersSaved">0</span> &nbsp;·&nbsp;
+      Payment status checked: <span id="asked">0</span> &nbsp;·&nbsp;
+      Left to check: <span id="cprLeft">0</span>
+    </div>
+
+    <div id="log"></div>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let pollTimer = null;
+  let sinceLog = 0;
+
+  // Try to load the account list. If there's no such endpoint yet,
+  // fall back to a plain numeric id field so this page still works.
+  async function loadAccounts() {
+    const sel = $('account');
+    try {
+      const r = await fetch('/api/courier/accounts');
+      if (!r.ok) throw new Error('no endpoint');
+      const data = await r.json();
+      const accounts = data.accounts || data || [];
+      if (!accounts.length) throw new Error('empty');
+      sel.innerHTML = accounts.map(a =>
+        `<option value="${a.id}">${a.label || a.courier + ' #' + a.id}</option>`
+      ).join('');
+    } catch (e) {
+      // Fallback: manual account id
+      sel.outerHTML = '<input type="number" id="account" placeholder="Account ID">';
+    }
+  }
+
+  function defaultDates() {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 90);
+    $('to').value = to.toISOString().slice(0, 10);
+    $('from').value = from.toISOString().slice(0, 10);
+  }
+
+  function showError(msg) {
+    $('err').textContent = msg;
+    $('err').classList.remove('hidden');
+  }
+  function clearError() {
+    $('err').classList.add('hidden');
+  }
+
+  async function start() {
+    clearError();
+    const account = $('account').value;
+    const from = $('from').value;
+    const to = $('to').value;
+    const withCpr = $('withCpr').checked;
+
+    if (!account) return showError('Pick an account');
+    if (!from || !to) return showError('Pick a from and to date');
+
+    $('startBtn').disabled = true;
+    try {
+      const r = await fetch('/api/courier/backfill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account, from, to, withCpr })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Could not start');
+
+      sinceLog = 0;
+      $('log').textContent = '';
+      $('panel').classList.remove('hidden');
+      $('stopBtn').classList.remove('hidden');
+      $('clearBtn').classList.add('hidden');
+      poll();
+    } catch (e) {
+      showError(e.message);
+      $('startBtn').disabled = false;
+    }
+  }
+
+  async function stop() {
+    await fetch('/api/courier/backfill-stop', { method: 'POST' });
+  }
+
+  async function clearJob() {
+    const r = await fetch('/api/courier/backfill-clear', { method: 'POST' });
+    if (r.ok) {
+      $('panel').classList.add('hidden');
+      $('clearBtn').classList.add('hidden');
+      $('startBtn').disabled = false;
+    }
+  }
+
+  function render(job) {
+    $('panel').classList.remove('hidden');
+    $('accountLabel').textContent = job.account || '';
+
+    const badge = $('stateBadge');
+    badge.textContent = job.state;
+    badge.className = 'state-badge state-' + job.state;
+
+    $('monthsDone').textContent = job.monthsDone;
+    $('monthsTotal').textContent = job.monthsTotal;
+    const pct = job.monthsTotal ? Math.round(100 * job.monthsDone / job.monthsTotal) : 0;
+    $('monthsBar').style.width = pct + '%';
+
+    $('ordersSaved').textContent = job.ordersSaved;
+    $('asked').textContent = job.asked;
+    $('cprLeft').textContent = job.cprLeft;
+
+    if (job.log && job.log.length) {
+      const box = $('log');
+      const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
+      job.log.forEach(l => { box.textContent += l.text + '\n'; });
+      sinceLog = job.logLength;
+      if (atBottom) box.scrollTop = box.scrollHeight;
+    }
+
+    if (job.state !== 'running') {
+      clearInterval(pollTimer);
+      $('stopBtn').classList.add('hidden');
+      $('clearBtn').classList.remove('hidden');
+      $('startBtn').disabled = false;
+      if (job.error) showError(job.error);
+    }
+  }
+
+  async function poll() {
+    clearInterval(pollTimer);
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/courier/backfill-status?since=' + sinceLog);
+        const data = await r.json();
+        if (data.job) render(data.job);
+      } catch (e) { /* keep trying */ }
+    };
+    await tick();
+    pollTimer = setInterval(tick, 2000);
+  }
+
+  // Resume watching a job that's already running (e.g. page was reloaded)
+  async function resumeIfRunning() {
+    try {
+      const r = await fetch('/api/courier/backfill-status?since=0');
+      const data = await r.json();
+      if (data.job && data.job.state === 'running') {
+        $('startBtn').disabled = true;
+        $('stopBtn').classList.remove('hidden');
+        poll();
+      } else if (data.job) {
+        render(data.job);
+      }
+    } catch (e) { /* no job yet */ }
+  }
+
+  $('startBtn').addEventListener('click', start);
+  $('stopBtn').addEventListener('click', stop);
+  $('clearBtn').addEventListener('click', clearJob);
+
+  defaultDates();
+  loadAccounts().then(resumeIfRunning);
+</script>
+</body>
+</html>
