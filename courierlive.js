@@ -34,10 +34,9 @@ async function ordersFor(acc, from, to) {
     recent.delete(oldest[0]);
   }
 
-  // the page does not wait for these - they are only so the receipts can be built
+  // the page does not wait for this - it is only so the receipts can be built
   if (acc.realm_id) {
     saveOrders(acc.realm_id, acc.id, acc.courier, orders).catch(() => {});
-    askAboutMoney(acc).catch(() => {});
   }
 
   return orders;
