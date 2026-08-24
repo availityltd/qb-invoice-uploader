@@ -153,9 +153,8 @@ export function mapOrder(row) {
   };
 }
 
-// PostEx numbers its statuses in the order get-order-status lists them
-const STATUS_IDS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
-
+// asking for "all" already brings back every status the portal shows
+const STATUS_IDS = [];
 async function askOrders(token, from, to, statusId) {
   const path = '/services/integration/api/order/v1/get-all-order';
   const sid = statusId === undefined || statusId === null ? 0 : statusId;
