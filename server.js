@@ -28,6 +28,7 @@ import { clean as cprClean } from './cpr.js';
 import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
+import { startDelJob, stopDelJob, clearDelJob, delSnapshot } from './deljobs.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
 import { startAdvJob, stopAdvJob, clearAdvJob, advSnapshot } from './advjobs.js';
 import {
@@ -779,6 +780,121 @@ app.post('/api/invoice-delete', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+// ==================== Deleting invoices in bulk ====================
+// The page shows the whole list first; this only runs on what it is handed.
+
+app.post('/api/qb-invoice-find', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const raw = req.body.numbers;
+  const list = (Array.isArray(raw) ? raw : String(raw || '').split(/[\s,;]+/))
+    .map(x => String(x).trim())
+    .filter(Boolean);
+
+  if (!list.length) return res.status(400).json({ error: 'Paste some invoice numbers first' });
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    const wanted = [];
+    const seen = new Set();
+    const asWritten = new Map();
+    list.forEach(n => {
+      const d = digitsOf(n);
+      if (!d) return;
+      if (!asWritten.has(d)) asWritten.set(d, n);
+      if (seen.has(d)) return;
+      seen.add(d);
+      wanted.push(d);
+    });
+
+    const found = new Map();
+    for (let i = 0; i < wanted.length; i += 40) {
+      const chunk = wanted.slice(i, i + 40);
+      const variants = [];
+      chunk.forEach(d => variants.push(`'#${d}'`, `'${d}'`));
+
+      const q = await qbQuery(realmId, token,
+        `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn ` +
+        `FROM Invoice WHERE DocNumber IN (${variants.join(',')}) MAXRESULTS 1000`);
+
+      (q.Invoice || []).forEach(inv => {
+        const d = digitsOf(inv.DocNumber);
+        if (!d) return;
+        if (!found.has(d)) found.set(d, []);
+        found.get(d).push(inv);
+      });
+    }
+
+    const ready = [], paid = [], notFound = [];
+
+    wanted.forEach(d => {
+      const copies = found.get(d);
+      if (!copies || !copies.length) { notFound.push(asWritten.get(d) || d); return; }
+
+      copies.forEach(inv => {
+        const total = Number(inv.TotalAmt || 0);
+        const entry = {
+          id: inv.Id,
+          doc: inv.DocNumber || '',
+          hash: (inv.DocNumber || '').charAt(0) === '#',
+          date: inv.TxnDate || '',
+          total,
+          balance: Number(inv.Balance === undefined ? total : inv.Balance),
+          customer: inv.CustomerRef ? (inv.CustomerRef.name || '') : ''
+        };
+
+        // anything with money against it is set aside, never deleted here
+        const hasPayment = (inv.LinkedTxn || []).some(t => t.TxnType === 'Payment');
+        if (hasPayment || entry.balance <= 0.005) paid.push(entry);
+        else ready.push(entry);
+      });
+    });
+
+    res.json({
+      asked: list.length,
+      unique: wanted.length,
+      ready, paid, notFound
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/invoice-delete-start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const id = startDelJob(realmId, req.body);
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/invoice-delete-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = delSnapshot(realmId, req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/invoice-delete-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopDelJob(realmId) });
+});
+
+app.post('/api/invoice-delete-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearDelJob(realmId);
+  if (!ok) return res.status(409).json({ error: 'The delete run is still going' });
+  res.json({ ok: true });
 });
 // ==================== Dashboard ====================
 app.get('/api/dashboard', async (req, res) => {
