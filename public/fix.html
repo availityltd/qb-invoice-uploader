@@ -302,13 +302,15 @@
               <div class="acts" style="margin-bottom:14px">
                 <button class="mini" id="btnPeekGo">Show what will go</button>
                 <button class="mini" id="btnPeekKeep">Show what stays</button>
+                                <button class="mini" id="btnPeekPaid">Show the paid ones</button>
                 <button class="mini" id="btnDelFile">Download the list</button>
               </div>
 
               <div class="peek" id="delPeek"></div>
 
               <div style="margin-top:18px">
-                <button class="solid" id="btnDelStart">Delete them</button>
+                               <button class="solid" id="btnDelStart">Delete them</button>
+                <button id="btnDelPaid" style="margin-left:8px">Delete the paid ones too</button>
                 <span style="font-size:12px;color:var(--faint);margin-left:10px" id="delPlan"></span>
               </div>
             </div>
@@ -809,6 +811,7 @@
       : 'Nothing matches that choice.';
 
     $('btnDelStart').disabled = !go.length;
+    $('btnDelPaid').disabled = !delData.paid.length;
     $('delPeek').classList.remove('open');
   }
 
@@ -841,7 +844,75 @@
     $('delPeek').innerHTML = peekTable(willStay(), false);
     $('delPeek').classList.add('open');
   });
+  $('btnPeekPaid').addEventListener('click', function(){
+    if(!delData || !delData.paid.length){
+      $('delPeek').innerHTML = '<div style="padding:14px;color:var(--muted);font-size:13px">None of them carry a payment.</div>';
+      $('delPeek').classList.add('open');
+      return;
+    }
 
+    var rows = delData.paid.map(function(x){
+      var pays = (x.payments || []).map(function(p){
+        return (p.ref || 'no CPR number') + ' · ' + money(p.amount) +
+               (p.bank ? ' · ' + safe(p.bank) : '') +
+               ' · ' + p.invoices + ' invoice' + (p.invoices === 1 ? '' : 's');
+      }).join('<br>');
+
+      return '<tr' + (x.shared ? ' style="background:#FDF3F3"' : '') + '>' +
+        '<td class="mono">' + safe(x.doc) + '</td>' +
+        '<td class="mono" style="font-size:11px;color:var(--faint)">Id ' + safe(x.id) + ' · ' + safe(x.date) + '</td>' +
+        '<td class="num mono">' + money(x.total) + '</td>' +
+        '<td style="font-size:11.5px">' + (pays || 'nothing found') + '</td>' +
+        '<td>' + (x.shared
+          ? '<span class="goes">also covers other invoices</span>'
+          : '<span class="stays">only these</span>') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    $('delPeek').innerHTML =
+      '<table><thead><tr><th>Invoice</th><th>Details</th><th class="num">Amount</th>' +
+      '<th>The payment behind it</th><th>Reach</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    $('delPeek').classList.add('open');
+  });
+
+  $('btnDelPaid').addEventListener('click', function(){
+    if(!delData || !delData.paid.length) return;
+
+    var want = whichWanted();
+    var list = delData.paid.filter(function(x){
+      if(want === 'hash')  return x.hash;
+      if(want === 'plain') return !x.hash;
+      return true;
+    });
+
+    if(!list.length) return alert('None of the paid ones match that choice.');
+
+    var shared = list.filter(function(x){ return x.shared; });
+    var amount = list.reduce(function(s, x){ return s + Number(x.total || 0); }, 0);
+    var payCount = {};
+    list.forEach(function(x){
+      (x.payments || []).forEach(function(p){ payCount[p.id] = 1; });
+    });
+    var pays = Object.keys(payCount).length;
+
+    var msg = list.length + ' invoices worth ' + money(amount) + ' will be removed, ' +
+              'along with ' + pays + ' payment' + (pays === 1 ? '' : 's') + ' behind them.\n\n' +
+              'The money will leave QuickBooks as well.';
+
+    if(shared.length){
+      msg += '\n\nWARNING: ' + shared.length + ' of those payments also cover invoices ' +
+             'that are NOT in this list. Those invoices will become unpaid.';
+    }
+
+    msg += '\n\nThis cannot be undone. Have you looked at the list?';
+
+    if(!confirm(msg)) return;
+
+    var again = prompt('Type DELETE WITH PAYMENTS to go ahead.');
+    if(String(again || '').trim().toUpperCase() !== 'DELETE WITH PAYMENTS') return;
+
+    startRemoving(list);
+  });
   $('btnDelFile').addEventListener('click', function(){
     var rows = [];
     willGo().forEach(function(x){
@@ -869,18 +940,24 @@
     var again = prompt('Type DELETE to go ahead.');
     if(String(again || '').trim().toUpperCase() !== 'DELETE') return;
 
+    startRemoving(go);
+  });
+
+  function startRemoving(list){
     $('btnDelStart').disabled = true;
+    $('btnDelPaid').disabled = true;
     delSince = 0;
     $('delLog').innerHTML = '';
 
     fetch('/api/invoice-delete-start', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ invoices: go })
+      body: JSON.stringify({ invoices: list })
     })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error){
           $('btnDelStart').disabled = false;
+          $('btnDelPaid').disabled = false;
           setStat($('statLook'),'bad', d.error);
           return;
         }
@@ -892,10 +969,10 @@
       })
       .catch(function(e){
         $('btnDelStart').disabled = false;
+        $('btnDelPaid').disabled = false;
         setStat($('statLook'),'bad', e.message);
       });
-  });
-
+  }
   $('btnDelStop').addEventListener('click', function(){
     fetch('/api/invoice-delete-stop', { method:'POST' }).catch(function(){});
   });
@@ -905,7 +982,8 @@
       .then(function(r){ return r.json(); })
       .then(function(){
         $('delRun').classList.add('hide');
-        $('btnDelStart').disabled = false;
+               $('btnDelStart').disabled = false;
+        $('btnDelPaid').disabled = false;
         delSince = 0;
       })
       .catch(function(){});
@@ -932,8 +1010,10 @@
 
         var pct = job.total ? Math.round(100 * (job.done + job.failed) / job.total) : 0;
         $('delBar').style.width = pct + '%';
-        $('delStat').textContent =
-          nf(job.done) + ' deleted' + (job.failed ? ', ' + nf(job.failed) + ' failed' : '') +
+             $('delStat').textContent =
+          nf(job.done) + ' deleted' +
+          (job.paymentsGone ? ', ' + nf(job.paymentsGone) + ' payments removed' : '') +
+          (job.failed ? ', ' + nf(job.failed) + ' failed' : '') +
           ' of ' + nf(job.total) +
           (job.state === 'running' ? '' : ' · ' + job.state);
 
@@ -960,6 +1040,7 @@
         $('btnDelStop').classList.add('hide');
         $('btnDelClear').classList.remove('hide');
         $('btnDelStart').disabled = false;
+                $('btnDelPaid').disabled = false;
       })
       .catch(function(){ delTimer = setTimeout(delPoll, 4000); });
   }
