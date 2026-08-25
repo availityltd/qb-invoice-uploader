@@ -829,13 +829,21 @@ app.post('/api/qb-invoice-find', async (req, res) => {
     }
 
     const ready = [], paid = [], notFound = [];
+    const payIds = new Set();
+    const ourInvoiceIds = new Set();
 
     wanted.forEach(d => {
       const copies = found.get(d);
       if (!copies || !copies.length) { notFound.push(asWritten.get(d) || d); return; }
 
       copies.forEach(inv => {
+        ourInvoiceIds.add(String(inv.Id));
+
         const total = Number(inv.TotalAmt || 0);
+        const linked = (inv.LinkedTxn || [])
+          .filter(t => t.TxnType === 'Payment')
+          .map(t => String(t.TxnId));
+
         const entry = {
           id: inv.Id,
           doc: inv.DocNumber || '',
@@ -843,14 +851,61 @@ app.post('/api/qb-invoice-find', async (req, res) => {
           date: inv.TxnDate || '',
           total,
           balance: Number(inv.Balance === undefined ? total : inv.Balance),
-          customer: inv.CustomerRef ? (inv.CustomerRef.name || '') : ''
+          customer: inv.CustomerRef ? (inv.CustomerRef.name || '') : '',
+          paymentIds: linked
         };
 
-        // anything with money against it is set aside, never deleted here
-        const hasPayment = (inv.LinkedTxn || []).some(t => t.TxnType === 'Payment');
-        if (hasPayment || entry.balance <= 0.005) paid.push(entry);
-        else ready.push(entry);
+        if (linked.length || entry.balance <= 0.005) {
+          linked.forEach(id => payIds.add(id));
+          paid.push(entry);
+        } else {
+          ready.push(entry);
+        }
       });
+    });
+
+    // what each of those payments is, and whether it touches anything else
+    const payments = {};
+    if (payIds.size) {
+      const ids = [...payIds];
+      for (let i = 0; i < ids.length; i += 40) {
+        const chunk = ids.slice(i, i + 40).map(x => `'${x}'`).join(',');
+        let q;
+        try {
+          q = await qbQuery(realmId, token,
+            `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, Line ` +
+            `FROM Payment WHERE Id IN (${chunk}) MAXRESULTS 1000`);
+        } catch (e) { continue; }
+
+        (q.Payment || []).forEach(p => {
+          // every invoice this payment sits against
+          const touches = [];
+          (p.Line || []).forEach(l => {
+            (l.LinkedTxn || []).forEach(t => {
+              if (t.TxnType === 'Invoice') touches.push(String(t.TxnId));
+            });
+          });
+
+          const outside = touches.filter(id => !ourInvoiceIds.has(id));
+
+          payments[String(p.Id)] = {
+            id: String(p.Id),
+            date: p.TxnDate || '',
+            amount: Number(p.TotalAmt || 0),
+            ref: String(p.PaymentRefNum || '').trim(),
+            bank: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : '',
+            invoices: touches.length,
+            outside: outside.length
+          };
+        });
+      }
+    }
+
+    // a payment that also covers an invoice we are not touching is a warning
+    paid.forEach(x => {
+      x.payments = (x.paymentIds || []).map(id => payments[id]).filter(Boolean);
+      x.shared = x.payments.some(p => p.outside > 0);
+      x.paidAmount = x.payments.reduce((s, p) => s + p.amount, 0);
     });
 
     res.json({
