@@ -32,6 +32,29 @@
   .peek td,.peek th{padding:6px 10px}
   .hand{border-left:3px solid var(--warn);padding:12px 12px 6px 14px;background:var(--warn-soft);
         border-radius:0 6px 6px 0;margin-top:18px}
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .tabs button{border:0;background:none;padding:12px 20px;font:inherit;font-size:13.5px;
+    cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+  .pane{display:none}
+  .pane.on{display:block}
+
+  textarea.nums{width:100%;min-height:150px;border:1px solid var(--line);border-radius:6px;
+    padding:11px 13px;font-family:var(--mono);font-size:12.5px;resize:vertical;background:#fff}
+
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;
+    margin:16px 0}
+  .tile{border:1px solid var(--line);border-radius:8px;padding:13px 15px;background:#fff}
+  .tile .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tile .l{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);
+    margin-top:4px}
+  .tile.go .n{color:var(--neg)}
+  .tile.keep .n{color:var(--ok)}
+
+  .opts{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0;font-size:13px}
+  .opts label{display:flex;align-items:center;gap:7px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -43,7 +66,7 @@
     <div class="topline">
       <div>
         <h1>Fix duplicates</h1>
-        <div class="sub">Find invoices that exist twice and tidy them up</div>
+        <div class="sub">Find invoices that exist twice, or remove ones that should not be there</div>
       </div>
       <div class="right"><span class="mono" id="scanAside" style="font-size:12px;color:var(--muted)"></span></div>
     </div>
@@ -58,6 +81,14 @@
       </div>
 
       <div id="main" class="hide">
+
+        <div class="tabs">
+          <button class="on" data-pane="dup">Find duplicates</button>
+          <button data-pane="del">Delete invoices</button>
+        </div>
+
+        <!-- ==================== duplicates ==================== -->
+        <div class="pane on" id="paneDup">
 
         <div class="note bad" style="margin-bottom:20px">
           <b>Take a backup first.</b> Deleting an invoice in QuickBooks cannot be undone.
@@ -234,6 +265,74 @@
           <p><b>Paid invoices are never removed by these buttons.</b> A payment in QuickBooks is attached to a particular invoice, so removing that invoice leaves the payment with nothing to sit against. Anything carrying money is put in the section at the bottom for you to handle in QuickBooks.</p>
           <p><b>Scan again after a run</b> so the counts reflect what is actually in QuickBooks now.</p>
         </footer>
+        </div>
+
+        <!-- ==================== deleting ==================== -->
+        <div class="pane" id="paneDel">
+
+          <div class="note bad" style="margin-bottom:20px">
+            <b>This cannot be undone.</b> Take a backup first — QuickBooks → Settings → Export data.
+            Anything carrying a payment is set aside and never touched.
+          </div>
+
+          <div class="sheet">
+            <div class="sec">
+              <h2><span class="no">01</span> The invoice numbers</h2>
+              <p class="hint">One per line, or separated by spaces or commas. The hash makes
+                no difference here — both spellings are looked up.</p>
+              <textarea class="nums" id="delNums" placeholder="#91349172&#10;#91349171&#10;#91349170"></textarea>
+              <div style="margin-top:8px;font-size:12px;color:var(--faint)" id="delCount"></div>
+
+              <div class="opts">
+                <label><input type="radio" name="which" value="hash" checked> Only the ones with a <code>#</code></label>
+                <label><input type="radio" name="which" value="plain"> Only the plain ones</label>
+                <label><input type="radio" name="which" value="both"> Both spellings</label>
+              </div>
+
+              <button class="solid" id="btnLook">Look them up in QuickBooks</button>
+              <div class="stat" id="statLook"></div>
+            </div>
+          </div>
+
+          <div class="sheet hide" id="delFound">
+            <div class="sec">
+              <h2><span class="no">02</span> What is there <span class="aside" id="delAside"></span></h2>
+              <div class="tiles" id="delTiles"></div>
+
+              <div class="acts" style="margin-bottom:14px">
+                <button class="mini" id="btnPeekGo">Show what will go</button>
+                <button class="mini" id="btnPeekKeep">Show what stays</button>
+                <button class="mini" id="btnDelFile">Download the list</button>
+              </div>
+
+              <div class="peek" id="delPeek"></div>
+
+              <div style="margin-top:18px">
+                <button class="solid" id="btnDelStart">Delete them</button>
+                <span style="font-size:12px;color:var(--faint);margin-left:10px" id="delPlan"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="sheet hide" id="delRun">
+            <div class="sec">
+              <h2><span class="no">03</span> Removing <span class="aside" id="delStat"></span></h2>
+              <div class="prog"><i id="delBar"></i></div>
+              <div class="log" id="delLog" style="height:280px"></div>
+              <div class="acts" style="margin-top:12px;margin-bottom:0">
+                <button class="mini" id="btnDelStop">Stop</button>
+                <button class="mini hide" id="btnDelClear">Start over</button>
+              </div>
+            </div>
+          </div>
+
+          <footer>
+            <p><b>Leaving this page is fine.</b> The removal runs on the server, so closing
+              the tab or losing the connection will not stop it. Come back and it will still
+              be going, or finished.</p>
+          </footer>
+        </div>
+
       </div>
     </div>
   </div>
@@ -245,14 +344,24 @@
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
   var data = null, logLines = [], stopFlag = false, busy = false;
+  var delData = null, delSince = 0, delTimer = null, delAwake = null;
 
   window.APP.ready.then(function(s){
-    if(s.connected) $('main').classList.remove('hide');
+    if(s.connected){ $('main').classList.remove('hide'); delPoll(); }
     else $('gate').classList.remove('hide');
   });
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
 
-  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  document.querySelectorAll('.tabs button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('.tabs button').forEach(function(x){ x.classList.remove('on'); });
+      document.querySelectorAll('.pane').forEach(function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      $('pane' + (b.dataset.pane === 'dup' ? 'Dup' : 'Del')).classList.add('on');
+    });
+  });
+
+  function nf(n){ return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function money(n){
     if(n === null || n === undefined || n === '') return '';
     var v = Number(n);
@@ -265,6 +374,10 @@
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   }
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  function safe(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
 
   function log(msg, cls){
     $('logSheet').classList.remove('hide');
@@ -293,6 +406,8 @@
   var t = new Date();
   $('dTo').value = isoD(t);
   $('dFrom').value = isoD(new Date(t.getFullYear(), t.getMonth(), 1));
+
+  /* ==================== duplicates ==================== */
 
   function scan(){
     var from = $('dFrom').value, to = $('dTo').value;
@@ -605,6 +720,249 @@
     document.body.removeChild(ta);
     setTimeout(function(){ $('btnCopyLog').textContent = 'Copy log'; }, 2000);
   });
+
+  /* ==================== deleting a pasted list ==================== */
+
+  $('delNums').addEventListener('input', function(){
+    var seen = {};
+    $('delNums').value.split(/[\s,;]+/).forEach(function(n){
+      var d = String(n).replace(/[^0-9]/g,'').replace(/^0+(?=[0-9])/,'');
+      if(d) seen[d] = 1;
+    });
+    var n = Object.keys(seen).length;
+    $('delCount').textContent = n ? nf(n) + ' invoice numbers' : '';
+  });
+
+  function whichWanted(){
+    var r = document.querySelector('input[name="which"]:checked');
+    return r ? r.value : 'hash';
+  }
+
+  document.querySelectorAll('input[name="which"]').forEach(function(r){
+    r.addEventListener('change', function(){ if(delData) drawDel(); });
+  });
+
+  $('btnLook').addEventListener('click', function(){
+    var nums = $('delNums').value.trim();
+    if(!nums) return setStat($('statLook'),'bad','Paste some invoice numbers first.');
+
+    setStat($('statLook'),'busy','Looking them up in QuickBooks…');
+    $('btnLook').disabled = true;
+    $('delFound').classList.add('hide');
+
+    fetch('/api/qb-invoice-find', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ numbers: nums })
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        $('btnLook').disabled = false;
+        if(d.error){ setStat($('statLook'),'bad', d.error); return; }
+        delData = d;
+        setStat($('statLook'),'ok','<b>' + nf(d.unique) + ' numbers looked up</b>');
+        drawDel();
+      })
+      .catch(function(e){
+        $('btnLook').disabled = false;
+        setStat($('statLook'),'bad','Could not reach QuickBooks: ' + e.message);
+      });
+  });
+
+  function willGo(){
+    if(!delData) return [];
+    var want = whichWanted();
+    return delData.ready.filter(function(x){
+      if(want === 'hash')  return x.hash;
+      if(want === 'plain') return !x.hash;
+      return true;
+    });
+  }
+
+  function willStay(){
+    if(!delData) return [];
+    var want = whichWanted();
+    var kept = delData.paid.slice();
+    delData.ready.forEach(function(x){
+      if(want === 'hash'  && !x.hash) kept.push(x);
+      if(want === 'plain' &&  x.hash) kept.push(x);
+    });
+    return kept;
+  }
+
+  function drawDel(){
+    $('delFound').classList.remove('hide');
+
+    var go = willGo(), stay = willStay();
+    var amount = go.reduce(function(s, x){ return s + Number(x.total || 0); }, 0);
+
+    $('delAside').textContent = nf(delData.unique) + ' numbers asked about';
+
+    $('delTiles').innerHTML =
+      '<div class="tile go"><div class="n">' + nf(go.length) + '</div><div class="l">Will be deleted</div></div>' +
+      '<div class="tile keep"><div class="n">' + nf(delData.paid.length) + '</div><div class="l">Have a payment</div></div>' +
+      '<div class="tile"><div class="n">' + nf(stay.length - delData.paid.length) + '</div><div class="l">Wrong spelling</div></div>' +
+      '<div class="tile"><div class="n">' + nf(delData.notFound.length) + '</div><div class="l">Not in QuickBooks</div></div>' +
+      '<div class="tile"><div class="n">' + money(amount) + '</div><div class="l">Value going</div></div>';
+
+    $('delPlan').textContent = go.length
+      ? go.length + ' invoice' + (go.length === 1 ? '' : 's') + ' will be removed for good.'
+      : 'Nothing matches that choice.';
+
+    $('btnDelStart').disabled = !go.length;
+    $('delPeek').classList.remove('open');
+  }
+
+  function peekTable(list, going){
+    if(!list.length) return '<div style="padding:14px;color:var(--muted);font-size:13px">Nothing here.</div>';
+
+    var rows = list.map(function(x){
+      return '<tr>' +
+        '<td class="mono">' + safe(x.doc) + '</td>' +
+        '<td class="mono" style="font-size:11px;color:var(--faint)">Id ' + safe(x.id) + ' · ' + safe(x.date) + '</td>' +
+        '<td>' + safe(x.customer || '') + '</td>' +
+        '<td class="num mono">' + money(x.total) + '</td>' +
+        '<td>' + (x.balance <= 0.005
+                  ? '<span class="pill paid">paid</span>'
+                  : '<span class="pill open">unpaid</span>') +
+          (going ? ' <span class="goes">← goes</span>' : ' <span class="stays">← stays</span>') +
+        '</td></tr>';
+    }).join('');
+
+    return '<table><thead><tr><th>Invoice</th><th>Details</th><th>Customer</th>' +
+           '<th class="num">Amount</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+
+  $('btnPeekGo').addEventListener('click', function(){
+    $('delPeek').innerHTML = peekTable(willGo(), true);
+    $('delPeek').classList.add('open');
+  });
+
+  $('btnPeekKeep').addEventListener('click', function(){
+    $('delPeek').innerHTML = peekTable(willStay(), false);
+    $('delPeek').classList.add('open');
+  });
+
+  $('btnDelFile').addEventListener('click', function(){
+    var rows = [];
+    willGo().forEach(function(x){
+      rows.push([x.doc, x.id, x.date, x.customer || '', money(x.total), 'will be deleted']);
+    });
+    willStay().forEach(function(x){
+      rows.push([x.doc, x.id, x.date, x.customer || '', money(x.total), 'stays']);
+    });
+    delData.notFound.forEach(function(n){
+      rows.push([n, '', '', '', '', 'not in QuickBooks']);
+    });
+    download('invoices-to-delete.csv',
+      buildCSV(['Invoice','QuickBooks id','Date','Customer','Amount','What happens'], rows));
+  });
+
+  $('btnDelStart').addEventListener('click', function(){
+    var go = willGo();
+    if(!go.length) return;
+
+    var amount = go.reduce(function(s, x){ return s + Number(x.total || 0); }, 0);
+    var msg = go.length + ' invoices worth ' + money(amount) + ' will be removed from ' +
+              'QuickBooks for good.\n\nThis cannot be undone. Have you looked at the list?';
+    if(!confirm(msg)) return;
+
+    var again = prompt('Type DELETE to go ahead.');
+    if(String(again || '').trim().toUpperCase() !== 'DELETE') return;
+
+    $('btnDelStart').disabled = true;
+    delSince = 0;
+    $('delLog').innerHTML = '';
+
+    fetch('/api/invoice-delete-start', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ invoices: go })
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){
+          $('btnDelStart').disabled = false;
+          setStat($('statLook'),'bad', d.error);
+          return;
+        }
+        $('delRun').classList.remove('hide');
+        $('btnDelStop').classList.remove('hide');
+        $('btnDelClear').classList.add('hide');
+        delKeepAwake(true);
+        delPoll();
+      })
+      .catch(function(e){
+        $('btnDelStart').disabled = false;
+        setStat($('statLook'),'bad', e.message);
+      });
+  });
+
+  $('btnDelStop').addEventListener('click', function(){
+    fetch('/api/invoice-delete-stop', { method:'POST' }).catch(function(){});
+  });
+
+  $('btnDelClear').addEventListener('click', function(){
+    fetch('/api/invoice-delete-clear', { method:'POST' })
+      .then(function(r){ return r.json(); })
+      .then(function(){
+        $('delRun').classList.add('hide');
+        $('btnDelStart').disabled = false;
+        delSince = 0;
+      })
+      .catch(function(){});
+  });
+
+  // Render lets a quiet server drop off; a small nudge keeps it listening
+  function delKeepAwake(on){
+    if(delAwake){ clearInterval(delAwake); delAwake = null; }
+    if(on) delAwake = setInterval(function(){
+      fetch('/auth/status', { cache:'no-store' }).catch(function(){});
+    }, 120000);
+  }
+
+  function delPoll(){
+    if(delTimer) clearTimeout(delTimer);
+
+    fetch('/api/invoice-delete-status?since=' + delSince, { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var job = d.job;
+        if(!job) return;
+
+        $('delRun').classList.remove('hide');
+
+        var pct = job.total ? Math.round(100 * (job.done + job.failed) / job.total) : 0;
+        $('delBar').style.width = pct + '%';
+        $('delStat').textContent =
+          nf(job.done) + ' deleted' + (job.failed ? ', ' + nf(job.failed) + ' failed' : '') +
+          ' of ' + nf(job.total) +
+          (job.state === 'running' ? '' : ' · ' + job.state);
+
+        if(job.log && job.log.length){
+          var el = $('delLog');
+          var stuck = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+          job.log.forEach(function(l){
+            var line = document.createElement('div');
+            if(l.kind && l.kind !== 'info') line.className = l.kind;
+            line.textContent = new Date(l.at).toLocaleTimeString() + '  ' + l.text;
+            el.appendChild(line);
+          });
+          delSince = job.logLength;
+          if(stuck) el.scrollTop = el.scrollHeight;
+        }
+
+        if(job.state === 'running'){
+          $('btnDelStart').disabled = true;
+          delTimer = setTimeout(delPoll, 2000);
+          return;
+        }
+
+        delKeepAwake(false);
+        $('btnDelStop').classList.add('hide');
+        $('btnDelClear').classList.remove('hide');
+        $('btnDelStart').disabled = false;
+      })
+      .catch(function(){ delTimer = setTimeout(delPoll, 4000); });
+  }
 })();
 </script>
 </body>
