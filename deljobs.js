@@ -27,6 +27,7 @@ export function delSnapshot(realmId, since) {
     total: job.total,
     done: job.done,
     failed: job.failed,
+        paymentsGone: job.paymentsGone,
     log: job.log.slice(Number(since) || 0),
     logLength: job.log.length,
     error: job.error || null
@@ -53,7 +54,12 @@ export function startDelJob(realmId, opts) {
 
   const list = (opts.invoices || [])
     .filter(x => x && x.id)
-    .map(x => ({ id: String(x.id), doc: String(x.doc || ''), total: Number(x.total || 0) }));
+     .map(x => ({
+      id: String(x.id),
+      doc: String(x.doc || ''),
+      total: Number(x.total || 0),
+      paymentIds: (x.paymentIds || []).map(String)
+    }));
 
   if (!list.length) throw new Error('Nothing was handed over to delete');
 
@@ -68,6 +74,8 @@ export function startDelJob(realmId, opts) {
     total: list.length,
     done: 0,
     failed: 0,
+        payDone: new Set(),
+    paymentsGone: 0,
     log: []
   };
 
@@ -90,7 +98,38 @@ async function freshToken(realmId, job) {
   }
   return job.token;
 }
+// A payment has to go before the invoice it sits on, or QuickBooks is left
+// holding money against nothing.
+async function removePayment(realmId, job, payId) {
+  const token = await freshToken(realmId, job);
 
+  const q = await qbQuery(realmId, token,
+    `SELECT Id, SyncToken, PaymentRefNum FROM Payment WHERE Id = '${payId}'`);
+  const found = (q.Payment || [])[0];
+  if (!found) return 'gone';
+
+  const r = await fetch(`${API}/v3/company/${realmId}/payment?operation=delete&minorversion=70`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify({ Id: found.Id, SyncToken: found.SyncToken })
+  });
+
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = text.slice(0, 200);
+    try {
+      const f = JSON.parse(text).Fault;
+      if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+    } catch (e) {}
+    throw new Error(msg);
+  }
+
+  return 'gone';
+}
 async function removeOne(realmId, job, inv) {
   const token = await freshToken(realmId, job);
 
@@ -139,6 +178,14 @@ async function run(realmId, job) {
     let done = false;
     for (let attempt = 1; attempt <= 3 && !done; attempt++) {
       try {
+                // the money first, then the invoice underneath it
+        for (const pid of (inv.paymentIds || [])) {
+          if (job.payDone.has(pid)) continue;
+          await removePayment(realmId, job, pid);
+          job.payDone.add(pid);
+          job.paymentsGone++;
+          say(job, `Removed the payment behind ${inv.doc || inv.id}`, 'ok');
+        }
         await removeOne(realmId, job, inv);
         job.done++;
         say(job, `Deleted ${inv.doc || inv.id}`, 'ok');
@@ -161,8 +208,8 @@ async function run(realmId, job) {
 
   job.state = job.cancel ? 'stopped' : 'done';
   job.finishedAt = new Date().toISOString();
-  say(job, job.cancel
-    ? `Stopped - ${job.done} deleted, ${job.failed} failed`
-    : `Finished - ${job.done} deleted, ${job.failed} failed`,
+   const tail = (job.paymentsGone ? `, ${job.paymentsGone} payments removed` : '') +
+               (job.failed ? `, ${job.failed} failed` : '');
+  say(job, (job.cancel ? 'Stopped - ' : 'Finished - ') + job.done + ' deleted' + tail,
     job.failed ? 'warn' : 'ok');
 }
