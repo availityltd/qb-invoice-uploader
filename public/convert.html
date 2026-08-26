@@ -808,7 +808,7 @@
           if(res.via==='sku') bySku++; else if(res.via==='name') byName++; else byMap++;
         } else { itemName=raw; unresolved++; }
                push(itemName,qty,rate,qty*rate,raw);
-
+}
       if(!block.length){ noLines++; continue; }
 
       var sh=num(cell(head,iShip));
