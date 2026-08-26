@@ -786,10 +786,12 @@
       if(!keepHash && invNo.charCodeAt(0)===35) invNo=invNo.slice(1);
 
       var block=[], objLines=[];
-      function push(item,qty,rate,amount){
-        block.push([invNo,custName,dc.s,dc.due,termS,"",memo,item,"",
+           // the description is what Shopify called the product, kept as it was
+      function push(item,qty,rate,amount,desc){
+        var d = desc || "";
+        block.push([invNo,custName,dc.s,dc.due,termS,"",memo,item,d,
                     qty.toFixed(2),money(rate),money(amount),dc.s]);
-        objLines.push({item:item,desc:"",qty:qty,rate:Math.round(rate*100)/100,
+        objLines.push({item:item,desc:d,qty:qty,rate:Math.round(rate*100)/100,
                        amt:Math.round(amount*100)/100,svc:dc.isoDate});
         grand+=amount;
       }
@@ -805,8 +807,7 @@
           itemName=res.name;
           if(res.via==='sku') bySku++; else if(res.via==='name') byName++; else byMap++;
         } else { itemName=raw; unresolved++; }
-        push(itemName,qty,rate,qty*rate);
-      }
+               push(itemName,qty,rate,qty*rate,raw);
 
       if(!block.length){ noLines++; continue; }
 
