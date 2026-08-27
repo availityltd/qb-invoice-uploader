@@ -12,7 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 <style>
-   .cdbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .cdbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
   .cdbar input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
     font:inherit;font-size:12.5px;background:#fff;height:auto;width:auto}
   .cdbar button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;
@@ -23,36 +23,48 @@
   .cdbar .find input{border:1px solid var(--line);border-radius:7px;padding:7px 11px;
     font:inherit;font-size:12.5px;width:190px}
 
-  .top{display:grid;grid-template-columns:1.1fr 1.1fr 1.3fr;gap:14px;margin-bottom:14px}
-  @media(max-width:1050px){.top{grid-template-columns:1fr}}
-  .big{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:17px 20px}
-  .big h3{margin:0 0 12px;font-size:13.5px;font-weight:600}
-  .big .amt{font-family:var(--mono);font-size:27px;font-weight:500;line-height:1.1}
-  .big .pill{display:inline-block;background:#EAF3FB;color:#2F6FA8;border-radius:20px;
-    padding:3px 11px;font-size:11.5px;margin-left:9px;vertical-align:middle}
-  .big .sub{font-size:12.5px;color:var(--muted);margin-top:11px}
-  .big .sub b{font-family:var(--mono);font-weight:500;color:var(--ink)}
-  .today{background:linear-gradient(135deg,#3B3A96,#6C5AC4);border:0;color:#fff}
-  .today h3{color:rgba(255,255,255,.85)}
-  .today .amt{color:#fff}
-  .today .three{display:flex;gap:22px;margin-top:14px;flex-wrap:wrap}
-  .today .three div{font-size:11px;color:rgba(255,255,255,.7)}
-  .today .three b{display:block;font-family:var(--mono);font-size:17px;font-weight:500;
-    margin-bottom:2px}
-  .today .three .a b{color:#FFD37A}
-  .today .three .p b{color:#8CE3A8}
-  .today .three .t b{color:#FFC15E}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;
+    margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px}
+  .card .k{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .card .v{font-family:var(--mono);font-size:23px;font-weight:500;margin-top:6px;line-height:1.1}
+  .card .n{font-size:11.5px;color:var(--muted);margin-top:4px}
+  .card.good .v{color:var(--ok)}
+  .card.warn .v{color:var(--warn)}
 
-  .row{display:grid;grid-template-columns:1fr 1.35fr;gap:14px;margin-bottom:14px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
   @media(max-width:1050px){.row{grid-template-columns:1fr}}
-  .row2{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-bottom:14px}
-  @media(max-width:1050px){.row2{grid-template-columns:1fr}}
+  .wide{display:grid;grid-template-columns:1.45fr 1fr;gap:14px;margin-bottom:14px}
+  @media(max-width:1050px){.wide{grid-template-columns:1fr}}
   .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
-  .box h3{margin:0 0 14px;font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .box h3{margin:0 0 14px;font-size:13.5px;font-weight:600;display:flex;align-items:baseline;gap:9px}
   .box h3 .aside{margin-left:auto;font-size:11.5px;color:var(--faint);font-weight:400}
+  .box h3 a{font-size:11.5px;font-weight:400;color:var(--qbo);text-decoration:none}
+  .box h3 a:hover{text-decoration:underline}
 
-  .tx{display:flex;flex-direction:column}
-  .tx a{display:grid;grid-template-columns:1fr auto;gap:8px;padding:10px 0;
+  table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--faint);border-bottom:1px solid var(--line);padding:7px 8px;font-weight:600}
+  table.t td{padding:8px;border-bottom:1px solid var(--line)}
+  table.t td.r,table.t th.r{text-align:right;font-family:var(--mono)}
+  table.t td.mono{font-family:var(--mono);font-size:12px}
+  table.t tr:last-child td{border-bottom:0}
+  table.t tr.tot td{font-weight:600;background:#FAFCFE}
+  table.t tr.click{cursor:pointer}
+  table.t tr.click:hover td{background:#F5FAFD}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  @media(max-width:620px){.grid{grid-template-columns:repeat(2,1fr)}}
+  .cell{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff;
+    cursor:pointer;text-align:left;font:inherit;width:100%}
+  .cell:hover{border-color:var(--qbo);background:#FAFDF9}
+  .cell .l{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+    line-height:1.35;min-height:26px}
+  .cell .n{font-family:var(--mono);font-size:22px;font-weight:500;margin-top:5px;line-height:1.1}
+  .cell .m{font-size:11px;color:var(--faint);margin-top:3px}
+  .cell.tot{background:#F3F7FB;border-color:#DCE7F1}
+
+  .tx a{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 0;
     border-bottom:1px solid var(--line);text-decoration:none;color:inherit}
   .tx a:last-child{border-bottom:0}
   .tx a:hover .tk{text-decoration:underline}
@@ -61,39 +73,21 @@
   .tx .am{font-family:var(--mono);font-size:12.5px;text-align:right}
   .tx .dt{font-size:11px;color:var(--faint);text-align:right;margin-top:2px}
 
-  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-  @media(max-width:620px){.grid{grid-template-columns:repeat(2,1fr)}}
-  .cell{border:1px solid var(--line);border-radius:9px;padding:13px 14px;background:#fff;
-    cursor:pointer;text-align:left;font:inherit;width:100%}
-  .cell:hover{border-color:var(--qbo);background:#FAFDF9}
-  .cell .l{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
-    line-height:1.35;min-height:26px}
-  .cell .n{font-family:var(--mono);font-size:23px;font-weight:500;margin-top:5px;line-height:1.1}
-  .cell .m{font-size:11px;color:var(--faint);margin-top:3px}
-  .cell.tot{background:#F3F7FB;border-color:#DCE7F1}
-
-  .rings{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .ring{text-align:center}
-  .ring .cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
-    margin-bottom:8px}
-  .ring .leg{font-size:11.5px;color:var(--muted);margin-top:6px}
-  .ring .leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
-
-  table.t{width:100%;border-collapse:collapse;font-size:12px}
-  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
-    color:var(--faint);border-bottom:1px solid var(--line);padding:7px 8px;font-weight:600}
-  table.t td{padding:8px;border-bottom:1px solid var(--line)}
-  table.t td.r,table.t th.r{text-align:right;font-family:var(--mono)}
-  table.t td.mono{font-family:var(--mono);font-size:11.5px}
-  table.t tr:last-child td{border-bottom:0}
+  .bars{display:flex;flex-direction:column;gap:7px}
+  .bars .b{display:grid;grid-template-columns:130px 1fr 108px;align-items:center;gap:10px;
+    font-size:12px}
+  .bars .track{display:block;background:var(--line);border-radius:4px;height:9px;overflow:hidden}
+  .bars .fill{display:block;height:9px;border-radius:4px}
+  .bars .num{text-align:right;font-family:var(--mono);font-size:11.5px}
 
   .drawer{position:fixed;inset:0;background:rgba(12,24,20,.45);display:none;z-index:60}
   .drawer.open{display:block}
-  .drawer .panel{position:absolute;right:0;top:0;bottom:0;width:min(940px,96vw);background:#fff;
+  .drawer .panel{position:absolute;right:0;top:0;bottom:0;width:min(980px,96vw);background:#fff;
     box-shadow:-8px 0 28px rgba(0,0,0,.18);display:flex;flex-direction:column}
   .drawer .hd{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
     align-items:center;gap:12px}
   .drawer .hd b{font-size:14px}
+  .drawer .hd .note{font-size:12px;color:var(--faint)}
   .drawer .hd .x{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:7px;
     width:30px;height:30px;cursor:pointer;font-size:15px;line-height:1}
   .drawer .bd{overflow:auto;padding:6px 20px 24px}
@@ -102,29 +96,8 @@
   .msg{padding:13px 15px;border-radius:8px;background:#FDF3F3;border:1px solid var(--bad);
     color:var(--bad);font-size:12.5px}
   .loading{color:var(--muted);font-size:12.5px;padding:22px 0}
-
-  /* ---- backfill drawer content ---- */
-  .bf-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:14px 0}
-  .bf-field label{display:block;font-size:11px;color:var(--faint);margin-bottom:4px}
-  .bf-field input[type=date]{border:1px solid var(--line);border-radius:7px;padding:7px 9px;
-    font:inherit;font-size:12.5px}
-  .bf-chk{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink)}
-  .bf-actions{display:flex;gap:8px;margin:4px 0 16px}
-  .bf-actions button{border:0;border-radius:7px;padding:9px 16px;font:inherit;font-size:12.5px;
-    cursor:pointer}
-  .bf-start{background:var(--qbo);color:#fff}
-  .bf-start:disabled{background:#B9D2C6;cursor:not-allowed}
-  .bf-stop{background:#C9453F;color:#fff}
-  .bf-clear{background:#EEF1F4;color:var(--ink)}
-  .bf-badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
-  .bf-running{background:#EAF3FB;color:#2F6FA8}
-  .bf-done{background:#E6F6EC;color:#1F9D5A}
-  .bf-stopped,.bf-failed{background:#FDF3F3;color:#C9453F}
-  .bf-track{background:var(--line);border-radius:5px;height:8px;overflow:hidden;margin:6px 0 12px}
-  .bf-fill{background:var(--qbo);height:100%;width:0%}
-  .bf-stats{font-size:12px;color:var(--muted);margin-bottom:10px}
-  .bf-log{background:#0F1B17;color:#CFE0D6;font-family:var(--mono);font-size:11.5px;
-    padding:11px;border-radius:7px;height:200px;overflow-y:auto;white-space:pre-wrap}
+  .fresh{font-size:11.5px;color:var(--faint)}
+  .fresh b{color:var(--ok);font-weight:500}
 </style>
 </head>
 <body>
@@ -150,20 +123,21 @@
       </div>
 
       <div id="body" class="hide">
-                <div class="cdbar">
+        <div class="cdbar">
           <button data-days="0">Today</button>
           <button data-days="6" class="on">7 days</button>
           <button data-days="29">30 days</button>
+          <button data-days="89">3 months</button>
           <input type="date" id="from">
           <input type="date" id="to">
           <button class="on" id="go">Show</button>
-          <button id="btnBackfill">Backfill history</button>
           <div class="find">
             <input id="track" placeholder="Tracking number">
             <button id="btnTrack">Find</button>
           </div>
         </div>
-        <div id="out"><div class="loading">Asking the courier…</div></div>
+        <div class="fresh" id="fresh"></div>
+        <div id="out"><div class="loading">Reading…</div></div>
       </div>
 
     </div>
@@ -187,6 +161,7 @@
   var qs = new URLSearchParams(location.search);
   var account = qs.get('account');
   var courier = qs.get('courier');
+  var keeperTimer = null;
 
   var COLOR = {
     delivered:'#1F9D5A', returned:'#C9453F', returning:'#E08A2E', transit:'#2F7DD1',
@@ -208,7 +183,7 @@
     return x.toFixed(0);
   }
   function iso(d){ return d.toISOString().slice(0,10); }
-  function today(){ return iso(new Date()); }
+  function monthStart(){ var d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-01'; }
   function short(day){ var p = String(day).split('-'); return p[2]+'/'+p[1]; }
 
   var fromEl = $('from'), toEl = $('to');
@@ -237,10 +212,9 @@
     var sf = localStorage.getItem('cdFrom'), st = localStorage.getItem('cdTo');
     if(sf && st){ fromEl.value = sf; toEl.value = st; } else setRange(6);
 
-       Array.prototype.forEach.call(document.querySelectorAll('.cdbar button[data-days]'), function(b){
+    document.querySelectorAll('.cdbar button[data-days]').forEach(function(b){
       b.addEventListener('click', function(){
-        Array.prototype.forEach.call(document.querySelectorAll('.cdbar button[data-days]'),
-          function(x){ x.classList.remove('on'); });
+        document.querySelectorAll('.cdbar button[data-days]').forEach(function(x){ x.classList.remove('on'); });
         b.classList.add('on');
         setRange(Number(b.getAttribute('data-days')));
         load();
@@ -249,11 +223,10 @@
     $('go').addEventListener('click', load);
     $('btnTrack').addEventListener('click', findOne);
     $('track').addEventListener('keydown', function(e){ if(e.key === 'Enter') findOne(); });
-    $('btnBackfill').addEventListener('click', openBackfill);
 
     head();
     load();
-    loadToday();
+    watchKeeper();
   });
 
   function head(){
@@ -270,122 +243,129 @@
       .catch(function(){});
   }
 
-  /* ---------- today's own strip, always live ---------- */
+  /* ---------- the quiet catch-up, so you can see it is current ---------- */
 
-  var todayData = null;
-
-  function loadToday(){
-    var p = new URLSearchParams();
-    p.set('from', today()); p.set('to', today());
-    if(account) p.set('account', account);
-    if(courier) p.set('courier', courier);
-
-    fetch('/api/courier/live?'+p.toString(), { cache:'no-store' })
+  function watchKeeper(){
+    fetch('/api/courier/keeper', { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
-        if(d.error) return;
-        todayData = d;
-        paintToday();
+        var el = $('fresh');
+        if(d.running){
+          el.innerHTML = 'Catching up with the courier\u2026';
+          if(keeperTimer) clearTimeout(keeperTimer);
+          keeperTimer = setTimeout(function(){ watchKeeper(); load(); }, 8000);
+          return;
+        }
+        if(d.finishedAt){
+          el.innerHTML = '<b>Up to date</b> \u00b7 last checked ' +
+            new Date(d.finishedAt).toLocaleTimeString();
+        }
+        if(keeperTimer) clearTimeout(keeperTimer);
+        keeperTimer = setTimeout(watchKeeper, 60000);
       })
       .catch(function(){});
   }
 
-   function paintToday(){
-    var el = $('todayBox');
-    if(!el || !todayData) return;
-    var t = todayData.totals;
-
-    // only what was actually created today - PostEx counts it the same way
-    var g = {};
-    (todayData.groups || []).forEach(function(x){ g[x.group] = x; });
-    var unbooked = (g.unbooked || {}).count || 0;
-
-    el.innerHTML =
-      '<h3>Today\u2019s orders</h3>' +
-      '<div class="amt">' + full(t.amount) + '</div>' +
-      '<div class="three">' +
-        '<div class="a"><b>' + full(t.codPending) + '</b>Pending amount</div>' +
-        '<div class="p"><b>' + n0(unbooked) + '</b>Waiting to be booked</div>' +
-        '<div class="t"><b>' + n0(t.orders) + '</b>Created today</div>' +
-      '</div>';
-  }
-  /* ---------- the whole page ---------- */
+  /* ---------- the page ---------- */
 
   var live = null;
 
   function load(){
     localStorage.setItem('cdFrom', fromEl.value);
     localStorage.setItem('cdTo', toEl.value);
-    $('out').innerHTML = '<div class="loading">Asking the courier\u2026</div>';
+    $('out').innerHTML = '<div class="loading">Reading\u2026</div>';
 
-    fetch('/api/courier/live?'+params(), { cache:'no-store' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if(d.error){ $('out').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
-        live = d;
-        draw(d);
-        paintToday();
-      })
-      .catch(function(e){
-        $('out').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
-      });
+    Promise.all([
+      fetch('/api/courier/dash?'+params(), { cache:'no-store' }).then(function(r){ return r.json(); }),
+      fetch('/api/courier/receipts?'+new URLSearchParams({
+        from: monthStart(), to: toEl.value,
+        account: account || '', courier: courier || '', limit: 8
+      }).toString(), { cache:'no-store' }).then(function(r){ return r.json(); }),
+      fetch('/api/courier/pickups?'+params({ limit: 8 }), { cache:'no-store' })
+        .then(function(r){ return r.json(); })
+    ])
+    .then(function(all){
+      var d = all[0];
+      if(d.error){ $('out').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+      live = d;
+      draw(d, all[1].cprs || [], all[2].days || []);
+    })
+    .catch(function(e){
+      $('out').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
+    });
   }
 
   function donut(done, total, colDone, colRest){
     var R = 46, C = 2*Math.PI*R;
     var part = total ? C * (done/total) : 0;
-    return '<svg width="130" height="130" viewBox="0 0 130 130">' +
+    return '<svg width="128" height="128" viewBox="0 0 130 130">' +
       '<circle cx="65" cy="65" r="'+R+'" fill="none" stroke="'+colRest+'" stroke-width="19"></circle>' +
       (part ? '<circle cx="65" cy="65" r="'+R+'" fill="none" stroke="'+colDone+'" stroke-width="19" ' +
         'stroke-dasharray="'+part.toFixed(2)+' '+(C-part).toFixed(2)+'" ' +
         'transform="rotate(-90 65 65)"></circle>' : '') +
-      '<text x="65" y="63" text-anchor="middle" font-size="18" font-weight="600" fill="#123">' +
+      '<text x="65" y="63" text-anchor="middle" font-size="17" font-weight="600" fill="#123">' +
         n0(done) + '</text>' +
       '<text x="65" y="80" text-anchor="middle" font-size="10" fill="#8A99A8">of ' + n0(total) + '</text>' +
       '</svg>';
   }
 
-  function lineChart(daily){
-    if(!daily.length) return '<div class="note">No days in this range.</div>';
+  // three bars a day: booked, delivered, returned
+  function dayChart(days){
+    if(!days.length) return '<div class="note">No days in this range.</div>';
 
-    var W = 640, H = 230, PL = 44, PR = 14, PT = 14, PB = 30;
+    var W = 700, H = 250, PL = 46, PR = 14, PT = 14, PB = 34;
     var iw = W-PL-PR, ih = H-PT-PB;
+
     var max = 0;
-    daily.forEach(function(d){ if(d.delivered > max) max = d.delivered; });
+    days.forEach(function(d){
+      max = Math.max(max, d.booked, d.delivered, d.returned);
+    });
     if(!max) max = 1;
 
-    var step = daily.length > 1 ? iw/(daily.length-1) : 0;
-    var pts = daily.map(function(d, i){
-      return [PL + i*step, PT + ih - ih*(d.delivered/max)];
-    });
-
+    var slot = iw/days.length;
+    var bw = Math.max(2, (slot - 6) / 3);
     var svg = '';
+
     for(var i=0;i<=4;i++){
       var y = PT + ih - (ih*i/4);
       svg += '<line x1="'+PL+'" y1="'+y.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+y.toFixed(1)+'" stroke="#EEF3F8"></line>';
       svg += '<text x="'+(PL-8)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" font-size="10" fill="#9AA8B6">'+n0(Math.round(max*i/4))+'</text>';
     }
 
-    var d = pts.map(function(p, i){ return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ');
-    var area = d + ' L' + pts[pts.length-1][0].toFixed(1) + ' ' + (PT+ih) +
-               ' L' + pts[0][0].toFixed(1) + ' ' + (PT+ih) + ' Z';
+    days.forEach(function(d, i){
+      var x0 = PL + i*slot + 3;
 
-    svg += '<path d="'+area+'" fill="#DFF3EA"></path>';
-    svg += '<path d="'+d+'" fill="none" stroke="#1F9D5A" stroke-width="2.2" stroke-linejoin="round"></path>';
+      function bar(n, off, fill, label, amt){
+        if(!n) return '';
+        var h = ih * (n/max);
+        return '<rect x="'+(x0+off*bw).toFixed(1)+'" y="'+(PT+ih-h).toFixed(1)+'" ' +
+               'width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="'+fill+'" rx="1.5">' +
+               '<title>'+esc(d.day)+' \u00b7 '+label+': '+n0(n)+' \u00b7 '+full(amt)+'</title></rect>';
+      }
 
-    pts.forEach(function(p, i){
-      svg += '<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3" fill="#1F9D5A">' +
-             '<title>'+esc(daily[i].day)+' \u00b7 '+n0(daily[i].delivered)+' delivered</title></circle>';
-      if(daily.length <= 16 || i % 3 === 0){
-        svg += '<text x="'+p[0].toFixed(1)+'" y="'+(H-10)+'" text-anchor="middle" font-size="10" fill="#9AA8B6">'+esc(short(daily[i].day))+'</text>';
+      svg += bar(d.booked,    0, '#9EC9EE', 'booked',    d.bookedAmount);
+      svg += bar(d.delivered, 1, '#1F9D5A', 'delivered', d.deliveredAmount);
+      svg += bar(d.returned,  2, '#E48B85', 'returned',  d.returnedAmount);
+
+      if(days.length <= 16 || i % Math.ceil(days.length/14) === 0){
+        svg += '<text x="'+(x0 + bw*1.5).toFixed(1)+'" y="'+(H-12)+'" text-anchor="middle" ' +
+               'font-size="10" fill="#9AA8B6">'+esc(short(d.day))+'</text>';
       }
     });
 
-    return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+svg+'</svg>';
+    return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+svg+'</svg>' +
+      '<div class="note"><span style="color:#9EC9EE">\u25AE</span> booked &nbsp; ' +
+      '<span style="color:#1F9D5A">\u25AE</span> delivered &nbsp; ' +
+      '<span style="color:#E48B85">\u25AE</span> returned</div>';
   }
 
-  function draw(d){
-    var t = d.totals, st = d.statuses || [], cities = d.cities || [];
+  function card(k, v, n, cls){
+    return '<div class="card' + (cls ? ' '+cls : '') + '"><div class="k">' + esc(k) + '</div>' +
+           '<div class="v">' + esc(v) + '</div><div class="n">' + esc(n) + '</div></div>';
+  }
+
+  function draw(d, cprs, picks){
+    var t = d.totals, st = d.statuses || [], days = d.days || [];
 
     var g = {};
     (d.groups || []).forEach(function(x){ g[x.group] = x; });
@@ -393,50 +373,95 @@
 
     var html = '';
 
-    /* --- top strip --- */
-    html += '<div class="top">';
-
-        html += '<div class="big"><h3>Cash on delivery</h3>' +
-            '<div class="amt">' + full(t.codPaid) +
-            '<span class="pill">' + n0(gc('delivered')) + ' orders</span></div>' +
-            '<div class="sub"><b>' + n0(t.pendingOrders) + '</b> orders pending \u00b7 ' +
-            'worth <b>' + full(t.codPending) + '</b></div></div>';
-
-    html += '<div class="big"><h3>Courier charges</h3>' +
-            '<div class="amt">' + full(t.fee) + '</div>' +
-            '<div class="sub">plus tax <b>' + full(t.tax) + '</b> \u00b7 ' +
-            'booked value <b>' + full(t.amount) + '</b></div></div>';
-
-    html += '<div class="big today" id="todayBox"><h3>Today\u2019s orders</h3>' +
-            '<div class="amt">\u2026</div></div>';
-
+    /* --- the numbers that matter --- */
+    html += '<div class="cards">';
+    html += card('Booked', n0(t.orders), full(t.amount) + ' worth');
+    html += card('Delivered', n0(t.delivered), full(t.deliveredAmount) + ' collected', 'good');
+    html += card('Returned', n0(t.returned), full((g.returned||{}).amount || 0) + ' came back');
+    html += card('Still moving', n0(t.pendingOrders), full(t.pendingAmount) + ' pending', 'warn');
+    html += card('Delivery rate', t.successRate.toFixed(1) + '%', 'of settled orders');
+    html += card('Courier charges', full(t.fee), 'plus tax ' + full(t.tax));
     html += '</div>';
 
-    /* --- recent + delivered chart --- */
+    /* --- day by day, with what each day was worth --- */
+    html += '<div class="box" style="margin-bottom:14px"><h3>Day by day' +
+            '<span class="aside">' + esc(d.from) + ' \u2192 ' + esc(d.to) + '</span></h3>' +
+            dayChart(days) + '</div>';
+
+    /* --- the daily table --- */
+    var dayRows = '';
+    var dt = { booked:0, bookedAmount:0, delivered:0, deliveredAmount:0,
+               returned:0, returnedAmount:0, picked:0 };
+
+    days.slice().reverse().forEach(function(x){
+      if(!x.booked && !x.delivered && !x.returned && !x.picked) return;
+      dayRows += '<tr><td class="mono">' + esc(x.day) + '</td>' +
+                 '<td class="r">' + n0(x.booked) + '</td>' +
+                 '<td class="r">' + money(x.bookedAmount) + '</td>' +
+                 '<td class="r">' + n0(x.delivered) + '</td>' +
+                 '<td class="r">' + money(x.deliveredAmount) + '</td>' +
+                 '<td class="r">' + n0(x.returned) + '</td>' +
+                 '<td class="r">' + money(x.returnedAmount) + '</td></tr>';
+
+      dt.booked += x.booked; dt.bookedAmount += x.bookedAmount;
+      dt.delivered += x.delivered; dt.deliveredAmount += x.deliveredAmount;
+      dt.returned += x.returned; dt.returnedAmount += x.returnedAmount;
+    });
+
+    dayRows += '<tr class="tot"><td>Total</td>' +
+               '<td class="r">' + n0(dt.booked) + '</td>' +
+               '<td class="r">' + money(dt.bookedAmount) + '</td>' +
+               '<td class="r">' + n0(dt.delivered) + '</td>' +
+               '<td class="r">' + money(dt.deliveredAmount) + '</td>' +
+               '<td class="r">' + n0(dt.returned) + '</td>' +
+               '<td class="r">' + money(dt.returnedAmount) + '</td></tr>';
+
+    html += '<div class="box" style="margin-bottom:14px"><h3>Every day, in numbers</h3>' +
+            '<div style="max-height:320px;overflow:auto"><table class="t">' +
+            '<tr><th>Day</th><th class="r">Booked</th><th class="r">Worth</th>' +
+            '<th class="r">Delivered</th><th class="r">Collected</th>' +
+            '<th class="r">Returned</th><th class="r">Came back</th></tr>' +
+            dayRows + '</table></div></div>';
+
+    /* --- receipts and pickups, side by side --- */
     html += '<div class="row">';
 
-    var tx = '';
-    (d.recent || []).slice(0, 8).forEach(function(o){
-      tx += '<a href="#" data-find="' + esc(o.tracking) + '">' +
-              '<div><div class="tk">' + esc(o.tracking) + '</div>' +
-              '<div class="rf">' + esc(o.orderRef || '') + '</div></div>' +
-              '<div><div class="am">Rs ' + full(o.amount) + '</div>' +
-              '<div class="dt">' + esc(o.status) + ' \u00b7 ' + esc(o.on || '') + '</div></div>' +
-            '</a>';
-    });
-    html += '<div class="box"><h3>Recent transactions<span class="aside">newest first</span></h3>' +
-            '<div class="tx">' + (tx || '<div class="note">Nothing yet.</div>') + '</div></div>';
+    var cprRows = cprs.map(function(c){
+      return '<tr class="click" data-cpr="' + esc(c.cpr) + '">' +
+             '<td class="mono">' + esc(c.cpr) + '</td>' +
+             '<td class="mono">' + esc(c.settledOn || '') + '</td>' +
+             '<td class="r">' + n0(c.orders) + '</td>' +
+             '<td class="r">' + full(c.amount) + '</td></tr>';
+    }).join('');
 
-    html += '<div class="box"><h3>Delivered orders<span class="aside">' +
-            esc(d.from) + ' \u2192 ' + esc(d.to) + '</span></h3>' +
-            lineChart(d.daily || []) + '</div>';
+    html += '<div class="box"><h3>Receipts this month' +
+            '<a href="/cprs.html' + (account ? '?account='+account : '') + '">View all receipts</a></h3>' +
+            '<table class="t"><tr><th>CPR number</th><th>Date</th>' +
+            '<th class="r">Orders</th><th class="r">Amount</th></tr>' +
+            (cprRows || '<tr><td colspan="4" style="color:var(--muted)">Nothing settled this month yet.</td></tr>') +
+            '</table></div>';
+
+    var pickRows = picks.map(function(p){
+      return '<tr class="click" data-pickup="' + esc(p.day) + '">' +
+             '<td class="mono">' + esc(p.day) + '</td>' +
+             '<td class="r">' + n0(p.parcels) + '</td>' +
+             '<td class="r">' + full(p.amount) + '</td>' +
+             '<td class="r">' + n0(p.delivered) + '</td></tr>';
+    }).join('');
+
+    html += '<div class="box"><h3>Handed over' +
+            '<a href="/pickups.html' + (account ? '?account='+account : '') + '">View every day</a></h3>' +
+            '<table class="t"><tr><th>Day</th><th class="r">Parcels</th>' +
+            '<th class="r">Worth</th><th class="r">Delivered since</th></tr>' +
+            (pickRows || '<tr><td colspan="4" style="color:var(--muted)">Nothing picked up in this range.</td></tr>') +
+            '</table></div>';
 
     html += '</div>';
 
-    /* --- every status + rings --- */
-    html += '<div class="row2">';
+    /* --- statuses and the rings --- */
+    html += '<div class="wide">';
 
-    var cells = '<button class="cell tot" data-group=""><div class="l">Total orders</div>' +
+    var cells = '<button class="cell tot" data-group=""><div class="l">All orders</div>' +
                 '<div class="n">' + n0(t.orders) + '</div>' +
                 '<div class="m">' + money(t.amount) + '</div></button>';
 
@@ -447,79 +472,85 @@
                '<div class="m">' + money(s.amount) + '</div></button>';
     });
 
-    html += '<div class="box"><h3>Total orders<span class="aside">click any number</span></h3>' +
+    html += '<div class="box"><h3>Every status<span class="aside">click any number</span></h3>' +
             '<div class="grid">' + cells + '</div></div>';
 
     var settled = gc('delivered') + gc('returned');
-    var rings =
-      '<div class="ring"><div class="cap">Successful orders</div>' +
-        donut(gc('delivered'), settled || t.orders, '#8CE3A8', '#E8EDF3') +
-        '<div class="leg"><i style="background:#8CE3A8"></i>delivered</div></div>' +
-      '<div class="ring"><div class="cap">Return orders</div>' +
-        donut(gc('returned') + gc('returning'), settled || t.orders, '#F3A5A5', '#E8EDF3') +
-        '<div class="leg"><i style="background:#F3A5A5"></i>returned</div></div>' +
-      '<div class="ring"><div class="cap">Booked orders</div>' +
-        donut(t.orders - gc('unbooked'), t.orders, '#8CE3A8', '#F3A5A5') +
-        '<div class="leg"><i style="background:#8CE3A8"></i>booked &nbsp;' +
-        '<i style="background:#F3A5A5"></i>unbooked</div></div>' +
-      '<div class="ring"><div class="cap">In the middle</div>' +
-        donut(gc('transit') + gc('review'), t.orders, '#9EC9EE', '#E8EDF3') +
-        '<div class="leg"><i style="background:#9EC9EE"></i>on the way</div></div>';
-
-    html += '<div class="box"><h3>How it is going</h3><div class="rings">' + rings + '</div></div>';
+    html += '<div class="box"><h3>How it is going</h3>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:center">' +
+        '<div><div class="k" style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">Delivered</div>' +
+          donut(gc('delivered'), settled || t.orders, '#8CE3A8', '#E8EDF3') + '</div>' +
+        '<div><div class="k" style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">Returned</div>' +
+          donut(gc('returned') + gc('returning'), settled || t.orders, '#F3A5A5', '#E8EDF3') + '</div>' +
+        '<div><div class="k" style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">Booked</div>' +
+          donut(t.orders - gc('unbooked'), t.orders, '#8CE3A8', '#F3A5A5') + '</div>' +
+        '<div><div class="k" style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">On the way</div>' +
+          donut(gc('transit') + gc('review'), t.orders, '#9EC9EE', '#E8EDF3') + '</div>' +
+      '</div></div>';
 
     html += '</div>';
 
-    /* --- accounts + cities --- */
-    html += '<div class="row2">';
+    /* --- recent, accounts, cities --- */
+    html += '<div class="row">';
 
-    var rows = '';
-    (d.accounts || []).forEach(function(a){
-      rows += '<tr><td><a href="/courier-dash.html?account=' + a.id + '">' + esc(a.label) + '</a></td>' +
-              '<td class="r">' + n0(a.orders) + '</td>' +
-              '<td class="r">' + n0(a.delivered) + '</td>' +
-              '<td class="r">' + n0(a.returned) + '</td>' +
-              '<td class="r">' + a.successRate.toFixed(1) + '%</td>' +
-              '<td class="r">' + money(a.deliveredAmount) + '</td>' +
-              '<td class="r">' + money(a.codPending) + '</td></tr>';
-    });
-    html += '<div class="box"><h3>Accounts</h3><table class="t">' +
-            '<tr><th>Account</th><th class="r">Orders</th><th class="r">Delivered</th>' +
-            '<th class="r">Returned</th><th class="r">Rate</th><th class="r">Collected</th>' +
-            '<th class="r">Pending</th></tr>' +
-            (rows || '<tr><td colspan="7" style="color:var(--muted)">No accounts.</td></tr>') +
-            '</table></div>';
+    var tx = (d.recent || []).map(function(o){
+      return '<a href="#" data-find="' + esc(o.tracking) + '">' +
+             '<div><div class="tk">' + esc(o.tracking) + '</div>' +
+             '<div class="rf">' + esc(o.orderRef || '') + '</div></div>' +
+             '<div><div class="am">Rs ' + full(o.amount) + '</div>' +
+             '<div class="dt">' + esc(o.on || '') + '</div></div></a>';
+    }).join('');
 
+    html += '<div class="box"><h3>Latest deliveries<span class="aside">newest first</span></h3>' +
+            '<div class="tx">' + (tx || '<div class="note">Nothing yet.</div>') + '</div></div>';
+
+    var cityRows = '';
     var cmax = 0;
-    cities.forEach(function(c){ if(c.count > cmax) cmax = c.count; });
-    var cb = '';
-    cities.forEach(function(c){
-      cb += '<tr><td>' + esc(c.city) + '</td>' +
-            '<td style="width:60%"><span style="display:block;background:var(--line);' +
-            'border-radius:4px;height:8px"><span style="display:block;background:#2F7DD1;height:8px;' +
-            'border-radius:4px;width:' + (cmax ? 100*c.count/cmax : 0).toFixed(1) + '%"></span></span></td>' +
-            '<td class="r">' + n0(c.count) + '</td></tr>';
+    (d.cities || []).forEach(function(c){ if(c.count > cmax) cmax = c.count; });
+
+    (d.cities || []).slice(0, 12).forEach(function(c){
+      var col = c.rate >= 90 ? '#1F9D5A' : (c.rate >= 75 ? '#C98B1E' : '#C9453F');
+      cityRows += '<div class="b"><span>' + esc(c.city) + '</span>' +
+        '<span class="track"><span class="fill" style="background:' + col + ';width:' +
+        (cmax ? 100*c.count/cmax : 0).toFixed(1) + '%"></span></span>' +
+        '<span class="num">' + n0(c.count) + ' \u00b7 ' + c.rate.toFixed(0) + '%</span></div>';
     });
-    html += '<div class="box"><h3>Busiest cities</h3><table class="t">' +
-            (cb || '<tr><td>No cities.</td></tr>') + '</table></div>';
+
+    html += '<div class="box"><h3>Cities<span class="aside">parcels and how many stuck</span></h3>' +
+            '<div class="bars">' + (cityRows || '<div class="note">No cities.</div>') + '</div>' +
+            '<div class="note">Green is 90% or better. Red is under 75%.</div></div>';
 
     html += '</div>';
 
-    if((d.trouble || []).length){
-      html += '<div class="msg">' + d.trouble.map(function(x){
-        return esc(x.label) + ': ' + esc(x.error);
-      }).join('<br>') + '</div>';
+    if((d.accounts || []).length > 1 || !account){
+      var accRows = (d.accounts || []).map(function(a){
+        return '<tr><td><a href="/courier-dash.html?account=' + a.id + '">' + esc(a.label) + '</a></td>' +
+               '<td class="r">' + n0(a.orders) + '</td>' +
+               '<td class="r">' + n0(a.delivered) + '</td>' +
+               '<td class="r">' + n0(a.returned) + '</td>' +
+               '<td class="r">' + a.successRate.toFixed(1) + '%</td>' +
+               '<td class="r">' + money(a.deliveredAmount) + '</td>' +
+               '<td class="r">' + money(a.pendingAmount) + '</td></tr>';
+      }).join('');
+
+      html += '<div class="box" style="margin-bottom:14px"><h3>Accounts</h3><table class="t">' +
+              '<tr><th>Account</th><th class="r">Orders</th><th class="r">Delivered</th>' +
+              '<th class="r">Returned</th><th class="r">Rate</th>' +
+              '<th class="r">Collected</th><th class="r">Pending</th></tr>' +
+              (accRows || '<tr><td colspan="7" style="color:var(--muted)">No accounts.</td></tr>') +
+              '</table></div>';
     }
 
-    html += '<div class="note">Asked from the courier at ' +
-            esc(new Date(d.pulledAt).toLocaleString()) + '</div>';
+    if(t.lastSeen){
+      html += '<div class="note">Newest order in the store: ' +
+              esc(new Date(t.lastSeen).toLocaleString()) + '</div>';
+    }
 
     $('out').innerHTML = html;
-    paintToday();
 
     $('out').querySelectorAll('.cell').forEach(function(b){
       b.addEventListener('click', function(){
-        openList(b.getAttribute('data-status'), b.getAttribute('data-group'));
+        openList({ status: b.getAttribute('data-status'), group: b.getAttribute('data-group') });
       });
     });
     $('out').querySelectorAll('[data-find]').forEach(function(a){
@@ -528,6 +559,12 @@
         $('track').value = a.getAttribute('data-find');
         findOne();
       });
+    });
+    $('out').querySelectorAll('[data-cpr]').forEach(function(tr){
+      tr.addEventListener('click', function(){ openList({ cpr: tr.getAttribute('data-cpr') }); });
+    });
+    $('out').querySelectorAll('[data-pickup]').forEach(function(tr){
+      tr.addEventListener('click', function(){ openPickup(tr.getAttribute('data-pickup')); });
     });
   }
 
@@ -539,43 +576,59 @@
     $('dBody').innerHTML = body;
     $('drawer').classList.add('open');
   }
-  $('dClose').addEventListener('click', function(){
-    $('drawer').classList.remove('open');
-    stopBackfillPolling();
-  });
+  $('dClose').addEventListener('click', function(){ $('drawer').classList.remove('open'); });
   $('drawer').addEventListener('click', function(e){
-    if(e.target === $('drawer')){ $('drawer').classList.remove('open'); stopBackfillPolling(); }
+    if(e.target === $('drawer')) $('drawer').classList.remove('open');
   });
 
-  function openList(status, group){
-    openDrawer(status || 'All orders', '', '<div class="loading">Fetching\u2026</div>');
+  function orderTable(rows){
+    var lines = rows.map(function(o){
+      return '<tr><td class="mono">' + esc(o.orderRef || '') + '</td>' +
+             '<td class="mono">' + esc(o.tracking) + '</td>' +
+             '<td>' + esc(o.city || '') + '</td>' +
+             '<td class="r">' + full(o.amount) + '</td>' +
+             '<td class="mono">' + esc(o.bookedOn || '') + '</td>' +
+             '<td class="mono">' + esc(o.deliveredOn || '') + '</td>' +
+             '<td>' + esc(o.status) + '</td>' +
+             '<td class="mono">' + esc(o.cprNumber || '') + '</td></tr>';
+    }).join('');
 
-    fetch('/api/courier/orders?'+params({ status: status, group: group }), { cache:'no-store' })
+    return '<table class="t">' +
+      '<tr><th>Order ref</th><th>Tracking</th><th>City</th><th class="r">Amount</th>' +
+      '<th>Booked</th><th>Delivered</th><th>Status</th><th>CPR</th></tr>' +
+      (lines || '<tr><td colspan="8">Nothing here.</td></tr>') + '</table>';
+  }
+
+  function openList(what){
+    var title = what.status || what.cpr || 'All orders';
+    openDrawer(title, '', '<div class="loading">Reading\u2026</div>');
+
+    fetch('/api/courier/rows?'+params(what), { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
-
-        var rows = (d.orders || []).map(function(o){
-          return '<tr><td class="mono">' + esc(o.orderRef || '') + '</td>' +
-                 '<td class="mono">' + esc(o.tracking) + '</td>' +
-                 '<td>' + esc(o.city || '') + '</td>' +
-                 '<td class="r">' + full(o.amount) + '</td>' +
-                 '<td class="mono">' + esc(o.bookedOn || '') + '</td>' +
-                 '<td class="mono">' + esc(o.deliveredOn || '') + '</td>' +
-                 '<td>' + esc(o.status) + '</td></tr>';
-        }).join('');
-
-        $('dNote').textContent = n0(d.count) + ' orders \u00b7 ' + full(d.amount) +
-          (d.count > d.orders.length ? ' \u00b7 showing first ' + d.orders.length : '');
-
-        $('dBody').innerHTML = '<table class="t">' +
-          '<tr><th>Order ref</th><th>Tracking</th><th>City</th><th class="r">Amount</th>' +
-          '<th>Booked</th><th>Delivered</th><th>Status</th></tr>' +
-          (rows || '<tr><td colspan="7">Nothing here.</td></tr>') + '</table>';
+        $('dNote').textContent = n0(d.count) + ' orders \u00b7 ' + full(d.amount);
+        $('dBody').innerHTML = orderTable(d.orders || []);
       })
-      .catch(function(e){
-        $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
-      });
+      .catch(function(e){ $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
+  }
+
+  function openPickup(day){
+    openDrawer('Handed over on ' + day, '', '<div class="loading">Reading\u2026</div>');
+
+    var p = new URLSearchParams();
+    p.set('day', day);
+    if(account) p.set('account', account);
+    if(courier) p.set('courier', courier);
+
+    fetch('/api/courier/pickups?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+        $('dNote').textContent = n0(d.parcels) + ' parcels \u00b7 ' + full(d.amount);
+        $('dBody').innerHTML = orderTable(d.orders || []);
+      })
+      .catch(function(e){ $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
   }
 
   function findOne(){
@@ -616,194 +669,11 @@
         html += line('Settled', p.settled ? 'yes' : 'not yet');
         html += line('Settled on', p.settledOn);
         html += line('CPR number', p.cprNumber);
-        html += line('Upfront payment', p.upfrontOn);
-        html += line('Reserve payment', p.reserveOn);
         html += '</table>';
-
-        if(!o){
-          html += '<div class="note">Only the payment side is shown \u2014 this parcel is ' +
-                  'outside the dates above.</div>';
-        }
 
         $('dBody').innerHTML = html;
       })
-      .catch(function(e){
-        $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
-      });
-  }
-
-  /* ---------- backfill, scoped to this account ---------- */
-
-  var bfTimer = null;
-  var bfSinceLog = 0;
-
-  function stopBackfillPolling(){
-    if(bfTimer){ clearInterval(bfTimer); bfTimer = null; }
-  }
-
-  function openBackfill(){
-    if(!account){
-      openDrawer('Backfill history', '',
-        '<div class="msg">Open this from a specific account\u2019s dashboard \u2014 ' +
-        'the URL needs ?account=... for this to know which one to pull.</div>');
-      return;
-    }
-
-    var toStr = today();
-    var fromD = new Date(); fromD.setDate(fromD.getDate() - 90);
-    var fromStr = iso(fromD);
-
-    var body =
-      '<div class="bf-row">' +
-        '<div class="bf-field"><label>From</label><input type="date" id="bfFrom" value="'+fromStr+'"></div>' +
-        '<div class="bf-field"><label>To</label><input type="date" id="bfTo" value="'+toStr+'"></div>' +
-      '</div>' +
-      '<label class="bf-chk"><input type="checkbox" id="bfCpr" checked> ' +
-        'Also fetch payment status (CPR) for delivered orders</label>' +
-      '<div class="bf-actions">' +
-        '<button class="bf-start" id="bfStart">Start backfill</button>' +
-        '<button class="bf-stop" id="bfStop" style="display:none">Stop</button>' +
-        '<button class="bf-clear" id="bfClear" style="display:none">Clear</button>' +
-      '</div>' +
-      '<div id="bfErr" class="msg" style="display:none;margin-bottom:12px"></div>' +
-      '<div id="bfPanel" style="display:none">' +
-        '<span id="bfBadge" class="bf-badge bf-running">running</span>' +
-        '<div class="bf-stats" style="margin-top:8px">' +
-          'Months: <span id="bfMonthsDone">0</span> / <span id="bfMonthsTotal">0</span>' +
-        '</div>' +
-        '<div class="bf-track"><div class="bf-fill" id="bfBar"></div></div>' +
-        '<div class="bf-stats">' +
-          'Orders saved: <span id="bfOrders">0</span> \u00b7 ' +
-          'Payment status checked: <span id="bfAsked">0</span> \u00b7 ' +
-          'Left to check: <span id="bfLeft">0</span>' +
-        '</div>' +
-        '<div class="bf-log" id="bfLog"></div>' +
-      '</div>';
-
-    openDrawer('Backfill history', '', body);
-
-    $('bfStart').addEventListener('click', bfStart);
-    $('bfStop').addEventListener('click', bfStop);
-    $('bfClear').addEventListener('click', bfClear);
-
-    bfResumeIfRunning();
-  }
-
-  function bfShowError(msg){
-    var e = $('bfErr');
-    if(!e) return;
-    e.textContent = msg;
-    e.style.display = 'block';
-  }
-  function bfClearError(){
-    var e = $('bfErr');
-    if(e) e.style.display = 'none';
-  }
-
-  function bfStart(){
-    bfClearError();
-    var from = $('bfFrom').value, to = $('bfTo').value;
-    var withCpr = $('bfCpr').checked;
-
-    if(!from || !to) return bfShowError('Pick a from and to date');
-
-    $('bfStart').disabled = true;
-    fetch('/api/courier/backfill', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account: account, from: from, to: to, withCpr: withCpr })
-    })
-      .then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
-      .then(function(res){
-        if(!res.ok) throw new Error(res.d.error || 'Could not start');
-        bfSinceLog = 0;
-        var log = $('bfLog'); if(log) log.textContent = '';
-        $('bfPanel').style.display = 'block';
-        $('bfStop').style.display = 'inline-block';
-        $('bfClear').style.display = 'none';
-        bfPoll();
-      })
-      .catch(function(e){
-        bfShowError(e.message);
-        $('bfStart').disabled = false;
-      });
-  }
-
-  function bfStop(){
-    fetch('/api/courier/backfill-stop', { method: 'POST' });
-  }
-
-  function bfClear(){
-    fetch('/api/courier/backfill-clear', { method: 'POST' })
-      .then(function(r){
-        if(r.ok){
-          $('bfPanel').style.display = 'none';
-          $('bfClear').style.display = 'none';
-          $('bfStart').disabled = false;
-        }
-      });
-  }
-
-  function bfRender(job){
-    if(!$('bfPanel')) return;
-    $('bfPanel').style.display = 'block';
-
-    var badge = $('bfBadge');
-    badge.textContent = job.state;
-    badge.className = 'bf-badge bf-' + job.state;
-
-    $('bfMonthsDone').textContent = job.monthsDone;
-    $('bfMonthsTotal').textContent = job.monthsTotal;
-    var pct = job.monthsTotal ? Math.round(100 * job.monthsDone / job.monthsTotal) : 0;
-    $('bfBar').style.width = pct + '%';
-
-    $('bfOrders').textContent = job.ordersSaved;
-    $('bfAsked').textContent = job.asked;
-    $('bfLeft').textContent = job.cprLeft;
-
-    if(job.log && job.log.length){
-      var box = $('bfLog');
-      var atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
-      job.log.forEach(function(l){ box.textContent += l.text + '\n'; });
-      bfSinceLog = job.logLength;
-      if(atBottom) box.scrollTop = box.scrollHeight;
-    }
-
-    if(job.state !== 'running'){
-      stopBackfillPolling();
-      $('bfStop').style.display = 'none';
-      $('bfClear').style.display = 'inline-block';
-      $('bfStart').disabled = false;
-      if(job.error) bfShowError(job.error);
-    }
-  }
-
-  function bfPoll(){
-    stopBackfillPolling();
-    var tick = function(){
-      fetch('/api/courier/backfill-status?since=' + bfSinceLog, { cache:'no-store' })
-        .then(function(r){ return r.json(); })
-        .then(function(data){ if(data.job && $('bfPanel')) bfRender(data.job); })
-        .catch(function(){});
-    };
-    tick();
-    bfTimer = setInterval(tick, 2000);
-  }
-
-  function bfResumeIfRunning(){
-    fetch('/api/courier/backfill-status?since=0', { cache:'no-store' })
-      .then(function(r){ return r.json(); })
-      .then(function(data){
-        if(!data.job || !$('bfPanel')) return;
-        if(data.job.state === 'running'){
-          $('bfStart').disabled = true;
-          $('bfStop').style.display = 'inline-block';
-          bfPoll();
-        } else {
-          bfRender(data.job);
-        }
-      })
-      .catch(function(){});
+      .catch(function(e){ $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
   }
 })();
 </script>
