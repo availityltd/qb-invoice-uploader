@@ -1,0 +1,36 @@
+// one day's handover as a file - what a load sheet would have listed
+app.get('/api/courier/pickup-file', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const day = String(req.query.day || '').trim();
+  if (!day) return res.status(400).json({ error: 'day required' });
+
+  try {
+    const d = await pickupOrders(realmId, {
+      day, account: req.query.account, courier: req.query.courier
+    });
+
+    const cell = v => {
+      const s = v == null ? '' : String(v);
+      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+
+    const rows = [['Order ref', 'Tracking', 'City', 'Amount', 'Status',
+                   'Booked', 'Delivered'].map(cell).join(',')];
+
+    d.orders.forEach(o => {
+      rows.push([o.orderRef, o.tracking, o.city, o.amount, o.status,
+                 o.bookedOn, o.deliveredOn].map(cell).join(','));
+    });
+
+    rows.push('');
+    rows.push([`${d.parcels} parcels`, '', '', d.amount].map(cell).join(','));
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="handover-${day}.csv"`);
+    res.send('\uFEFF' + rows.join('\r\n') + '\r\n');
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
