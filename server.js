@@ -53,6 +53,7 @@ import {
 import {
   startBackfill, stopBackfill, clearBackfill, backfillSnapshot
 } from './backfill.js';
+import { startKeeper, keeperState, sweepNow } from './keeper.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -2630,6 +2631,19 @@ app.post('/api/courier/backfill-clear', async (req, res) => {
   if (!ok) return res.status(409).json({ error: 'The backfill is still running' });
   res.json({ ok: true });
 });
+// how the quiet catch-up is getting on
+app.get('/api/courier/keeper', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(keeperState());
+});
+
+app.post('/api/courier/keeper-now', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json(sweepNow());
+});
 // the orders behind one status
 
 app.get('/api/courier/orders', async (req, res) => {
@@ -3624,7 +3638,10 @@ initDb()
   .then(() => initSettings())
   .then(() => initCache())
   .then(() => initCouriers())
-  .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
+  .then(() => app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    startKeeper();
+  }))
   .catch(err => {
     console.error('DB init failed:', err);
     process.exit(1);
