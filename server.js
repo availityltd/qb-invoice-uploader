@@ -54,6 +54,9 @@ import {
   startBackfill, stopBackfill, clearBackfill, backfillSnapshot
 } from './backfill.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
+import {
+  dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy
+} from './dashdata.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
@@ -2643,6 +2646,68 @@ app.post('/api/courier/keeper-now', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.json(sweepNow());
+});
+// ---------- The dashboard, read from our own table ----------
+
+app.get('/api/courier/dash', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account, courier } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await dashData(realmId, { from, to, account, courier }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the receipts, newest first
+app.get('/api/courier/receipts', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account, courier, limit } = req.query;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ cprs: await recentCprs(realmId, { from, to, account, courier, limit }) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// what was handed over, day by day - what a load sheet would have said
+app.get('/api/courier/pickups', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account, courier, limit, day } = req.query;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    if (day) return res.json(await pickupOrders(realmId, { day, account, courier }));
+    res.json({ days: await pickups(realmId, { from, to, account, courier, limit }) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the orders behind any number on the page
+app.get('/api/courier/rows', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account, courier, status, group, city, cpr } = req.query;
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await ordersBy(realmId, { from, to, account, courier, status, group, city, cpr }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 // the orders behind one status
 
