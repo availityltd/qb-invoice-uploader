@@ -413,6 +413,7 @@
     {k:"ship",   g:["shipping","shipping price"]},
     {k:"tax",    g:["taxes","total tax","tax"]},
     {k:"disc",   g:["discount amount","total discount","discount"]},
+        {k:"shipm",  g:["shipping method","shipping name","shipping line title"]},
     {k:"status", g:["financial status","payment status"]},
     {k:"fulfil", g:["fulfillment status","fulfilment status"]},
     {k:"total",  g:["total"]},
@@ -718,7 +719,8 @@
     }
 
     var iOrder=m.order,iDate=m.date,iItem=m.item,iQty=m.qty,iRate=m.rate,iSku=m.sku,
-        iShip=m.ship,iTax=m.tax,iDisc=m.disc,iStat=m.status,iFul=m.fulfil,iTot=m.total,
+                iShip=m.ship,iTax=m.tax,iDisc=m.disc,iShipM=m.shipm,
+        iStat=m.status,iFul=m.fulfil,iTot=m.total,
         iCust=m.cust,iMail=m.email,iA1=m.a1,iA2=m.a2,iCity=m.city,iProv=m.prov,iZip=m.zip,iCtry=m.country;
     function cell(r,i){ return (i>=0&&i<r.length&&r[i]!=null)?String(r[i]).trim():""; }
 
@@ -811,12 +813,13 @@
 }
       if(!block.length){ noLines++; continue; }
 
+           // shipping carries whatever Shopify called the method
       var sh=num(cell(head,iShip));
-      if(sh!==0) push(shipName,1,sh,sh);
+      if(sh!==0) push(shipName,1,sh,sh,cell(head,iShipM)||"Shipping");
       var ds=num(cell(head,iDisc));
-      if(ds>0) push(discName,1,ds,ds);
+      if(ds>0) push(discName,1,ds,ds,"Discount Product");
       var tx=num(cell(head,iTax));
-      if(tx!==0) push("Sales Tax",1,tx,tx);
+      if(tx!==0) push("Sales Tax",1,tx,tx,"Sales Tax");
 
       allInvoices.push({docNumber:invNo,customer:custName,txnDate:dc.isoDate,
                         dueDate:dc.isoDue,terms:termS,memo:memo,lines:objLines});
