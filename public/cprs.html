@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cash payment receipts</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .cdbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .cdbar input[type=date],.cdbar input[type=text]{border:1px solid var(--line);border-radius:7px;
+    padding:7px 9px;font:inherit;font-size:12.5px;background:#fff;height:auto;width:auto}
+  .cdbar button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;
+    font:inherit;font-size:12.5px;cursor:pointer;width:auto;height:auto;color:var(--ink)}
+  .cdbar button:hover{border-color:var(--qbo)}
+  .cdbar button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+  .cdbar .find{margin-left:auto;display:flex;gap:6px}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;
+    margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px}
+  .card .k{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .card .v{font-family:var(--mono);font-size:23px;font-weight:500;margin-top:6px;line-height:1.1}
+  .card .n{font-size:11.5px;color:var(--muted);margin-top:4px}
+
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;
+    margin-bottom:14px}
+  .box h3{margin:0 0 14px;font-size:13.5px;font-weight:600;display:flex;align-items:baseline;gap:9px}
+  .box h3 .aside{margin-left:auto;font-size:11.5px;color:var(--faint);font-weight:400}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--faint);border-bottom:1px solid var(--line);padding:8px;font-weight:600}
+  table.t td{padding:9px 8px;border-bottom:1px solid var(--line)}
+  table.t td.r,table.t th.r{text-align:right;font-family:var(--mono)}
+  table.t td.mono{font-family:var(--mono);font-size:12px}
+  table.t tr:last-child td{border-bottom:0}
+  table.t tr.tot td{font-weight:600;background:#FAFCFE}
+  table.t tr.click{cursor:pointer}
+  table.t tr.click:hover td{background:#F5FAFD}
+
+  .mon{font-weight:600;background:#F3F7FB}
+
+  .drawer{position:fixed;inset:0;background:rgba(12,24,20,.45);display:none;z-index:60}
+  .drawer.open{display:block}
+  .drawer .panel{position:absolute;right:0;top:0;bottom:0;width:min(1000px,96vw);background:#fff;
+    box-shadow:-8px 0 28px rgba(0,0,0,.18);display:flex;flex-direction:column}
+  .drawer .hd{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
+    align-items:center;gap:12px}
+  .drawer .hd b{font-size:14px}
+  .drawer .hd .note{font-size:12px;color:var(--faint)}
+  .drawer .hd .x{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:7px;
+    width:30px;height:30px;cursor:pointer;font-size:15px;line-height:1}
+  .drawer .bd{overflow:auto;padding:6px 20px 24px}
+
+  .note{font-size:11.5px;color:var(--faint);margin-top:11px}
+  .msg{padding:13px 15px;border-radius:8px;background:#FDF3F3;border:1px solid var(--bad);
+    color:var(--bad);font-size:12.5px}
+  .loading{color:var(--muted);font-size:12.5px;padding:22px 0}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Cash payment receipts</h1>
+        <div class="sub" id="sub">Every CPR the courier has settled</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Courier accounts are kept per company.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+        <div class="cdbar">
+          <button data-days="29" class="on">30 days</button>
+          <button data-days="89">3 months</button>
+          <button data-days="364">A year</button>
+          <button data-days="0" id="btnAll">Everything</button>
+          <input type="date" id="from">
+          <input type="date" id="to">
+          <button class="on" id="go">Show</button>
+          <div class="find">
+            <input type="text" id="q" placeholder="CPR number">
+          </div>
+        </div>
+        <div id="out"><div class="loading">Reading…</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="panel">
+    <div class="hd"><b id="dTitle">Receipt</b><span class="note" id="dNote"></span>
+      <button class="x" id="dClose">&times;</button></div>
+    <div class="bd" id="dBody"></div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var qs = new URLSearchParams(location.search);
+  var account = qs.get('account');
+  var courier = qs.get('courier');
+  var all = [];
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function n0(v){ return Number(v||0).toLocaleString('en-US'); }
+  function full(v){ return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function iso(d){ return d.toISOString().slice(0,10); }
+
+  var MONTHS = ['','January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+  var fromEl = $('from'), toEl = $('to');
+
+  function setRange(days){
+    var t = new Date(), f = new Date();
+    f.setDate(f.getDate() - days);
+    fromEl.value = iso(f); toEl.value = iso(t);
+  }
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    setRange(29);
+
+    document.querySelectorAll('.cdbar button[data-days]').forEach(function(b){
+      b.addEventListener('click', function(){
+        document.querySelectorAll('.cdbar button[data-days]').forEach(function(x){ x.classList.remove('on'); });
+        b.classList.add('on');
+        var n = Number(b.getAttribute('data-days'));
+        if(n) setRange(n);
+        else { fromEl.value = '2020-01-01'; toEl.value = iso(new Date()); }
+        load();
+      });
+    });
+    $('go').addEventListener('click', load);
+    $('q').addEventListener('input', function(){ draw(); });
+
+    head();
+    load();
+  });
+
+  function head(){
+    if(!account && !courier) return;
+    var p = new URLSearchParams();
+    if(account) p.set('account', account);
+    if(courier) p.set('courier', courier);
+    fetch('/api/courier/scope?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(!d.error) $('sub').textContent = d.title; })
+      .catch(function(){});
+  }
+
+  function load(){
+    $('out').innerHTML = '<div class="loading">Reading\u2026</div>';
+
+    var p = new URLSearchParams();
+    p.set('from', fromEl.value);
+    p.set('to', toEl.value);
+    p.set('limit', 500);
+    if(account) p.set('account', account);
+    if(courier) p.set('courier', courier);
+
+    fetch('/api/courier/receipts?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('out').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+        all = d.cprs || [];
+        draw();
+      })
+      .catch(function(e){ $('out').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
+  }
+
+  function draw(){
+    var q = $('q').value.trim().toLowerCase();
+    var list = q
+      ? all.filter(function(c){ return String(c.cpr).toLowerCase().indexOf(q) > -1; })
+      : all;
+
+    var orders = 0, amount = 0;
+    list.forEach(function(c){ orders += c.orders; amount += c.amount; });
+
+    var html = '<div class="cards">' +
+      '<div class="card"><div class="k">Receipts</div><div class="v">' + n0(list.length) +
+        '</div><div class="n">in this range</div></div>' +
+      '<div class="card"><div class="k">Orders settled</div><div class="v">' + n0(orders) +
+        '</div><div class="n">across every receipt</div></div>' +
+      '<div class="card"><div class="k">Money received</div><div class="v">' + full(amount) +
+        '</div><div class="n">PKR</div></div>' +
+      '<div class="card"><div class="k">Average receipt</div><div class="v">' +
+        full(list.length ? amount/list.length : 0) + '</div><div class="n">per CPR</div></div>' +
+      '</div>';
+
+    // grouped by month, newest first
+    var byMonth = {};
+    list.forEach(function(c){
+      var k = (c.settledOn || '0000-00').slice(0, 7);
+      if(!byMonth[k]) byMonth[k] = [];
+      byMonth[k].push(c);
+    });
+
+    var rows = '';
+    Object.keys(byMonth).sort().reverse().forEach(function(k){
+      var group = byMonth[k];
+      var mo = 0, am = 0;
+      group.forEach(function(c){ mo += c.orders; am += c.amount; });
+
+      var label = k === '0000-00'
+        ? 'No date'
+        : MONTHS[Number(k.slice(5,7))] + ' ' + k.slice(0,4);
+
+      rows += '<tr class="mon"><td colspan="2">' + esc(label) + '</td>' +
+              '<td class="r">' + n0(group.length) + ' receipts</td>' +
+              '<td class="r">' + n0(mo) + '</td>' +
+              '<td class="r">' + full(am) + '</td></tr>';
+
+      group.forEach(function(c){
+        rows += '<tr class="click" data-cpr="' + esc(c.cpr) + '">' +
+                '<td class="mono">' + esc(c.cpr) + '</td>' +
+                '<td class="mono">' + esc(c.settledOn || '') + '</td>' +
+                '<td>' + esc(c.account) + '</td>' +
+                '<td class="r">' + n0(c.orders) + '</td>' +
+                '<td class="r">' + full(c.amount) + '</td></tr>';
+      });
+    });
+
+    html += '<div class="box"><h3>Receipts' +
+            '<span class="aside">click one to see what is inside</span></h3>' +
+            '<table class="t"><tr><th>CPR number</th><th>Settled</th><th>Account</th>' +
+            '<th class="r">Orders</th><th class="r">Amount</th></tr>' +
+            (rows || '<tr><td colspan="5" style="color:var(--muted)">Nothing settled in this range.</td></tr>') +
+            '</table></div>';
+
+    html += '<div class="note">A receipt appears here once the courier has told us its number. ' +
+            'Newly delivered parcels take a few days to be settled.</div>';
+
+    $('out').innerHTML = html;
+
+    $('out').querySelectorAll('[data-cpr]').forEach(function(tr){
+      tr.addEventListener('click', function(){ openCpr(tr.getAttribute('data-cpr')); });
+    });
+  }
+
+  /* ---------- one receipt ---------- */
+
+  $('dClose').addEventListener('click', function(){ $('drawer').classList.remove('open'); });
+  $('drawer').addEventListener('click', function(e){
+    if(e.target === $('drawer')) $('drawer').classList.remove('open');
+  });
+
+  function openCpr(cpr){
+    $('dTitle').textContent = cpr;
+    $('dNote').textContent = '';
+    $('dBody').innerHTML = '<div class="loading">Reading\u2026</div>';
+    $('drawer').classList.add('open');
+
+    var p = new URLSearchParams();
+    p.set('cpr', cpr);
+    p.set('from', '2020-01-01');
+    p.set('to', iso(new Date()));
+    if(account) p.set('account', account);
+    if(courier) p.set('courier', courier);
+
+    fetch('/api/courier/rows?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+
+        var rows = (d.orders || []).map(function(o){
+          return '<tr><td class="mono">' + esc(o.orderRef || '') + '</td>' +
+                 '<td class="mono">' + esc(o.tracking) + '</td>' +
+                 '<td>' + esc(o.city || '') + '</td>' +
+                 '<td class="r">' + full(o.amount) + '</td>' +
+                 '<td class="r">' + full(o.fee) + '</td>' +
+                 '<td class="mono">' + esc(o.deliveredOn || '') + '</td>' +
+                 '<td class="mono">' + esc(o.settledOn || '') + '</td></tr>';
+        }).join('');
+
+        var fee = (d.orders || []).reduce(function(s, x){ return s + x.fee + x.tax; }, 0);
+
+        $('dNote').textContent = n0(d.count) + ' orders \u00b7 ' + full(d.amount) +
+                                 ' \u00b7 charges ' + full(fee);
+
+        $('dBody').innerHTML =
+          '<div style="margin:14px 0 4px"><a href="/api/courier/cpr-file?cpr=' +
+          encodeURIComponent(cpr) + '"><button>Download this receipt</button></a></div>' +
+          '<table class="t">' +
+          '<tr><th>Order ref</th><th>Tracking</th><th>City</th><th class="r">Amount</th>' +
+          '<th class="r">Fee</th><th>Delivered</th><th>Settled</th></tr>' +
+          (rows || '<tr><td colspan="7">Nothing here.</td></tr>') + '</table>';
+      })
+      .catch(function(e){ $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
+  }
+})();
+</script>
+</body>
+</html>
