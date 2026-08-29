@@ -25,7 +25,10 @@ import {
 } from './cpr.js';
 import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
-import { startJob, stopJob, clearJob, retryFailed, snapshot, remainingInvoices } from './jobs.js';
+import {
+  startJob, stopJob, pauseJob, resumeJob, clearJob,
+  retryFailed, snapshot, remainingInvoices
+} from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
 import { startDelJob, stopDelJob, clearDelJob, delSnapshot } from './deljobs.js';
@@ -3638,7 +3641,23 @@ app.post('/api/upload/stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopJob(realmId) });
 });
+// Pause holds the run where it is; Resume carries on from the same place,
+// so nothing already in QuickBooks is sent again.
+app.post('/api/upload/pause', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: pauseJob(realmId) });
+});
 
+app.post('/api/upload/resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.json({ ok: true, jobId: resumeJob(realmId) });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
 app.post('/api/upload/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
