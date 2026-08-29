@@ -3609,6 +3609,39 @@ app.post('/api/void/clear', async (req, res) => {
   res.json({ ok: true });
 });
 // ==================== Upload ====================
+// Convert hands the list over here instead of squeezing it through the
+// browser, so a run of any size makes it across.
+const handovers = new Map();      // realmId -> { invoices, at }
+
+app.post('/api/upload/handover', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const list = req.body.invoices;
+  if (!Array.isArray(list) || !list.length) {
+    return res.status(400).json({ error: 'No invoices were sent' });
+  }
+
+  handovers.set(realmId, { invoices: list, at: Date.now() });
+
+  // anything left lying about for a day is not coming back for it
+  const cutoff = Date.now() - 24 * 3600 * 1000;
+  handovers.forEach((v, k) => { if (v.at < cutoff) handovers.delete(k); });
+
+  res.json({ ok: true, count: list.length });
+});
+
+app.get('/api/upload/handover', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const held = handovers.get(realmId);
+  if (!held) return res.json({ invoices: [] });
+
+  if (req.query.keep !== '1') handovers.delete(realmId);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ invoices: held.invoices, at: held.at });
+});
 // the work happens in a server-side job now, so leaving the page changes nothing
 
 app.post('/api/upload/start', async (req, res) => {
