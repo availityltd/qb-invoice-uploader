@@ -213,7 +213,12 @@
 
   // A big run will not fit in session storage, and losing it there is no loss
   // anyway - once Start is pressed the whole list lives on the server.
+  // a small run is worth keeping for a reload; a big one lives on the server
   function keepInvoices(){
+    if(invoices.length > 2000){
+      try { sessionStorage.removeItem(KEEP); } catch(e){}
+      return;
+    }
     try {
       sessionStorage.setItem(KEEP, JSON.stringify(invoices));
     } catch(e){
