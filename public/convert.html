@@ -927,12 +927,29 @@
       buildCSV(["Order","Reason","Financial status","Fulfillment status","Total"],result.excluded));
   });
 
-  $('btnSend').addEventListener("click",function(){
+   $('btnSend').addEventListener("click",function(){
     if(!result||!result.allInvoices.length) return;
-    try{
-      sessionStorage.setItem('pendingInvoices',JSON.stringify(result.allInvoices));
-      location.href='/upload.html?from=convert';
-    }catch(e){ alert('Could not pass the data across: '+e.message); }
+
+    var b = $('btnSend');
+    b.disabled = true;
+    b.textContent = 'Sending ' + nf(result.allInvoices.length) + ' invoices…';
+
+    // the list goes to the server, not through the browser - no size limit
+    fetch('/api/upload/handover', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ invoices: result.allInvoices })
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error) throw new Error(d.error);
+        location.href='/upload.html?from=convert';
+      })
+      .catch(function(e){
+        b.disabled = false;
+        b.textContent = 'Send to Upload';
+        alert('Could not pass the invoices across: ' + e.message);
+      });
   });
   $('dlall').addEventListener("click",function(){
     if(!result) return;
