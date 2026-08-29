@@ -145,6 +145,7 @@
   var invoices = [], negSet = {}, itemCounts = {}, logLines = [];
   var lastEventId = 0, poller = null, job = null;
   var KEEP = 'sqbo_invoices';
+  var HANDOFF = 'pendingInvoices';   // what Convert leaves behind for a small run
 
   /* ---------- small helpers ---------- */
 
@@ -211,8 +212,6 @@
       .catch(function(){ if(done) done(); });
   }
 
-  // A big run will not fit in session storage, and losing it there is no loss
-  // anyway - once Start is pressed the whole list lives on the server.
   // a small run is worth keeping for a reload; a big one lives on the server
   function keepInvoices(){
     if(invoices.length > 2000){
@@ -234,14 +233,40 @@
     } catch(e){}
   }
 
+  // Convert hands the list over one of two ways: straight through the browser
+  // when it is small enough, otherwise parked on the server. Either way it is
+  // still there when you wander off and come back.
   function checkIncoming(){
     var qs = new URLSearchParams(location.search);
-    if(qs.get('from') !== 'convert') return;
+    var fromConvert = qs.get('from') === 'convert';
 
-    $('fromConvert').classList.remove('hide');
-    $('fromConvert').textContent = 'Fetching the invoices from Convert\u2026';
+    try {
+      var raw = sessionStorage.getItem(HANDOFF);
+      if(raw){
+        var list = JSON.parse(raw);
+        sessionStorage.removeItem(HANDOFF);
+        if(list && list.length){
+          accept(list);
+          $('fileArea').classList.add('hide');
+          $('fromConvert').classList.remove('hide');
+          $('fromConvert').textContent =
+            nf(list.length) + ' invoice' + (list.length===1?'':'s') +
+            ' received from the Convert page. To use a file instead, reload this page.';
+          return;
+        }
+      }
+    } catch(e){}
 
-    fetch('/api/upload/handover', { cache:'no-store' })
+    // nothing in the browser - ask the server, and leave it there so coming
+    // back to this page a second time still finds it
+    if(!fromConvert && invoices.length) return;
+
+    if(fromConvert){
+      $('fromConvert').classList.remove('hide');
+      $('fromConvert').textContent = 'Fetching the invoices from Convert\u2026';
+    }
+
+    fetch('/api/upload/handover?keep=1', { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         var list = d.invoices || [];
@@ -251,11 +276,13 @@
         }
         accept(list);
         $('fileArea').classList.add('hide');
+        $('fromConvert').classList.remove('hide');
         $('fromConvert').textContent =
           nf(list.length) + ' invoice' + (list.length===1?'':'s') +
           ' received from the Convert page. To use a file instead, reload this page.';
       })
       .catch(function(e){
+        if(!fromConvert) return;
         $('fromConvert').className = 'note bad';
         $('fromConvert').textContent = 'Could not fetch them: ' + e.message;
       });
@@ -422,6 +449,10 @@
           paint();
           return;
         }
+
+        // a run on the server is enough on its own - the progress and the log
+        // do not need the invoice list to be sitting in this browser
+        $('runSec').classList.remove('hide');
 
         // a different run than the one we were watching - start the log again
         if(job && d.job.id !== job.id){
