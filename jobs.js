@@ -63,14 +63,14 @@ function buildPayload(inv, customerId, itemMap, termMap, negSet) {
   return p;
 }
 
-// a sleep that wakes early when the job is told to stop
+// a sleep that wakes early when the job is told to stop or hold
 function nap(job, ms) {
   return new Promise(resolve => {
     const step = 250;
     let waited = 0;
     const t = setInterval(() => {
       waited += step;
-      if (waited >= ms || job.stop) { clearInterval(t); resolve(); }
+      if (waited >= ms || job.stop || job.hold) { clearInterval(t); resolve(); }
     }, step);
   });
 }
@@ -91,7 +91,7 @@ export function startJob(realmId, { invoices, delay, negativeItems, batchSize })
     throw new Error('An upload is already running for this company');
   }
 
-  let size = Number(batchSize) || 30;
+  let size = Number(batchSize) || 10;
   if (size < 1) size = 1;
   if (size > 30) size = 30;          // QuickBooks will not take more than 30
 
@@ -99,6 +99,7 @@ export function startJob(realmId, { invoices, delay, negativeItems, batchSize })
     id: Date.now(),
     state: 'running',
     stop: false,
+    hold: false,
     invoices,
     total: invoices.length,
     cursor: 0,
@@ -168,6 +169,24 @@ async function sendChunk(realmId, job, itemMap, termMap, chunk) {
   return out;
 }
 
+// waits here while the job is held, and comes back false if it was stopped
+async function waitWhileHeld(job) {
+  if (!job.hold) return true;
+
+  push(job, 'log', 'Paused. Press Resume to carry on from here.');
+  job.state = 'paused';
+
+  while (job.hold && !job.stop) {
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  if (job.stop) return false;
+
+  job.state = 'running';
+  push(job, 'log', 'Carrying on.');
+  return true;
+}
+
 async function pass(realmId, job, itemMap, termMap, list, isRetry) {
   let pending = list;
 
@@ -177,6 +196,7 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
 
     for (let i = 0; i < pending.length; i += job.batchSize) {
       if (job.stop) return;
+      if (job.hold && !(await waitWhileHeld(job))) return;
 
       // several dead batches in a row means QuickBooks is busy, not that we are wrong
       if (job.streak >= DEAD_BATCH_STREAK) {
@@ -184,11 +204,20 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
         job.state = 'waiting';
         await nap(job, COOL_DOWN);
         if (job.stop) return;
+        if (job.hold && !(await waitWhileHeld(job))) return;
         job.state = 'running';
         job.streak = 0;
       }
 
-      const chunk = pending.slice(i, i + job.batchSize);
+      // anything already in QuickBooks is skipped, so a resume never repeats work
+      const chunk = pending.slice(i, i + job.batchSize)
+        .filter(inv => !job.done.has(inv.docNumber));
+
+      if (!chunk.length) {
+        if (firstRound && !isRetry) job.cursor = Math.min(job.total, i + job.batchSize);
+        continue;
+      }
+
       let results;
 
       try {
@@ -246,7 +275,7 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
       job.streak = goodInChunk ? 0 : job.streak + 1;
 
       if (firstRound && !isRetry) {
-        job.cursor = Math.min(job.total, i + chunk.length);
+        job.cursor = Math.min(job.total, i + job.batchSize);
       }
 
       if (i + job.batchSize < pending.length) await nap(job, job.delay);
@@ -258,6 +287,7 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
       job.state = 'waiting';
       await nap(job, wait * 1000);
       if (job.stop) return;
+      if (job.hold && !(await waitWhileHeld(job))) return;
       job.state = 'running';
     }
 
@@ -286,17 +316,18 @@ async function run(realmId, job) {
   const stuck = [...job.failed].filter(d => !job.done.has(d));
 
   if (job.stop) {
-    push(job, 'log', 'Stopped.');
+    push(job, 'log', `Stopped - ${job.done.size} of ${job.total} were uploaded.`);
     job.state = 'stopped';
   } else if (!stuck.length) {
     push(job, 'log', '--- All invoices uploaded ---');
     job.state = 'done';
+    job.cursor = job.total;
   } else {
     push(job, 'log', `--- ${stuck.length} invoice${stuck.length === 1 ? '' : 's'} still failing. Use Retry failed only, or download the list. ---`);
     job.state = 'done';
+    job.cursor = job.total;
   }
 
-  job.cursor = job.total;
   job.finishedAt = Date.now();
 }
 
@@ -304,13 +335,66 @@ export function stopJob(realmId) {
   const job = jobs.get(realmId);
   if (!job) return false;
   job.stop = true;
+  job.hold = false;
   push(job, 'log', 'Stop requested - finishing the batch in flight...');
   return true;
 }
 
+// Pause holds the run where it is. Resume picks up from the same place, so
+// nothing already in QuickBooks is sent a second time.
+export function pauseJob(realmId) {
+  const job = jobs.get(realmId);
+  if (!job) return false;
+  if (job.state !== 'running' && job.state !== 'waiting') return false;
+  job.hold = true;
+  return true;
+}
+
+export function resumeJob(realmId) {
+  const job = jobs.get(realmId);
+  if (!job) throw new Error('Nothing to resume');
+
+  // still on the server and merely held - just let it go
+  if (job.hold && job.state === 'paused') {
+    job.hold = false;
+    return job.id;
+  }
+
+  // it had stopped, so a fresh run is started with whatever is left
+  if (job.state === 'stopped' || job.state === 'error') {
+    const left = job.invoices.filter(inv => !job.done.has(inv.docNumber));
+    if (!left.length) throw new Error('Everything has already been uploaded');
+
+    const carried = {
+      done: new Set(job.done),
+      events: job.events,
+      lastId: job.lastId
+    };
+
+    const id = startJob(realmId, {
+      invoices: left,
+      delay: job.delay,
+      negativeItems: [...job.negSet],
+      batchSize: job.batchSize
+    });
+
+    // keep the log and the tally, so the page reads as one long run
+    const fresh = jobs.get(realmId);
+    fresh.done = carried.done;
+    fresh.events = carried.events;
+    fresh.lastId = carried.lastId;
+    push(fresh, 'log',
+      `Carrying on - ${carried.done.size} already uploaded, ${left.length} to go.`);
+
+    return id;
+  }
+
+  throw new Error('The upload is already going');
+}
+
 export function clearJob(realmId) {
   const job = jobs.get(realmId);
-  if (job && (job.state === 'running' || job.state === 'waiting')) return false;
+  if (job && (job.state === 'running' || job.state === 'waiting' || job.state === 'paused')) return false;
   jobs.delete(realmId);
   return true;
 }
@@ -318,7 +402,7 @@ export function clearJob(realmId) {
 export function retryFailed(realmId) {
   const job = jobs.get(realmId);
   if (!job) throw new Error('Nothing to retry');
-  if (job.state === 'running' || job.state === 'waiting') {
+  if (job.state === 'running' || job.state === 'waiting' || job.state === 'paused') {
     throw new Error('The upload is still going');
   }
 
@@ -360,7 +444,9 @@ export function snapshot(realmId, since, full) {
   if (full) {
     out.done = [...job.done];
     out.failed = [...job.failed].filter(d => !job.done.has(d));
-    out.remaining = job.invoices.slice(job.cursor).map(x => x.docNumber);
+    out.remaining = job.invoices
+      .filter(inv => !job.done.has(inv.docNumber))
+      .map(x => x.docNumber);
   }
 
   return out;
@@ -369,7 +455,7 @@ export function snapshot(realmId, since, full) {
 export function remainingInvoices(realmId) {
   const job = jobs.get(realmId);
   if (!job) return [];
-  return job.invoices.slice(job.cursor);
+  return job.invoices.filter(inv => !job.done.has(inv.docNumber));
 }
 
 export function negativesOf(realmId) {
