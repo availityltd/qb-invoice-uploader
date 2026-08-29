@@ -927,14 +927,25 @@
       buildCSV(["Order","Reason","Financial status","Fulfillment status","Total"],result.excluded));
   });
 
-   $('btnSend').addEventListener("click",function(){
+  $('btnSend').addEventListener("click",function(){
     if(!result||!result.allInvoices.length) return;
 
     var b = $('btnSend');
+
+    // A small run fits in the browser, and going that way is instant. Only when
+    // the browser refuses the size does the list take the slower trip through
+    // the server, which has no limit.
+    try{
+      sessionStorage.setItem('pendingInvoices', JSON.stringify(result.allInvoices));
+      location.href='/upload.html?from=convert';
+      return;
+    }catch(e){
+      try{ sessionStorage.removeItem('pendingInvoices'); }catch(e2){}
+    }
+
     b.disabled = true;
     b.textContent = 'Sending ' + nf(result.allInvoices.length) + ' invoices…';
 
-    // the list goes to the server, not through the browser - no size limit
     fetch('/api/upload/handover', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -951,6 +962,7 @@
         alert('Could not pass the invoices across: ' + e.message);
       });
   });
+
   $('dlall').addEventListener("click",function(){
     if(!result) return;
     result.parts.forEach(function(p,i){
