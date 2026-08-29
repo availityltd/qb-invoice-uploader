@@ -11,6 +11,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+  .runbtns{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}
+  .runbtns .run{flex:1;min-width:160px}
+  .runbtns .side{flex:0 0 auto;min-width:130px;border:1px solid var(--line);background:#fff;
+    border-radius:8px;padding:12px 18px;font:inherit;font-size:14px;cursor:pointer;color:var(--ink)}
+  .runbtns .side:hover{border-color:var(--qbo)}
+</style>
 </head>
 <body>
 
@@ -21,7 +28,7 @@
     <div class="topline">
       <div>
         <h1>Upload</h1>
-        <div class="sub">Create the invoices in QuickBooks, one at a time</div>
+        <div class="sub">Create the invoices in QuickBooks</div>
       </div>
       <div class="right"><span class="mono" id="srcAside" style="font-size:12px;color:var(--muted)"></span></div>
     </div>
@@ -80,20 +87,24 @@
             <div class="g3">
              <div>
                 <label for="batchSize">Invoices per batch</label>
-                <input type="number" id="batchSize" value="30" step="1" min="1" max="30">
-                <p class="hint">QuickBooks takes up to 30 at a time. Lower this if you see inventory lock errors.</p>
+                <input type="number" id="batchSize" value="10" step="1" min="1" max="30">
+                <p class="hint">QuickBooks takes up to 30 at a time, but ten is steadier — fewer inventory lock errors.</p>
               </div>
               <div>
                 <label for="delay">Pause between batches (seconds)</label>
                 <input type="number" id="delay" value="1" step="0.5" min="0">
                 <p class="hint">A short breather so QuickBooks can settle between batches.</p>
               </div>
-              <div></div> 
+              <div></div>
             </div>
-            <div style="margin-top:16px">
+
+            <div class="runbtns">
               <button class="run" id="btnStart">Start upload</button>
-              <button class="run" id="btnStop" style="display:none;background:var(--neg)">Stop upload</button>
+              <button class="run" id="btnResume" style="display:none">Carry on from here</button>
+              <button class="side" id="btnPause" style="display:none">Pause</button>
+              <button class="side" id="btnStop" style="display:none;border-color:var(--neg);color:var(--neg)">Stop</button>
             </div>
+
             <div class="prog"><i id="bar"></i></div>
             <div class="runhint" id="stat">Ready</div>
             <div class="log" id="log"></div>
@@ -117,8 +128,8 @@
 
         <footer>
           <p><b>It runs on the server:</b> once you press Start the work carries on by itself. You can open another page, or close this one, and come back — the log and the progress will still be here.</p>
-          <p><b>Stop works at once:</b> pressing Stop tells the server directly. It finishes the invoice it is on and then stops.</p>
-          <p><b>Failures are retried:</b> anything that fails is tried again automatically, up to three more rounds, with a growing pause between them.</p>
+          <p><b>Pause holds your place.</b> Press Pause to hold the run where it is, then Carry on when you are ready — nothing already in QuickBooks is sent a second time. Stop ends the run, and Carry on still works afterwards.</p>
+          <p><b>Failures are retried:</b> anything that fails is tried again automatically, up to four more rounds, with a growing pause between them.</p>
         </footer>
       </div>
     </div>
@@ -137,7 +148,7 @@
 
   /* ---------- small helpers ---------- */
 
-  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function nf(n){ return String(n == null ? 0 : n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
   function setStat(el, cls, html){ el.className = 'stat ' + cls; el.innerHTML = html; }
 
   function log(msg, cls){
@@ -200,9 +211,14 @@
       .catch(function(){ if(done) done(); });
   }
 
-  // invoices survive a reload so Start still works after coming back
+  // A big run will not fit in session storage, and losing it there is no loss
+  // anyway - once Start is pressed the whole list lives on the server.
   function keepInvoices(){
-    try { sessionStorage.setItem(KEEP, JSON.stringify(invoices)); } catch(e){}
+    try {
+      sessionStorage.setItem(KEEP, JSON.stringify(invoices));
+    } catch(e){
+      try { sessionStorage.removeItem(KEEP); } catch(e2){}
+    }
   }
   function restoreInvoices(){
     try {
@@ -278,7 +294,7 @@
 
   function updateBatchAside(){
     if(job && job.total){
-      var left = Math.max(0, job.total - job.cursor);
+      var left = Math.max(0, job.total - job.doneCount);
       $('batchAside').textContent = left > 0 ? (nf(left) + ' still to send') : 'all sent';
       return;
     }
@@ -381,7 +397,7 @@
   var CLS = { ok:'ok', fail:'err', retry:'warn', error:'err', log:'info' };
 
   function refresh(first){
-   var u = '/api/upload/status?since=' + lastEventId + (first ? '&full=1' : '');
+    var u = '/api/upload/status?since=' + lastEventId + (first ? '&full=1' : '');
     return fetch(u, { cache: 'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
@@ -415,14 +431,18 @@
 
         paint();
 
-        if(d.job.state === 'running' || d.job.state === 'waiting') startPolling();
-        else { stopPolling(); refreshLists(); }
+        if(d.job.state === 'running' || d.job.state === 'waiting' || d.job.state === 'paused') {
+          startPolling();
+        } else {
+          stopPolling();
+          refreshLists();
+        }
       })
       .catch(function(){ /* one missed poll is nothing to worry about */ });
   }
 
   function refreshLists(){
-   fetch('/api/upload/status?since=' + lastEventId + '&full=1', { cache: 'no-store' })
+    fetch('/api/upload/status?since=' + lastEventId + '&full=1', { cache: 'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(!d.job) return;
@@ -447,34 +467,54 @@
   /* ---------- drawing ---------- */
 
   function paint(){
-    var live = job && (job.state === 'running' || job.state === 'waiting');
+    var st = job ? job.state : null;
+    var live = st === 'running' || st === 'waiting';
+    var held = st === 'paused';
+    var halted = st === 'stopped' || st === 'error';
 
-    $('btnStart').style.display = live ? 'none' : 'block';
-    $('btnStop').style.display  = live ? 'block' : 'none';
+    $('btnStart').style.display  = (!job || (!live && !held && !halted)) ? 'block' : 'none';
+    $('btnPause').style.display  = live ? 'block' : 'none';
+    $('btnStop').style.display   = (live || held) ? 'block' : 'none';
+    $('btnResume').style.display = (held || halted) ? 'block' : 'none';
+
+    $('btnPause').disabled = false;
+    $('btnPause').textContent = 'Pause';
     $('btnStop').disabled = false;
-    $('btnStop').textContent = 'Stop upload';
+    $('btnStop').textContent = 'Stop';
+    $('btnResume').textContent = held ? 'Carry on' : 'Carry on from here';
 
     if(!job){
       $('liveNote').classList.add('hide');
       $('bar').style.width = '0%';
       $('stat').textContent = invoices.length ? 'Ready' : 'Load a file first';
-      $('btnStart').textContent = 'Start upload';
+      $('btnStart').textContent = invoices.length ? 'Start upload' : 'Load a file first';
       $('btnRetry').style.display = 'none';
       updateBatchAside();
       return;
     }
 
-    var pct = job.total ? Math.round(job.cursor / job.total * 100) : 0;
-    $('bar').style.width = pct + '%';
+    // progress follows what has actually landed, not where the cursor sits
+    var pct = job.total ? Math.round((job.doneCount + job.failedCount) / job.total * 100) : 0;
+    $('bar').style.width = Math.min(100, pct) + '%';
     $('stat').textContent =
       nf(job.doneCount) + ' done · ' + nf(job.failedCount) + ' failed · ' +
-      nf(Math.max(0, job.total - job.cursor)) + ' remaining';
+      nf(Math.max(0, job.total - job.doneCount - job.failedCount)) + ' remaining';
 
-    if(job.state === 'waiting'){
+    if(held){
       $('liveNote').classList.remove('hide');
       $('liveNote').textContent =
-        'Waiting before retry round ' + job.round + '. The server is handling it — you can leave this page.';
-    } else if(job.state === 'running'){
+        'Held where it is. Press Carry on and it picks up from the same place — ' +
+        'nothing already in QuickBooks is sent again.';
+    } else if(halted){
+      $('liveNote').classList.remove('hide');
+      $('liveNote').textContent =
+        'Stopped after ' + nf(job.doneCount) + ' of ' + nf(job.total) + '. ' +
+        'Carry on from here will send only what is left.';
+    } else if(st === 'waiting'){
+      $('liveNote').classList.remove('hide');
+      $('liveNote').textContent =
+        'Waiting before the next retry round. The server is handling it — you can leave this page.';
+    } else if(st === 'running'){
       $('liveNote').classList.remove('hide');
       $('liveNote').textContent =
         'Running on the server. You can move to another page and come back — nothing will be lost.';
@@ -482,12 +522,11 @@
       $('liveNote').classList.add('hide');
     }
 
-    $('btnStart').textContent = invoices.length ? 'Start upload' : 'Load a file first';
-    $('btnRetry').style.display = (!live && job.failedCount) ? 'inline-block' : 'none';
+    $('btnRetry').style.display = (!live && !held && job.failedCount) ? 'inline-block' : 'none';
     if(job.failedCount) $('btnRetry').textContent = 'Retry failed only (' + job.failedCount + ')';
 
     updateBatchAside();
-    if(!live) showResults();
+    if(!live && !held) showResults();
   }
 
   function showResults(){
@@ -518,7 +557,7 @@
     post('/api/upload/start', {
       invoices: invoices,
       delay: (parseFloat($('delay').value) || 1) * 1000,
-      batchSize: parseInt($('batchSize').value, 10) || 30,
+      batchSize: parseInt($('batchSize').value, 10) || 10,
       negativeItems: negativeList()
     }).then(function(){
       $('btnStart').disabled = false;
@@ -526,6 +565,28 @@
       startPolling();
     }).catch(function(e){
       $('btnStart').disabled = false;
+      log(e.message, 'err');
+    });
+  });
+
+  $('btnPause').addEventListener('click', function(){
+    $('btnPause').disabled = true;
+    $('btnPause').textContent = 'Pausing…';
+    post('/api/upload/pause').catch(function(e){
+      $('btnPause').disabled = false;
+      $('btnPause').textContent = 'Pause';
+      log(e.message, 'err');
+    });
+  });
+
+  $('btnResume').addEventListener('click', function(){
+    $('btnResume').disabled = true;
+    post('/api/upload/resume').then(function(){
+      $('btnResume').disabled = false;
+      refresh(false);
+      startPolling();
+    }).catch(function(e){
+      $('btnResume').disabled = false;
       log(e.message, 'err');
     });
   });
