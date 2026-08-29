@@ -397,9 +397,18 @@
     }).catch(function(){ $('prodAside').textContent='product load failed'; });
   }
 
+    var mapBySku = {};
+
   function loadMappings(){
     fetch('/api/mappings').then(function(r){return r.json();}).then(function(d){
       mappings=d.mappings||{};
+
+      // the same choice, findable by SKU alone - product names change, SKUs do not
+      mapBySku = {};
+      Object.keys(mappings).forEach(function(k){
+        var sku = k.split('~|~')[0];
+        if(sku && mapBySku[sku] === undefined) mapBySku[sku] = mappings[k];
+      });
     }).catch(function(){});
   }
 
@@ -586,7 +595,8 @@
     $('runHint').textContent = ok ? "" : ("Still required: "+need.join(", "));
   }
 
-  function srcKey(sku,name){ return (key(sku)||'')+'\u0000'+(key(name)||''); }
+   // a plain separator - a null byte cannot be stored in the database
+  function srcKey(sku,name){ return (key(sku)||'')+'~|~'+(key(name)||''); }
 
   function findBySku(sku){
     if(!sku) return null;
@@ -606,6 +616,16 @@
       if(m.skip) return {skip:true, via:'map'};
       if(m.qbItem) return {name:m.qbItem, via:'map'};
     }
+
+    // the same SKU chosen before, even if Shopify has since renamed it
+    if(sku){
+      var s = mapBySku[key(sku)];
+      if(s){
+        if(s.skip) return {skip:true, via:'map'};
+        if(s.qbItem) return {name:s.qbItem, via:'map'};
+      }
+    }
+
     var h=findBySku(sku);
     if(h) return {name:h, via:'sku'};
     var h2=qbByName[key(name)];
@@ -614,28 +634,6 @@
     if(h3) return {name:h3, via:'name'};
     return {unmatched:true, key:mk, sku:sku, name:name};
   }
-
-  $('btnScan').addEventListener("click",function(){
-    var m=shop.map, rows=shop.rows;
-    function cell(r,i){ return (i>=0&&i<r.length&&r[i]!=null)?String(r[i]).trim():""; }
-    var seen={}, list=[];
-    for(var i=0;i<rows.length;i++){
-      var sku=cell(rows[i],m.sku), name=cell(rows[i],m.item);
-      if(!name) continue;
-      var res=resolve(sku,name);
-      if(!res.unmatched) continue;
-      var k=res.key;
-      if(seen[k]){ seen[k].count++; continue; }
-      seen[k]={sku:sku,name:name,count:1,key:k};
-      list.push(seen[k]);
-    }
-    pending=list;
-    if(!list.length){ $('mapSheet').classList.add('hide'); doConvert(); return; }
-    buildMapTable();
-    $('mapSheet').classList.remove('hide');
-    $('mapSheet').scrollIntoView({behavior:'smooth',block:'start'});
-  });
-
   function buildMapTable(){
     $('mapAside').textContent=pending.length+" product"+(pending.length===1?"":"s");
     var body=$('mapBody'); body.innerHTML='';
@@ -674,7 +672,11 @@
     fetch('/api/mappings',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({mappings:list})})
       .then(function(r){return r.json();}).then(function(){
-        list.forEach(function(mm){ mappings[mm.key]={qbItem:mm.qbItem,skip:mm.skip}; });
+                list.forEach(function(mm){
+          var choice = {qbItem:mm.qbItem, skip:mm.skip};
+          mappings[mm.key] = choice;
+          if(mm.sku) mapBySku[key(mm.sku)] = choice;
+        });
         $('mapSaved').textContent='Saved '+list.length;
         setTimeout(function(){ $('mapSaved').textContent=''; },2500);
       }).catch(function(){ $('mapSaved').textContent='Save failed'; });
