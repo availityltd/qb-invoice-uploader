@@ -230,20 +230,30 @@
   }
 
   function checkIncoming(){
-    var raw = null;
-    try { raw = sessionStorage.getItem('pendingInvoices'); } catch(e){}
-    if(!raw) return;
-    try {
-      var list = JSON.parse(raw);
-      if(!list || !list.length) return;
-      sessionStorage.removeItem('pendingInvoices');
-      accept(list);
-      $('fileArea').classList.add('hide');
-      $('fromConvert').classList.remove('hide');
-      $('fromConvert').textContent =
-        list.length + ' invoice' + (list.length===1?'':'s') + ' received from the Convert page. ' +
-        'To use a file instead, reload this page.';
-    } catch(e){}
+    var qs = new URLSearchParams(location.search);
+    if(qs.get('from') !== 'convert') return;
+
+    $('fromConvert').classList.remove('hide');
+    $('fromConvert').textContent = 'Fetching the invoices from Convert\u2026';
+
+    fetch('/api/upload/handover', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var list = d.invoices || [];
+        if(!list.length){
+          $('fromConvert').classList.add('hide');
+          return;
+        }
+        accept(list);
+        $('fileArea').classList.add('hide');
+        $('fromConvert').textContent =
+          nf(list.length) + ' invoice' + (list.length===1?'':'s') +
+          ' received from the Convert page. To use a file instead, reload this page.';
+      })
+      .catch(function(e){
+        $('fromConvert').className = 'note bad';
+        $('fromConvert').textContent = 'Could not fetch them: ' + e.message;
+      });
   }
 
   /* ---------- file in ---------- */
