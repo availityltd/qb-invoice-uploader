@@ -77,6 +77,20 @@
   .lists td{padding:5px 13px;border-bottom:1px solid var(--line)}
   .lists td.num{text-align:right;font-family:var(--mono)}
 
+  .dupbox{border:1px solid var(--warn);background:#FFFBF0;border-radius:8px;
+    padding:14px 16px;margin-bottom:16px}
+  .dupbox h3{margin:0 0 6px;font-size:13px;font-weight:600}
+  .dupbox p{margin:0 0 10px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .dupbox table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff}
+  .dupbox th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:7px 10px;border-bottom:1px solid var(--line)}
+  .dupbox td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .dupbox td.num{text-align:right;font-family:var(--mono)}
+  .dupbox button{font-size:11.5px;padding:4px 12px;border-radius:6px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;font-family:inherit;white-space:nowrap}
+  .dupbox button:hover{border-color:var(--qbo)}
+  .dupbox .from{font-size:11px;color:var(--muted)}
+
   .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
     background:#fff;font-size:13px}
   .result.good{border-color:var(--qbo);background:#F2FAF0}
@@ -202,11 +216,12 @@
 
         <div class="step hide" id="stepMatch">
           <h2>What matched</h2>
-                    <div class="hint" id="matchHint"></div>
+          <div class="hint" id="matchHint"></div>
           <div id="colourRow" class="hide" style="margin-bottom:14px">
             <button class="solid" id="btnColour">Colour this CPR in the sheet</button>
             <span id="colourNote" style="font-size:12px;color:var(--muted);margin-left:10px"></span>
           </div>
+          <div id="dupBox"></div>
           <div id="traceBox"></div>
           <div class="tally" id="tally"></div>
           <div class="lists" id="lists"></div>
@@ -845,6 +860,8 @@
       'CPR ' + esc(d.cprNumber || '-') +
       (d.cprDate ? ' dated ' + esc(d.cprDate) : ' - no date in the sheet') +
       ' \u00b7 ' + nf(t.sheetRows) + ' rows in the sheet' +
+      (t.mergedRows ? ' \u00b7 ' + nf(t.mergedRows) + ' merged parcel' +
+                      (t.mergedRows === 1 ? '' : 's') : '') +
       (t.skipped ? ' \u00b7 ' + nf(t.skipped) + ' not delivered, skipped' : '') +
       (trouble
         ? '<br><b style="color:var(--warn)">' + nf(trouble) + ' invoice' +
@@ -852,14 +869,17 @@
           nf(t.alreadyPaid) + ' already received'
         : '');
 
+    drawDuplicates(d);
     drawTrace(tr);
     $('colourRow').classList.toggle('hide', S.excel);
     $('colourNote').textContent = '';
+
     $('tally').innerHTML =
       '<div class="ok"><div class="n">' + nf(t.matched) + '</div><div class="l">Ready to pay</div></div>' +
       '<div class="ok"><div class="n">' + money(t.amount) + '</div><div class="l">Amount</div></div>' +
       '<div class="warn"><div class="n">' + nf(t.amountOff) + '</div><div class="l">Amount differs</div></div>' +
       '<div class="warn"><div class="n">' + nf(t.notInQb) + '</div><div class="l">Not in QB</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.paidElsewhere || 0) + '</div><div class="l">Under another CPR</div></div>' +
       '<div><div class="n">' + nf(t.alreadyPaid) + '</div><div class="l">Already paid</div></div>';
 
     var lists = $('lists');
@@ -876,26 +896,103 @@
 
     box('Amount differs \u2014 sheet vs QuickBooks', d.amountOff, function(r){
       var gap = Number(r.sheetAmount) - Number(r.qbBalance);
-      return '<tr><td>' + esc(r.invoice) + '</td>' +
+      return '<tr><td>' + esc(r.invoice) +
+             (r.merged ? ' <span style="color:var(--muted)">(merged)</span>' : '') + '</td>' +
              '<td class="num">' + money(r.sheetAmount) + '</td>' +
              '<td class="num" style="color:var(--muted)">' + money(r.qbBalance) + '</td>' +
              '<td class="num" style="color:var(--warn)">' +
                (gap > 0 ? '+' : '') + money(gap) + '</td></tr>';
     });
     box('Not found in QuickBooks', d.notInQb, function(r){
-      return '<tr><td>' + esc(r.invoice) + '</td><td class="num">' + money(r.amount) + '</td></tr>';
+      return '<tr><td>' + esc(r.invoice) +
+             (r.merged && r.missing ? '<br><span style="font-size:11px;color:var(--muted)">missing: ' +
+               esc(r.missing.join(', ')) + '</span>' : '') + '</td>' +
+             '<td class="num">' + money(r.amount) + '</td></tr>';
     });
     box('Already paid', d.alreadyPaid, function(r){
       return '<tr><td>' + esc(r.invoice) + '</td><td class="num">' + money(r.qbTotal) + '</td></tr>';
     });
 
-    if(!t.matched){
+    // nothing left to pay, and nothing to duplicate either
+    if(!t.matched && !(d.paidElsewhere || []).length){
       $('stepPay').classList.add('hide');
       if(t.alreadyPaid > 0) say('ok', '<b>Every invoice in this CPR is already received.</b>');
       else say('bad', '<b>Nothing left to pay in this CPR.</b>');
       return;
     }
+    if(!t.matched){
+      // only duplicates to deal with - the pay step comes back once one is made
+      $('stepPay').classList.add('hide');
+      return;
+    }
     showPay(d);
+  }
+
+  /* ---------- parcels replaced and settled twice ---------- */
+
+  // An order that came back as an exchange sits in two CPRs. QuickBooks will
+  // not take the same number twice, so a copy is made under "-D" and this CPR
+  // pays that instead.
+  function drawDuplicates(d){
+    var box = $('dupBox');
+    box.innerHTML = '';
+
+    var list = d.paidElsewhere || [];
+    if(!list.length) return;
+
+    var rows = [];
+    list.forEach(function(r){
+      (r.elsewhere || []).forEach(function(p){
+        rows.push({
+          sheetRow: r.sheetRow,
+          invoice: p.number,
+          qbDoc: p.qbDoc,
+          qbId: p.qbId,
+          total: p.qbTotal,
+          cprs: (p.cprs || []).join(', ')
+        });
+      });
+    });
+    if(!rows.length) return;
+
+    box.innerHTML =
+      '<div class="dupbox">' +
+        '<h3>Paid under another CPR \u2014 replaced parcels</h3>' +
+        '<p>These orders were already received under a different settlement, but they are in ' +
+          'this CPR as well. Make a copy under <b>-D</b> and it can be received here too. ' +
+          'The copy keeps the original date, customer and lines.</p>' +
+        '<table>' +
+          '<thead><tr><th>Order</th><th>In QuickBooks</th><th>Received under</th>' +
+            '<th class="num">Amount</th><th></th></tr></thead>' +
+          '<tbody>' + rows.map(function(r, i){
+            return '<tr>' +
+              '<td>' + esc(r.invoice) + '<div class="from">sheet row ' + r.sheetRow + '</div></td>' +
+              '<td>' + esc(r.qbDoc) + '</td>' +
+              '<td>' + esc(r.cprs || '\u2014') + '</td>' +
+              '<td class="num">' + money(r.total) + '</td>' +
+              '<td><button data-dup="' + i + '" data-qbid="' + esc(r.qbId) + '">Create -D</button></td>' +
+              '</tr>';
+          }).join('') + '</tbody>' +
+        '</table>' +
+      '</div>';
+
+    box.querySelectorAll('button[data-dup]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var qbId = b.getAttribute('data-qbid');
+        b.disabled = true;
+        b.textContent = 'Creating...';
+
+        post('/api/cpr/duplicate', { invoiceId: qbId }).then(function(res){
+          b.textContent = res.invoice.doc + ' made';
+          // the new invoice is unpaid, so re-reading puts it in Ready to pay
+          setTimeout(function(){ openCpr(S.currentKey); }, 900);
+        }).catch(function(e){
+          b.disabled = false;
+          b.textContent = 'Create -D';
+          say('bad', '<b>' + esc(e.message) + '</b>');
+        });
+      });
+    });
   }
 
   // what QuickBooks actually did with this CPR, and how to put it right
@@ -1160,7 +1257,7 @@
     if(j.posted > 0){
       $('stepPay').classList.add('done');
       if(S.groups.length) loadSheetStatus();   // repaint the cards from QuickBooks
-            if(!S.excel) colourNow(true);
+      if(!S.excel) colourNow(true);
     }
 
     post('/api/cpr/receive-clear').catch(function(){});
@@ -1218,7 +1315,8 @@
       setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
     });
   }
-    /* ---------- colouring the sheet ---------- */
+
+  /* ---------- colouring the sheet ---------- */
 
   // green received, yellow amount differs, orange paid under another CPR,
   // red not in QuickBooks. Rows still waiting are left as they are.
@@ -1228,12 +1326,15 @@
     var b = $('btnColour');
     if(b){ b.disabled = true; b.textContent = 'Colouring...'; }
 
-      // the three lists on this page already say what each row is - the sheet
-    // just gets told the same thing, so the two can never disagree
+    // the lists on this page already say what each row is - the sheet just
+    // gets told the same thing, so the two can never disagree
     var m = S.match || {};
     var plan = [];
     (m.alreadyPaid || []).forEach(function(r){
       if(r.sheetRow) plan.push({ row: r.sheetRow, colour: 'green' });
+    });
+    (m.paidElsewhere || []).forEach(function(r){
+      if(r.sheetRow) plan.push({ row: r.sheetRow, colour: 'orange' });
     });
     (m.amountOff || []).forEach(function(r){
       if(r.sheetRow) plan.push({ row: r.sheetRow, colour: 'yellow' });
@@ -1270,7 +1371,7 @@
     });
   }
 
-     var colourBtn = $('btnColour');
+  var colourBtn = $('btnColour');
   if(colourBtn) colourBtn.addEventListener('click', function(){ colourNow(false); });
 })();
 </script>
