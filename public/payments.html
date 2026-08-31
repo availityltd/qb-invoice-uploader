@@ -1228,11 +1228,30 @@
     var b = $('btnColour');
     if(b){ b.disabled = true; b.textContent = 'Colouring...'; }
 
+      // the three lists on this page already say what each row is - the sheet
+    // just gets told the same thing, so the two can never disagree
+    var m = S.match || {};
+    var plan = [];
+    (m.alreadyPaid || []).forEach(function(r){
+      if(r.sheetRow) plan.push({ row: r.sheetRow, colour: 'green' });
+    });
+    (m.amountOff || []).forEach(function(r){
+      if(r.sheetRow) plan.push({ row: r.sheetRow, colour: 'yellow' });
+    });
+    (m.notInQb || []).forEach(function(r){
+      if(r.sheetRow) plan.push({ row: r.sheetRow, colour: 'red' });
+    });
+
+    if(!plan.length){
+      if(b){ b.disabled = false; b.textContent = 'Colour this CPR in the sheet'; }
+      $('colourNote').textContent = 'Nothing to colour yet.';
+      return Promise.resolve();
+    }
+
     return post('/api/cpr/colour', {
       sheetId: S.sheetId,
       tab: S.tab,
-      courier: S.courier,
-      cpr: S.currentKey === 'All rows' ? '(no CPR number)' : S.currentKey
+      plan: plan
     }).then(function(d){
       if(b){ b.disabled = false; b.textContent = 'Colour this CPR in the sheet'; }
       var t = d.tally || {};
