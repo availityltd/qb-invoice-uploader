@@ -382,3 +382,59 @@ export async function paymentsByIds(realmId, token, paymentIds) {
 
   return [...seen.values()];
 }
+
+/* ==================== colouring the sheet ==================== */
+
+// Work out what colour each row of one CPR deserves. Four outcomes:
+//
+//   green   the invoice is paid, and the payment carries this CPR's number
+//   yellow  the invoice is there but the sheet and QuickBooks disagree on the amount
+//   orange  the invoice is paid, but under a different CPR - the replaced-parcel case
+//   red     no such invoice in QuickBooks
+//
+// A row that matches but has not been received yet is left alone, so what is
+// still outstanding stays easy to see.
+export function colourPlan(rows, found, opts) {
+  const o = opts || {};
+  const mine = digitsOf(o.cprNumber) || clean(o.cprNumber);
+  const payRef = o.payRefById || {};       // payment id -> the ref it was posted under
+  const tolerance = o.tolerance === undefined ? 0.01 : o.tolerance;
+
+  const plan = [];
+
+  rows.forEach(r => {
+    if (!r.sheetRow) return;
+
+    const inv = found.get ? found.get(digitsOf(r.invoice))
+                          : found[digitsOf(r.invoice)];
+
+    if (!inv) {
+      plan.push({ row: r.sheetRow, colour: 'red' });
+      return;
+    }
+
+    const paid = (inv.paymentIds || []).length > 0;
+
+    if (paid && mine) {
+      const underMine = (inv.paymentIds || []).some(id => {
+        const ref = payRef[String(id)];
+        if (ref === undefined) return false;
+        return digitsOf(ref) === mine || clean(ref) === clean(o.cprNumber);
+      });
+
+      if (!underMine) {
+        plan.push({ row: r.sheetRow, colour: 'orange' });
+        return;
+      }
+    }
+
+    if (Math.abs(Number(r.amount || 0) - Number(inv.total || 0)) > tolerance) {
+      plan.push({ row: r.sheetRow, colour: 'yellow' });
+      return;
+    }
+
+    if (paid) plan.push({ row: r.sheetRow, colour: 'green' });
+  });
+
+  return plan;
+}
