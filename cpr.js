@@ -19,6 +19,18 @@ export function digitsOf(v) {
   return String(v ?? '').replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
 }
 
+// One parcel can carry several orders - the courier writes them in one cell,
+// "91302583 , 91302588", and the COD is the two added up. Every number in the
+// cell is pulled out so all of them can be settled together.
+export function splitInvoices(cell) {
+  const s = clean(cell);
+  if (!s) return [];
+  return s
+    .split(/[\s,;/|]+/)
+    .map(x => clean(x))
+    .filter(x => digitsOf(x).length >= 4);
+}
+
 const MONTHS = {
   jan:1, feb:2, mar:3, apr:4, may:5, jun:6,
   jul:7, aug:8, sep:9, oct:10, nov:11, dec:12
@@ -159,9 +171,15 @@ export async function loadSheet(sheetId, tabTitle, excel, saved) {
 // courier sheets end with a Total line - it has no order number, skip it
     if (!invoice) continue;
     if (/^(grand )?total/i.test(invoice)) continue;
+
+    const invoices = splitInvoices(invoice);
+    if (!invoices.length) continue;
+
     rows.push({
       sheetRow: r + 1,                       // 1-based, matches the sheet
-      invoice,
+      invoice,                               // the cell as written
+      invoices,                              // every order number inside it
+      merged: invoices.length > 1,
       amount,
       status,
       cprNumber: cols.cpr     >= 0 ? clean(raw[cols.cpr])     : '',
@@ -290,6 +308,68 @@ export async function postPayment(realmId, token, payload) {
   return { ok: true, id: body.Payment ? body.Payment.Id : null, tid };
 }
 
+// A parcel that was replaced comes back under a second CPR, so the same order
+// has to be settled twice. QuickBooks will not take the number twice, so a
+// copy is made under "-D" and that is what the second CPR pays.
+export async function copyInvoice(realmId, token, invoiceId, suffix) {
+  const q = await qbQuery(realmId, token, `SELECT * FROM Invoice WHERE Id = '${invoiceId}'`);
+  const src = (q.Invoice || [])[0];
+  if (!src) throw new Error('That invoice is not in QuickBooks any more');
+
+  const base = clean(src.DocNumber) || String(invoiceId);
+
+  // -D, then -D2, -D3 if those are taken already
+  let doc = '';
+  for (let n = 1; n <= 9; n++) {
+    const tryDoc = base + (suffix || '-D') + (n === 1 ? '' : n);
+    const hit = await qbQuery(realmId, token,
+      `SELECT Id FROM Invoice WHERE DocNumber = '${tryDoc}' MAXRESULTS 1`);
+    if (!(hit.Invoice || []).length) { doc = tryDoc; break; }
+  }
+  if (!doc) throw new Error('Too many copies of ' + base + ' already');
+
+  const payload = {
+    DocNumber: doc.slice(0, 21),
+    TxnDate: src.TxnDate,                 // the original date, so ageing stays true
+    CustomerRef: src.CustomerRef,
+    Line: (src.Line || []).filter(l => l.DetailType === 'SalesItemLineDetail'),
+    PrivateNote: `Replacement copy of ${base}` +
+                 (src.PrivateNote ? ' - ' + src.PrivateNote : '')
+  };
+  if (src.SalesTermRef) payload.SalesTermRef = src.SalesTermRef;
+  if (src.DueDate) payload.DueDate = src.DueDate;
+
+  if (!payload.Line.length) throw new Error('That invoice has no product lines to copy');
+
+  const r = await fetch(`${API}/v3/company/${realmId}/invoice?minorversion=70`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = text.slice(0, 300);
+    try {
+      const f = JSON.parse(text).Fault;
+      if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+    } catch (e) {}
+    throw new Error(msg);
+  }
+
+  const made = JSON.parse(text).Invoice;
+  return {
+    id: made.Id,
+    doc: made.DocNumber,
+    total: Number(made.TotalAmt || 0),
+    from: base
+  };
+}
+
 export { listFolders, listSheetsIn, listTabs, paintRows, getSetting, setSetting, recordRun };
 // Every payment we post carries the CPR number in PaymentRefNum, so one
 // sweep of the payments tells us which CPRs are already done - no need to
@@ -381,60 +461,4 @@ export async function paymentsByIds(realmId, token, paymentIds) {
   }
 
   return [...seen.values()];
-}
-
-/* ==================== colouring the sheet ==================== */
-
-// Work out what colour each row of one CPR deserves. Four outcomes:
-//
-//   green   the invoice is paid, and the payment carries this CPR's number
-//   yellow  the invoice is there but the sheet and QuickBooks disagree on the amount
-//   orange  the invoice is paid, but under a different CPR - the replaced-parcel case
-//   red     no such invoice in QuickBooks
-//
-// A row that matches but has not been received yet is left alone, so what is
-// still outstanding stays easy to see.
-export function colourPlan(rows, found, opts) {
-  const o = opts || {};
-  const mine = digitsOf(o.cprNumber) || clean(o.cprNumber);
-  const payRef = o.payRefById || {};       // payment id -> the ref it was posted under
-  const tolerance = o.tolerance === undefined ? 0.01 : o.tolerance;
-
-  const plan = [];
-
-  rows.forEach(r => {
-    if (!r.sheetRow) return;
-
-    const inv = found.get ? found.get(digitsOf(r.invoice))
-                          : found[digitsOf(r.invoice)];
-
-    if (!inv) {
-      plan.push({ row: r.sheetRow, colour: 'red' });
-      return;
-    }
-
-    const paid = (inv.paymentIds || []).length > 0;
-
-    if (paid && mine) {
-      const underMine = (inv.paymentIds || []).some(id => {
-        const ref = payRef[String(id)];
-        if (ref === undefined) return false;
-        return digitsOf(ref) === mine || clean(ref) === clean(o.cprNumber);
-      });
-
-      if (!underMine) {
-        plan.push({ row: r.sheetRow, colour: 'orange' });
-        return;
-      }
-    }
-
-    if (Math.abs(Number(r.amount || 0) - Number(inv.total || 0)) > tolerance) {
-      plan.push({ row: r.sheetRow, colour: 'yellow' });
-      return;
-    }
-
-    if (paid) plan.push({ row: r.sheetRow, colour: 'green' });
-  });
-
-  return plan;
 }
