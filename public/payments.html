@@ -933,7 +933,7 @@
   // An order that came back as an exchange sits in two CPRs. QuickBooks will
   // not take the same number twice, so a copy is made under "-D" and this CPR
   // pays that instead.
-  function drawDuplicates(d){
+    function drawDuplicates(d){
     var box = $('dupBox');
     box.innerHTML = '';
 
@@ -960,7 +960,8 @@
         '<h3>Paid under another CPR \u2014 replaced parcels</h3>' +
         '<p>These orders were already received under a different settlement, but they are in ' +
           'this CPR as well. Make a copy under <b>-D</b> and it can be received here too. ' +
-          'The copy keeps the original date, customer and lines.</p>' +
+          'The copy keeps the original date, customer and lines, and the number in the sheet ' +
+          'is changed to match \u2014 so this only ever happens once per order.</p>' +
         '<table>' +
           '<thead><tr><th>Order</th><th>In QuickBooks</th><th>Received under</th>' +
             '<th class="num">Amount</th><th></th></tr></thead>' +
@@ -970,7 +971,7 @@
               '<td>' + esc(r.qbDoc) + '</td>' +
               '<td>' + esc(r.cprs || '\u2014') + '</td>' +
               '<td class="num">' + money(r.total) + '</td>' +
-              '<td><button data-dup="' + i + '" data-qbid="' + esc(r.qbId) + '">Create -D</button></td>' +
+              '<td><button data-dup="' + i + '">Create -D</button></td>' +
               '</tr>';
           }).join('') + '</tbody>' +
         '</table>' +
@@ -978,13 +979,30 @@
 
     box.querySelectorAll('button[data-dup]').forEach(function(b){
       b.addEventListener('click', function(){
-        var qbId = b.getAttribute('data-qbid');
+        var r = rows[Number(b.getAttribute('data-dup'))];
         b.disabled = true;
         b.textContent = 'Creating...';
 
-        post('/api/cpr/duplicate', { invoiceId: qbId }).then(function(res){
+        post('/api/cpr/duplicate', {
+          invoiceId: r.qbId,
+          sheetId: S.sheetId,
+          tab: S.tab,
+          sheetRow: r.sheetRow,
+          invoiceCol: (S.cols && S.cols.invoice !== undefined) ? S.cols.invoice : 0,
+          oldNumber: r.invoice
+        }).then(function(res){
+          // if the sheet was not renamed the same copy would be offered again
+          // next time, so that counts as a failure worth stopping for
+          if(!res.renamed){
+            b.disabled = false;
+            b.textContent = 'Create -D';
+            say('bad', '<b>' + esc(res.invoice.doc) + ' was made in QuickBooks, but the sheet ' +
+                'could not be renamed: ' + esc(res.renameError || '') +
+                ' \u2014 change the number in the sheet by hand before trying again.</b>');
+            return;
+          }
           b.textContent = res.invoice.doc + ' made';
-          // the new invoice is unpaid, so re-reading puts it in Ready to pay
+          // the copy is unpaid, so re-reading puts it in Ready to pay
           setTimeout(function(){ openCpr(S.currentKey); }, 900);
         }).catch(function(e){
           b.disabled = false;
@@ -994,7 +1012,6 @@
       });
     });
   }
-
   // what QuickBooks actually did with this CPR, and how to put it right
   function drawTrace(tr){
     var box = $('traceBox');
