@@ -21,7 +21,7 @@ import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
 import {
   listFolders, listSheetsIn, loadSheet, groupByCpr, isDelivered,
   findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits,
-  paymentsByCpr, paymentsByIds
+    paymentsByCpr, paymentsByIds, colourPlan
 } from './cpr.js';
 import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
@@ -1732,6 +1732,60 @@ app.post('/api/cpr/bank', async (req, res) => {
     prefs[courier] = { accountId: String(accountId), methodId: methodId || null };
     await setSetting(realmId, 'cpr:prefs', prefs);
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// Colour one CPR's rows in the sheet: green received, yellow amount differs,
+// orange paid under another CPR, red not in QuickBooks. Google Sheets only -
+// an Excel file would have to be rewritten whole, which is not worth it here.
+app.post('/api/cpr/colour', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, courier, cpr } = req.body;
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+  if (req.body.excel) {
+    return res.status(400).json({ error: 'Colouring only works on a Google Sheet' });
+  }
+
+  try {
+    // the tab's own id, which is what the formatting call wants
+    const tabs = await listTabs(sheetId, false);
+    const hit = tabs.find(t => t.title === tab);
+    if (!hit) return res.status(400).json({ error: 'That tab is not in the sheet any more' });
+
+    const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+    const data = await loadSheet(sheetId, tab, false, saved);
+    const hasStatus = data.cols.status >= 0;
+
+    let rows = data.rows;
+    if (cpr) rows = rows.filter(r => (r.cprNumber || '(no CPR number)') === cpr);
+    if (!rows.length) return res.status(400).json({ error: 'No rows for that CPR' });
+
+    const delivered = rows.filter(r => isDelivered(r, hasStatus));
+
+    const token = await getAccessToken(realmId);
+    const found = await findInvoices(realmId, token, delivered.map(r => r.invoice));
+
+    // which CPR number each payment behind these invoices was posted under
+    const ids = [];
+    found.forEach(inv => (inv.paymentIds || []).forEach(id => ids.push(id)));
+    const pays = await paymentsByIds(realmId, token, [...new Set(ids)]);
+    const payRefById = {};
+    pays.forEach(p => { payRefById[String(p.id)] = p.ref; });
+
+    const plan = colourPlan(delivered, found, {
+      cprNumber: rows[0].cprNumber || '',
+      payRefById
+    });
+
+    await paintRows(sheetId, hit.id, plan, data.width);
+
+    const tally = {};
+    plan.forEach(p => { tally[p.colour] = (tally[p.colour] || 0) + 1; });
+
+    res.json({ ok: true, painted: plan.length, tally });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
