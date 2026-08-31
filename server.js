@@ -1846,23 +1846,42 @@ app.post('/api/cpr/colour', async (req, res) => {
 });
 // A replaced parcel comes back under a second CPR, so the same order has to be
 // settled twice. QuickBooks will not take the number twice, so a copy is made
-// under "-D" and the second CPR pays that instead.
+// under "-D" - and the sheet row is renamed to match, which is what stops the
+// same copy being made again on the next look.
 app.post('/api/cpr/duplicate', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const { invoiceId } = req.body;
+  const { invoiceId, sheetId, tab, sheetRow, invoiceCol, oldNumber } = req.body;
   if (!invoiceId) return res.status(400).json({ error: 'invoiceId required' });
+  if (!sheetId || !tab || !sheetRow) {
+    return res.status(400).json({ error: 'The sheet row is needed so it can be renamed' });
+  }
 
   try {
     const token = await getAccessToken(realmId);
     const made = await copyInvoice(realmId, token, invoiceId, '-D');
-    res.json({ ok: true, invoice: made });
+
+    // rename the number in the sheet, so this row now points at the copy
+    let renamed = false;
+    try {
+      const cell = await readCell(sheetId, tab, Number(sheetRow), Number(invoiceCol));
+      const next = String(cell || '').replace(
+        new RegExp('(^|[\\s,;])' + String(oldNumber).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[\\s,;])'),
+        '$1' + made.doc
+      );
+      await writeCell(sheetId, tab, Number(sheetRow), Number(invoiceCol), next);
+      renamed = true;
+    } catch (e) {
+      // the copy exists either way - the page is told the rename failed
+      return res.json({ ok: true, invoice: made, renamed: false, renameError: e.message });
+    }
+
+    res.json({ ok: true, invoice: made, renamed });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
 });
-
 // post the payments in the background, then stamp the sheet
 app.post('/api/cpr/receive', async (req, res) => {
   const realmId = await requireCompany(req, res);
