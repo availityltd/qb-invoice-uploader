@@ -7,9 +7,8 @@ import { recordRun, getSetting, setSetting } from './settings.js';
 const jobs = new Map();
 const MAX_EVENTS = 2000;
 
-// QuickBooks will not take a payment with thousands of lines on it
-const SPLIT_ABOVE = 1000;
-const CHUNK = 500;
+// Up to this many go across as one payment; beyond it the run is halved.
+const SPLIT_ABOVE = 2000;
 
 export const QB_STATUS_HEADER = 'QB Status';
 
@@ -156,16 +155,16 @@ async function run(realmId, job) {
       continue;
     }
 
-    if (lines.length < SPLIT_ABOVE) {
+     if (lines.length <= SPLIT_ABOVE) {
       await sendPart(custId, lines, '', 0);
       continue;
     }
 
-    const parts = Math.ceil(lines.length / CHUNK);
-    push(job, 'log', `${lines.length} invoices for this customer - sending as ${parts} payments.`);
-    for (let i = 0; i < parts && !job.stop; i++) {
-      await sendPart(custId, lines.slice(i * CHUNK, (i + 1) * CHUNK), `part ${i + 1} of ${parts}`, 0);
-    }
+    // over the limit, so it goes in two halves rather than many small ones
+    const half = Math.ceil(lines.length / 2);
+    push(job, 'log', `${lines.length} invoices for this customer - sending as 2 payments.`);
+    await sendPart(custId, lines.slice(0, half), 'part 1 of 2', 0);
+    if (!job.stop) await sendPart(custId, lines.slice(half), 'part 2 of 2', 0);
   }
 
   // stamp the sheet only if the payments actually landed
