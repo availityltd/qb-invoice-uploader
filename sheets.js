@@ -482,3 +482,29 @@ export async function peekImages(sheetId, tabTitle) {
         'Pictures pasted over the grid are not listed by the API at all.'
   };
 }
+
+/* ---------- one cell at a time (Google Sheets only) ---------- */
+
+// Renaming a single order number in the sheet - used when a replaced parcel
+// gets a "-D" copy in QuickBooks and the row has to point at it instead.
+export async function readCell(sheetId, tabTitle, row, colIndex) {
+  const sheets = google.sheets({ version: 'v4', auth: auth() });
+  const r = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `'${tabTitle}'!${colLetter(colIndex)}${row}`,
+    valueRenderOption: 'UNFORMATTED_VALUE'
+  });
+  const v = r.data.values;
+  return (v && v[0] && v[0][0] !== undefined) ? String(v[0][0]) : '';
+}
+
+export async function writeCell(sheetId, tabTitle, row, colIndex, value) {
+  const sheets = google.sheets({ version: 'v4', auth: auth() });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `'${tabTitle}'!${colLetter(colIndex)}${row}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[value]] }
+  });
+  return true;
+}
