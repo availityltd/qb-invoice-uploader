@@ -1779,7 +1779,7 @@ app.post('/api/cpr/colour', async (req, res) => {
       cprNumber: rows[0].cprNumber || '',
       payRefById
     });
-
+    console.log('colour:', { tab, tabId: hit.id, rows: plan.length, width: data.width });
     await paintRows(sheetId, hit.id, plan, data.width);
 
     const tally = {};
