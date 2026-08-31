@@ -202,7 +202,11 @@
 
         <div class="step hide" id="stepMatch">
           <h2>What matched</h2>
-          <div class="hint" id="matchHint"></div>
+                    <div class="hint" id="matchHint"></div>
+          <div id="colourRow" class="hide" style="margin-bottom:14px">
+            <button class="solid" id="btnColour">Colour this CPR in the sheet</button>
+            <span id="colourNote" style="font-size:12px;color:var(--muted);margin-left:10px"></span>
+          </div>
           <div id="traceBox"></div>
           <div class="tally" id="tally"></div>
           <div class="lists" id="lists"></div>
@@ -849,7 +853,8 @@
         : '');
 
     drawTrace(tr);
-
+    $('colourRow').classList.toggle('hide', S.excel);
+    $('colourNote').textContent = '';
     $('tally').innerHTML =
       '<div class="ok"><div class="n">' + nf(t.matched) + '</div><div class="l">Ready to pay</div></div>' +
       '<div class="ok"><div class="n">' + money(t.amount) + '</div><div class="l">Amount</div></div>' +
@@ -1155,6 +1160,7 @@
     if(j.posted > 0){
       $('stepPay').classList.add('done');
       if(S.groups.length) loadSheetStatus();   // repaint the cards from QuickBooks
+            if(!S.excel) colourNow(true);
     }
 
     post('/api/cpr/receive-clear').catch(function(){});
@@ -1212,6 +1218,41 @@
       setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
     });
   }
+    /* ---------- colouring the sheet ---------- */
+
+  // green received, yellow amount differs, orange paid under another CPR,
+  // red not in QuickBooks. Rows still waiting are left as they are.
+  function colourNow(quiet){
+    if(S.excel || !S.currentKey) return Promise.resolve();
+
+    var b = $('btnColour');
+    if(b){ b.disabled = true; b.textContent = 'Colouring...'; }
+
+    return post('/api/cpr/colour', {
+      sheetId: S.sheetId,
+      tab: S.tab,
+      courier: S.courier,
+      cpr: S.currentKey === 'All rows' ? '(no CPR number)' : S.currentKey
+    }).then(function(d){
+      if(b){ b.disabled = false; b.textContent = 'Colour this CPR in the sheet'; }
+      var t = d.tally || {};
+      var bits = [];
+      if(t.green)  bits.push(nf(t.green) + ' received');
+      if(t.yellow) bits.push(nf(t.yellow) + ' amount differs');
+      if(t.orange) bits.push(nf(t.orange) + ' under another CPR');
+      if(t.red)    bits.push(nf(t.red) + ' not in QuickBooks');
+      $('colourNote').textContent = bits.length
+        ? 'Coloured ' + nf(d.painted) + ' rows \u2014 ' + bits.join(', ')
+        : 'Nothing to colour yet.';
+    }).catch(function(e){
+      if(b){ b.disabled = false; b.textContent = 'Colour this CPR in the sheet'; }
+      if(!quiet) say('bad', '<b>' + esc(e.message) + '</b>');
+      else $('colourNote').textContent = 'Could not colour the sheet: ' + e.message;
+    });
+  }
+
+     var colourBtn = $('btnColour');
+  if(colourBtn) colourBtn.addEventListener('click', function(){ colourNow(false); });
 })();
 </script>
 </body>
