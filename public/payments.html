@@ -982,8 +982,8 @@
         ? 'Payment date will be <b>' + esc(d.cprDate) + '</b> (the CPR date).<br>'
         : '<b style="color:var(--warn)">No CPR date found in the sheet - QuickBooks will use today.</b><br>') +
       parts.join('<br>') +
-      (d.totals.matched >= 1000
-        ? '<br><span style="color:var(--muted)">Over a thousand invoices, so this goes to QuickBooks as several payments under the same CPR.</span>'
+      (d.totals.matched >= 2000
+        ? '<br><span style="color:var(--muted)">Over two thousand invoices, so this goes to QuickBooks as several payments under the same CPR.</span>'
         : '');
 
     if(S.bank){
