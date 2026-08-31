@@ -350,26 +350,72 @@ export async function writeStatusExcel(fileId, tabTitle, headerRow, colIndex, ro
 
 /* ---------- painting (Google Sheets only) ---------- */
 
+export const ROW_COLOURS = {
+  green:  { red: 0.85, green: 0.94, blue: 0.86 },  // received in QuickBooks
+  yellow: { red: 1.00, green: 0.95, blue: 0.75 },  // amount differs
+  red:    { red: 0.99, green: 0.85, blue: 0.84 },  // not found in QuickBooks
+  orange: { red: 1.00, green: 0.89, blue: 0.77 },  // paid under another CPR
+  clear:  null
+};
+
+// how wide the tab is, so a whole row really means the whole row
+async function tabWidth(sheets, sheetId, tabId) {
+  const r = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    fields: 'sheets.properties'
+  });
+  const hit = (r.data.sheets || [])
+    .find(s => s.properties && s.properties.sheetId === Number(tabId));
+  const g = hit && hit.properties.gridProperties;
+  return (g && g.columnCount) ? g.columnCount : 40;
+}
+
+// A sheet of a few thousand rows would otherwise mean a few thousand requests,
+// so rows that sit next to each other and share a colour go across as one band.
+function bands(colours) {
+  const sorted = colours
+    .filter(c => c && c.row > 0)
+    .slice()
+    .sort((a, b) => a.row - b.row);
+
+  const out = [];
+  let cur = null;
+
+  sorted.forEach(c => {
+    if (cur && c.colour === cur.colour && c.row === cur.end + 1) {
+      cur.end = c.row;
+      return;
+    }
+    if (cur) out.push(cur);
+    cur = { colour: c.colour, start: c.row, end: c.row };
+  });
+  if (cur) out.push(cur);
+
+  return out;
+}
+
 export async function paintRows(sheetId, tabId, colours, width) {
-  if (!colours.length) return;
+  if (!colours || !colours.length) return 0;
   const sheets = google.sheets({ version: 'v4', auth: auth() });
 
-  const palette = {
-    green:  { red: 0.85, green: 0.94, blue: 0.86 },
-    yellow: { red: 1.00, green: 0.95, blue: 0.75 },
-    clear:  null
-  };
+  const cols = width || await tabWidth(sheets, sheetId, tabId);
 
-  const requests = colours.map(c => ({
+  const requests = bands(colours).map(b => ({
     repeatCell: {
       range: {
-        sheetId: tabId,
-        startRowIndex: c.row - 1,
-        endRowIndex: c.row,
+        sheetId: Number(tabId),
+        startRowIndex: b.start - 1,
+        endRowIndex: b.end,
         startColumnIndex: 0,
-        endColumnIndex: width || 40
+        endColumnIndex: cols
       },
-      cell: { userEnteredFormat: { backgroundColor: palette[c.colour] || undefined } },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: ROW_COLOURS[b.colour] === undefined
+            ? undefined
+            : ROW_COLOURS[b.colour]
+        }
+      },
       fields: 'userEnteredFormat.backgroundColor'
     }
   }));
@@ -381,6 +427,7 @@ export async function paintRows(sheetId, tabId, colours, width) {
       requestBody: { requests: requests.slice(i, i + size) }
     });
   }
+  return colours.length;
 }
 
 export async function testConnection() {
