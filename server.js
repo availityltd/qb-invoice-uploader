@@ -1866,10 +1866,22 @@ app.post('/api/cpr/duplicate', async (req, res) => {
     let renamed = false;
     try {
       const cell = await readCell(sheetId, tab, Number(sheetRow), Number(invoiceCol));
-      const next = String(cell || '').replace(
-        new RegExp('(^|[\\s,;])' + String(oldNumber).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[\\s,;])'),
-        '$1' + made.doc
-      );
+         // a plain cell is replaced whole; a merged one has just its own number
+      // swapped, so the other orders in the same parcel stay as they are
+      const before = String(cell || '').trim();
+      const want = String(oldNumber).trim();
+      let next;
+      if (before === want) {
+        next = made.doc;
+      } else {
+        const parts = before.split(/([\s,;]+)/);
+        let hit = false;
+        next = parts.map(p => {
+          if (!hit && p.trim() === want) { hit = true; return made.doc; }
+          return p;
+        }).join('');
+        if (!hit) throw new Error(`"${want}" is not in that cell any more (it reads "${before}")`);
+      }
       await writeCell(sheetId, tab, Number(sheetRow), Number(invoiceCol), next);
       renamed = true;
     } catch (e) {
