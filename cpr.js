@@ -225,9 +225,16 @@ export async function findInvoices(realmId, token, numbers) {
   for (let i = 0; i < list.length; i += size) {
     const chunk = list.slice(i, i + size);
     const variants = [];
-    chunk.forEach(n => {
+       chunk.forEach(n => {
       const d = digitsOf(n);
       if (!d) return;
+      // a "-D" copy has the same digits as the original, so the number is
+      // asked for as written too - otherwise the two cannot be told apart
+      const asIs = clean(n);
+      if (asIs && asIs !== d && asIs !== '#' + d) {
+        variants.push(`'${asIs}'`);
+        if (asIs.charAt(0) !== '#') variants.push(`'#${asIs}'`);
+      }
       variants.push(`'#${d}'`, `'${d}'`);
     });
     if (!variants.length) continue;
@@ -236,9 +243,28 @@ export async function findInvoices(realmId, token, numbers) {
       `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, SyncToken, LinkedTxn ` +
       `FROM Invoice WHERE DocNumber IN (${variants.join(',')}) MAXRESULTS 1000`);
 
-    (q.Invoice || []).forEach(inv => {
+       (q.Invoice || []).forEach(inv => {
+      const doc = clean(inv.DocNumber);
       const d = digitsOf(inv.DocNumber);
       if (!d) return;
+
+      // filed under the number as written as well, so "#91304573-D" finds the
+      // copy and not the original it was made from
+      const asKey = doc.replace(/^#/, '');
+      if (asKey && asKey !== d) {
+        found.set(asKey, {
+          id: inv.Id,
+          doc: inv.DocNumber || '',
+          date: inv.TxnDate || '',
+          total: Number(inv.TotalAmt || 0),
+          balance: Number(inv.Balance === undefined ? inv.TotalAmt : inv.Balance),
+          customerId: inv.CustomerRef ? inv.CustomerRef.value : null,
+          customerName: inv.CustomerRef ? (inv.CustomerRef.name || '') : '',
+          paymentIds: (inv.LinkedTxn || [])
+            .filter(t => t.TxnType === 'Payment').map(t => String(t.TxnId))
+        });
+        return;
+      }
       const total = Number(inv.TotalAmt || 0);
       const bal = Number(inv.Balance === undefined ? total : inv.Balance);
       const prev = found.get(d);
