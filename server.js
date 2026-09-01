@@ -1530,7 +1530,11 @@ app.get('/api/cpr/match', async (req, res) => {
 
     delivered.forEach(r => {
       const numbers = r.invoices || [r.invoice];
-      const parts = numbers.map(n => ({ number: n, inv: found.get(cprDigits(n)) || null }));
+      // the number as written first - that is what tells a "-D" copy apart
+      const parts = numbers.map(n => {
+        const asIs = String(n).trim().replace(/^#/, '');
+        return { number: n, inv: found.get(asIs) || found.get(cprDigits(n)) || null };
+      });
       const missing = parts.filter(p => !p.inv);
 
       // one number in a merged row missing means the whole row has to wait
