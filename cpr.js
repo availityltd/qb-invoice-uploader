@@ -328,18 +328,26 @@ export async function copyInvoice(realmId, token, invoiceId, suffix) {
   }
   if (!doc) throw new Error('Too many copies of ' + base + ' already');
 
+   // every line the original had - dropping a discount or a shipping line here
+  // is what makes a copy come out at the wrong amount
+  const lines = (src.Line || []).filter(l => l.DetailType !== 'SubTotalLineDetail');
+
   const payload = {
     DocNumber: doc.slice(0, 21),
     TxnDate: src.TxnDate,                 // the original date, so ageing stays true
     CustomerRef: src.CustomerRef,
-    Line: (src.Line || []).filter(l => l.DetailType === 'SalesItemLineDetail'),
+    Line: lines,
     PrivateNote: `Replacement copy of ${base}` +
                  (src.PrivateNote ? ' - ' + src.PrivateNote : '')
   };
   if (src.SalesTermRef) payload.SalesTermRef = src.SalesTermRef;
   if (src.DueDate) payload.DueDate = src.DueDate;
+  if (src.CurrencyRef) payload.CurrencyRef = src.CurrencyRef;
+  if (src.TxnTaxDetail) payload.TxnTaxDetail = src.TxnTaxDetail;
+  if (src.BillAddr) payload.BillAddr = src.BillAddr;
+  if (src.ShipAddr) payload.ShipAddr = src.ShipAddr;
 
-  if (!payload.Line.length) throw new Error('That invoice has no product lines to copy');
+  if (!payload.Line.length) throw new Error('That invoice has no lines to copy');
 
   const r = await fetch(`${API}/v3/company/${realmId}/invoice?minorversion=70`, {
     method: 'POST',
