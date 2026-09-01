@@ -28,7 +28,7 @@ import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages,
 import { clean as cprClean } from './cpr.js';
 import {
   startJob, stopJob, pauseJob, resumeJob, clearJob,
-  retryFailed, snapshot, remainingInvoices
+    retryFailed, snapshot, remainingInvoices, resumeUnfinished
 } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
@@ -3938,9 +3938,11 @@ initDb()
   .then(() => initSettings())
   .then(() => initCache())
   .then(() => initCouriers())
+    .then(() => import('./jobstore.js').then(m => m.initJobStore()))
   .then(() => app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startKeeper();
+        resumeUnfinished().catch(e => console.error('resume failed:', e.message));
   }))
   .catch(err => {
     console.error('DB init failed:', err);
