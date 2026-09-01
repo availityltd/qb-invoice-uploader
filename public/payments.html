@@ -798,8 +798,14 @@
     if(!st) return;
 
     var qbAmount = tr && tr.qbAmount !== undefined ? tr.qbAmount : st.qbAmount;
-    var notes = (tr && tr.notes) ? tr.notes.slice() : [];
-
+        // a payment under another CPR only matters until a "-D" copy is made, so
+    // once nothing is left in that bucket the note goes with it
+    var stale = !(d.paidElsewhere || []).length;
+    var notes = (tr && tr.notes)
+      ? tr.notes.filter(function(n){
+          return !(stale && (n.kind === 'wrongref' || n.kind === 'bank' || n.kind === 'date'));
+        })
+      : [];
     // the sheet-vs-QuickBooks gap still belongs on the card
     if(qbAmount !== undefined && st.sheetAmount !== undefined){
       var gap = Math.round((qbAmount - st.sheetAmount) * 100) / 100;
@@ -895,7 +901,14 @@
         '<div class="inner"><table>' + rows.map(render).join('') + '</table></div>';
       lists.appendChild(el);
     }
-
+    box('Ready to pay', d.matched, function(r){
+      return '<tr><td>' + esc(r.invoice) +
+             (r.merged ? ' <span style="color:var(--muted)">(merged)</span>' : '') +
+             (r.qbDoc && r.qbDoc !== r.invoice
+               ? '<div style="font-size:11px;color:var(--muted)">' + esc(r.qbDoc) + '</div>' : '') +
+             '</td>' +
+             '<td class="num">' + money(r.qbBalance) + '</td></tr>';
+    });
     box('Amount differs \u2014 sheet vs QuickBooks', d.amountOff, function(r){
       var gap = Number(r.sheetAmount) - Number(r.qbBalance);
       return '<tr><td>' + esc(r.invoice) +
@@ -1112,6 +1125,59 @@
 
     drawWarning();
   }
+    $('btnPay').addEventListener('click', function(){
+    if(!S.match || !S.match.matched || !S.match.matched.length){
+      say('bad', '<b>Nothing is queued to pay \u2014 open the CPR again.</b>');
+      return;
+    }
+
+    var acctSel = $('acct');
+    if(!acctSel.value) return say('bad', '<b>Pick a deposit account.</b>');
+
+    var msg = 'Record ' + S.match.totals.matched + ' payments totalling ' +
+              money(S.match.totals.amount) + '?';
+    if(!S.match.cprDate) msg += '\n\nNo CPR date was found, so QuickBooks will date this today.';
+    if(S.bank && S.bank.accountId && acctSel.value !== String(S.bank.accountId)){
+      msg += '\n\nThis is not the account ' + S.courier + ' usually pays into.';
+    }
+    if(!confirm(msg)) return;
+
+    clearSay();
+    $('btnPay').disabled = true;
+    $('paylog').innerHTML = '';
+    $('payOut').innerHTML = '';
+    S.lastEventId = 0;
+    S.payJob = null;
+
+    post('/api/cpr/receive', {
+      courier: S.courier,
+      cprNumber: S.match.cprNumber,
+      cprDate: S.match.cprDate,
+      accountId: acctSel.value,
+      accountName: acctSel.options[acctSel.selectedIndex].textContent,
+      methodId: $('method').value || null,
+      matched: S.match.matched,
+      sheetId: S.sheetId,
+      tab: S.tab,
+      excel: S.excel,
+      headerRow: S.headerRow,
+      statusCol: S.statusCol,
+      writeStatus: false
+    }).then(function(){
+      $('btnPay').disabled = false;
+      pollPay(true);
+      startPolling();
+    }).catch(function(e){
+      $('btnPay').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    $('btnStop').textContent = 'Stopping...';
+    post('/api/cpr/receive-stop').catch(function(){});
+  });
   // Google Sheets get colours instead, and the Excel path is not used here any
   // more, so nothing is written into a status column at all
   function drawWarning(){
