@@ -1865,8 +1865,17 @@ app.post('/api/cpr/duplicate', async (req, res) => {
     // rename the number in the sheet, so this row now points at the copy
     let renamed = false;
     try {
-      const cell = await readCell(sheetId, tab, Number(sheetRow), Number(invoiceCol));
-         // a plain cell is replaced whole; a merged one has just its own number
+          // the sheet is read here so the invoice column is found the same way the
+      // rest of the page finds it - no need for the browser to say where it is
+      const saved = req.body.courier
+        ? await getSetting(realmId, `cpr:cols:${req.body.courier}`, null) : null;
+      const data = await loadSheet(sheetId, tab, false, saved);
+      const col = data.cols.invoice;
+      if (col < 0) throw new Error('The invoice column is not set for this courier');
+
+      const cell = await readCell(sheetId, tab, Number(sheetRow), col);
+
+      // a plain cell is replaced whole; a merged one has just its own number
       // swapped, so the other orders in the same parcel stay as they are
       const before = String(cell || '').trim();
       const want = String(oldNumber).trim();
@@ -1880,9 +1889,10 @@ app.post('/api/cpr/duplicate', async (req, res) => {
           if (!hit && p.trim() === want) { hit = true; return made.doc; }
           return p;
         }).join('');
-        if (!hit) throw new Error(`"${want}" is not in that cell any more (it reads "${before}")`);
+        if (!hit) throw new Error(`"${want}" is not in row ${sheetRow} (it reads "${before}")`);
       }
-      await writeCell(sheetId, tab, Number(sheetRow), Number(invoiceCol), next);
+
+      await writeCell(sheetId, tab, Number(sheetRow), col, next);
       renamed = true;
     } catch (e) {
       // the copy exists either way - the page is told the rename failed
