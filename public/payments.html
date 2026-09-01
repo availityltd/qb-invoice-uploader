@@ -1001,7 +1001,9 @@
                 ' \u2014 change the number in the sheet by hand before trying again.</b>');
             return;
           }
-          b.textContent = res.invoice.doc + ' made';
+                    // one copy per order is the whole point - no second one is offered
+          b.textContent = 'Done \u2014 ' + res.invoice.doc;
+          b.disabled = true;
           // the copy is unpaid, so re-reading puts it in Ready to pay
           setTimeout(function(){ openCpr(S.currentKey); }, 900);
         }).catch(function(e){
