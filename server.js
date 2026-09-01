@@ -23,7 +23,8 @@ import {
   findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits,
         paymentsByCpr, paymentsByIds, copyInvoice
 } from './cpr.js';
-import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages } from './sheets.js';
+import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages,    
+        readCell, writeCell } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import {
   startJob, stopJob, pauseJob, resumeJob, clearJob,
