@@ -870,7 +870,9 @@
         : '');
 
     drawDuplicates(d);
-    drawTrace(tr);
+       // the trace only matters while something here is paid under another CPR -
+    // once a "-D" copy is made there is nothing left to look at
+    drawTrace((d.paidElsewhere || []).length ? tr : null);
     $('colourRow').classList.toggle('hide', S.excel);
     $('colourNote').textContent = '';
 
@@ -1110,99 +1112,12 @@
 
     drawWarning();
   }
-
+  // Google Sheets get colours instead, and the Excel path is not used here any
+  // more, so nothing is written into a status column at all
   function drawWarning(){
-    var box = $('warnBox');
-    var risks = (S.inspect && S.inspect.risks) || [];
-
-    if(!S.excel || !risks.length){
-      box.innerHTML =
-        '<label style="font-size:13px;display:flex;align-items:center;gap:7px;margin-bottom:16px">' +
-        '<input type="checkbox" id="doWrite" checked style="width:auto">' +
-        'Write "Received" into the QB Status column' +
-        (S.excel && S.inspect.hasMacros ? ' <span style="color:var(--muted)">(macros will be kept)</span>' : '') +
-        '</label>';
-      return;
-    }
-
-    box.innerHTML =
-      '<div class="warnbox">' +
-        '<h3>This Excel file has formatting that a rewrite would drop</h3>' +
-        '<p>To write into an Excel file on Drive the whole file has to be saved again. ' +
-          'Data, formulas' + (S.inspect.hasMacros ? ' and macros' : '') + ' survive, but these do not:</p>' +
-        '<ul>' + risks.map(function(r){ return '<li>' + esc(r.label) + '</li>'; }).join('') + '</ul>' +
-        '<div class="choice">' +
-          '<label><input type="radio" name="wmode" value="skip" checked>' +
-            '<span>Leave the sheet alone<small>Payments go into QuickBooks. ' +
-            'You get the received invoice numbers to copy or download.</small></span></label>' +
-          '<label><input type="radio" name="wmode" value="write">' +
-            '<span>Write "Received" anyway<small>The QB Status column gets filled in and ' +
-            'the formatting above is lost.</small></span></label>' +
-        '</div>' +
-      '</div>';
+    $('warnBox').innerHTML = '';
   }
-
-  function wantsWrite(){
-    var cb = $('doWrite');
-    if(cb) return cb.checked;
-    var r = document.querySelector('input[name="wmode"]:checked');
-    return !!(r && r.value === 'write');
-  }
-
-  $('btnPay').addEventListener('click', function(){
-    if(!S.match || !S.match.matched.length) return;
-
-    var acctSel = $('acct');
-    if(!acctSel.value) return say('bad', '<b>Pick a deposit account.</b>');
-
-    var write = wantsWrite();
-    var msg = 'Record ' + S.match.totals.matched + ' payments totalling ' +
-              money(S.match.totals.amount) + '?';
-    if(!S.match.cprDate) msg += '\n\nNo CPR date was found, so QuickBooks will date this today.';
-    if(S.bank && S.bank.accountId && acctSel.value !== String(S.bank.accountId)){
-      msg += '\n\nThis is not the account ' + S.courier + ' usually pays into.';
-    }
-    if(write && S.excel && (S.inspect.risks || []).length){
-      msg += '\n\nThe sheet will be saved again and the formatting listed above will be lost.';
-    }
-    if(!confirm(msg)) return;
-
-    clearSay();
-    $('btnPay').disabled = true;
-    $('paylog').innerHTML = '';
-    $('payOut').innerHTML = '';
-    S.lastEventId = 0;
-    S.payJob = null;
-
-    post('/api/cpr/receive', {
-      courier: S.courier,
-      cprNumber: S.match.cprNumber,
-      cprDate: S.match.cprDate,
-      accountId: acctSel.value,
-      accountName: acctSel.options[acctSel.selectedIndex].textContent,
-      methodId: $('method').value || null,
-      matched: S.match.matched,
-      sheetId: S.sheetId,
-      tab: S.tab,
-      excel: S.excel,
-      headerRow: S.headerRow,
-      statusCol: S.statusCol,
-      writeStatus: write
-    }).then(function(){
-      $('btnPay').disabled = false;
-      pollPay(true);
-      startPolling();
-    }).catch(function(e){
-      $('btnPay').disabled = false;
-      say('bad', '<b>' + esc(e.message) + '</b>');
-    });
-  });
-
-  $('btnStop').addEventListener('click', function(){
-    $('btnStop').disabled = true;
-    $('btnStop').textContent = 'Stopping...';
-    post('/api/cpr/receive-stop').catch(function(){});
-  });
+    function wantsWrite(){ return false; }
 
   /* ---------- watching the payment run ---------- */
 
