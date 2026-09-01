@@ -1,6 +1,6 @@
 import { getAccessToken, loadItems, loadTerms, getOrCreateCustomer, postInvoiceBatch } from './qb.js';
 import { logUpload } from './db.js';
-
+import { saveJobStart, saveJobProgress, clearJobRow, unfinishedJobs } from './jobstore.js';
 // one running job per company, kept on the server so it survives page changes
 const jobs = new Map();
 const MAX_EVENTS = 4000;
@@ -120,6 +120,7 @@ export function startJob(realmId, { invoices, delay, negativeItems, batchSize })
   };
 
   jobs.set(realmId, job);
+    saveJobStart(realmId, job).catch(() => {});
   run(realmId, job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -277,7 +278,8 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
       if (firstRound && !isRetry) {
         job.cursor = Math.min(job.total, i + job.batchSize);
       }
-
+      // the place is written down after every batch, so a restart loses nothing
+      saveJobProgress(realmId, job).catch(() => {});
       if (i + job.batchSize < pending.length) await nap(job, job.delay);
     }
 
@@ -329,6 +331,7 @@ async function run(realmId, job) {
   }
 
   job.finishedAt = Date.now();
+    saveJobProgress(realmId, job).catch(() => {});
 }
 
 export function stopJob(realmId) {
@@ -461,4 +464,44 @@ export function remainingInvoices(realmId) {
 export function negativesOf(realmId) {
   const job = jobs.get(realmId);
   return job ? [...job.negSet] : [];
+}
+// When the server comes back after a deploy or a crash, any run that was still
+// going is started again with whatever is left. Nothing already in QuickBooks
+// is sent twice, because the done list came back with it.
+export async function resumeUnfinished() {
+  let rows = [];
+  try { rows = await unfinishedJobs(); } catch (e) { return; }
+
+  for (const row of rows) {
+    try {
+      const all = row.invoices || [];
+      const done = new Set(row.done || []);
+      const left = all.filter(inv => !done.has(inv.docNumber));
+
+      if (!left.length) { await clearJobRow(row.realm_id); continue; }
+
+      const opts = row.opts || {};
+      startJob(row.realm_id, {
+        invoices: left,
+        delay: opts.delay,
+        negativeItems: opts.negativeItems || [],
+        batchSize: opts.batchSize
+      });
+
+      // carry the tally and the log across, so the page reads as one run
+      const job = jobs.get(row.realm_id);
+      if (job) {
+        job.done = done;
+        job.failed = new Set(row.failed || []);
+        job.events = row.events || [];
+        job.lastId = job.events.length ? job.events[job.events.length - 1].id : 0;
+        job.total = all.length;
+        job.invoices = all;
+        job.cursor = Number(row.cursor) || done.size;
+        push(job, 'log',
+          `Server restarted - carrying on. ${done.size} already uploaded, ${left.length} to go.`);
+        saveJobStart(row.realm_id, job).catch(() => {});
+      }
+    } catch (e) { /* one bad row must not stop the rest */ }
+  }
 }
