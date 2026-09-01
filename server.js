@@ -1867,18 +1867,28 @@ app.post('/api/cpr/duplicate', async (req, res) => {
     try {
           // the sheet is read here so the invoice column is found the same way the
       // rest of the page finds it - no need for the browser to say where it is
-      const saved = req.body.courier
-        ? await getSetting(realmId, `cpr:cols:${req.body.courier}`, null) : null;
-      const data = await loadSheet(sheetId, tab, false, saved);
-      const col = data.cols.invoice;
-      if (col < 0) throw new Error('The invoice column is not set for this courier');
+          // whichever column holds the number we are replacing - found by looking
+      // for it in the row itself, so nothing has to be passed in
+      const want = String(oldNumber).trim();
+      const grid = await readTab(sheetId, tab, false);
+      const rowCells = grid[Number(sheetRow) - 1] || [];
+
+      let col = -1;
+      for (let i = 0; i < rowCells.length; i++) {
+        const cellText = String(rowCells[i] == null ? '' : rowCells[i]).trim();
+        if (cellText === want) { col = i; break; }
+        if (cellText.split(/[\s,;]+/).some(p => p.trim() === want)) { col = i; break; }
+      }
+      if (col < 0) {
+        throw new Error(`"${want}" is not anywhere in row ${sheetRow} of that tab`);
+      }
 
       const cell = await readCell(sheetId, tab, Number(sheetRow), col);
 
       // a plain cell is replaced whole; a merged one has just its own number
       // swapped, so the other orders in the same parcel stay as they are
       const before = String(cell || '').trim();
-      const want = String(oldNumber).trim();
+    
       let next;
       if (before === want) {
         next = made.doc;
