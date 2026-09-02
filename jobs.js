@@ -13,12 +13,15 @@ const TOKEN_LIFE = 40 * 60 * 1000;
 const DEAD_BATCH_STREAK = 3;
 const COOL_DOWN = 5 * 60 * 1000;
 
-function push(job, type, msg, extra) {
+function push(job, type, msg) {
+  // Pakistan is five hours ahead of the server's own clock
+  const t = new Date(Date.now() + 5 * 3600 * 1000);
+  const stamp = String(t.getUTCHours()).padStart(2, '0') + ':' +
+                String(t.getUTCMinutes()).padStart(2, '0') + ':' +
+                String(t.getUTCSeconds()).padStart(2, '0');
   job.lastId++;
-  job.events.push(Object.assign({ id: job.lastId, type, msg }, extra || {}));
-  if (job.events.length > MAX_EVENTS) {
-    job.events.splice(0, job.events.length - MAX_EVENTS);
-  }
+  job.events.push({ id: job.lastId, type, msg: stamp + '  ' + msg });
+  if (job.events.length > 4000) job.events.splice(0, job.events.length - 4000);
 }
 
 function isAuthError(msg, status) {
