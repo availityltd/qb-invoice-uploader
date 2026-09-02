@@ -120,7 +120,7 @@ export function startJob(realmId, { invoices, delay, negativeItems, batchSize })
   };
 
   jobs.set(realmId, job);
-    saveJobStart(realmId, job).catch(() => {});
+      saveJobStart(realmId, job).catch(e => console.error('job save failed:', e.message));
   run(realmId, job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -280,7 +280,7 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
         job.cursor = Math.min(job.total, i + job.batchSize);
       }
       // the place is written down after every batch, so a restart loses nothing
-      saveJobProgress(realmId, job).catch(() => {});
+            saveJobProgress(realmId, job).catch(e => console.error('job progress failed:', e.message));
       if (i + job.batchSize < pending.length) await nap(job, job.delay);
     }
 
@@ -332,7 +332,7 @@ async function run(realmId, job) {
   }
 
   job.finishedAt = Date.now();
-    saveJobProgress(realmId, job).catch(() => {});
+         saveJobProgress(realmId, job).catch(e => console.error('job progress failed:', e.message));
 }
 
 export function stopJob(realmId) {
