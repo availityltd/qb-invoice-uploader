@@ -175,11 +175,9 @@
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('main').classList.remove('hide');
-    loadNegatives(function(){
-          restoreInvoices();
+        restoreInvoices();
     checkIncoming();
     refresh(true);          // pick up whatever the server is already doing
-    });
   });
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
 
