@@ -782,7 +782,11 @@
       var ap=[cell(head,iA1),cell(head,iA2),cell(head,iCity),cell(head,iProv),cell(head,iZip),cell(head,iCtry)];
       var addr="";
       for(i=0;i<6;i++) if(ap[i]) addr=addr?addr+", "+ap[i]:ap[i];
-      var memo=buyer+(addr?" — "+addr:"")+" — order "+grp2.k;
+            // the buyer's name and address go in the billing block instead, and the
+      // message on the invoice is left empty
+      var billLines=[buyer].concat(ap.filter(Boolean));
+      var memo="";
+      var ds=num(cell(head,iDisc));
 
       var invNo=grp2.k;
       if(!keepHash && invNo.charCodeAt(0)===35) invNo=invNo.slice(1);
@@ -816,13 +820,15 @@
            // shipping carries whatever Shopify called the method
       var sh=num(cell(head,iShip));
       if(sh!==0) push(shipName,1,sh,sh,cell(head,iShipM)||"Shipping");
-      var ds=num(cell(head,iDisc));
-      if(ds>0) push(discName,1,ds,ds,"Discount Product");
+            if(ds>0) grand-=ds;
       var tx=num(cell(head,iTax));
       if(tx!==0) push("Sales Tax",1,tx,tx,"Sales Tax");
 
-      allInvoices.push({docNumber:invNo,customer:custName,txnDate:dc.isoDate,
-                        dueDate:dc.isoDue,terms:termS,memo:memo,lines:objLines});
+           allInvoices.push({docNumber:invNo,customer:custName,txnDate:dc.isoDate,
+                        dueDate:dc.isoDue,terms:termS,memo:memo,
+                        billTo:billLines,
+                        discount:Math.round(ds*100)/100,
+                        lines:objLines});
 
       if(cur.length&&(cur.length+block.length>ROW_CAP||(INV_CAP&&curInv.length>=INV_CAP))){
         parts.push({rows:cur,invs:curInv}); cur=[]; curInv=[];
