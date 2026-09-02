@@ -1,4 +1,4 @@
-import { getAccessToken, loadItems, loadTerms, getOrCreateCustomer, postInvoiceBatch } from './qb.js';
+import { getAccessToken, loadItems, loadTerms, getOrCreateCustomer, postInvoice } from './qb.js';
 import { logUpload } from './db.js';
 import { saveJobStart, saveJobProgress, clearJobRow, unfinishedJobs } from './jobstore.js';
 // one running job per company, kept on the server so it survives page changes
@@ -129,31 +129,32 @@ export function startJob(realmId, { invoices, delay, negativeItems, batchSize })
 
   return job.id;
 }
-
-// one trip to QuickBooks with up to batchSize invoices on board
+// One invoice per request. QuickBooks holds the inventory lock while it writes,
+// so a batch of ten has to finish inside one request and the gateway cuts the
+// connection first - that is what "stream timeout" was. Sent singly it is
+// slower, but it does not stop.
 async function sendChunk(realmId, job, itemMap, termMap, chunk) {
   const token = await tokenFor(realmId, job);
-  const ready = [];
-  const rejected = [];
-
-  for (const inv of chunk) {
-    try {
-      const custId = await getOrCreateCustomer(realmId, token, inv.customer, job.custCache);
-      ready.push({ inv, payload: buildPayload(inv, custId, itemMap, termMap, job.negSet) });
-    } catch (e) {
-      // a missing product or a customer we could not reach - nothing a retry will fix
-      rejected.push({ inv, msg: e.message, retryable: !/not found in QuickBooks/i.test(e.message) });
-    }
-  }
-
-  const results = ready.length
-    ? await postInvoiceBatch(realmId, token, ready.map(r => r.payload))
-    : [];
-
   const out = [];
 
-  results.forEach(r => {
-    const inv = ready[r.index].inv;
+  for (const inv of chunk) {
+    if (job.stop) break;
+
+    let payload;
+    try {
+      const custId = await getOrCreateCustomer(realmId, token, inv.customer, job.custCache);
+      payload = buildPayload(inv, custId, itemMap, termMap, job.negSet);
+    } catch (e) {
+      // a missing product is nothing a retry will fix
+      out.push({
+        inv, ok: false, msg: e.message, status: 0,
+        retryable: !/not found in QuickBooks/i.test(e.message)
+      });
+      continue;
+    }
+
+    const r = await postInvoice(realmId, token, payload);
+
     if (r.ok) {
       out.push({ inv, ok: true, id: r.id });
     } else if (isDuplicate(r.msg)) {
@@ -161,14 +162,14 @@ async function sendChunk(realmId, job, itemMap, termMap, chunk) {
     } else {
       out.push({ inv, ok: false, msg: r.msg, status: r.status, retryable: r.retryable, tid: r.tid });
     }
-  });
 
-  rejected.forEach(x => {
-    out.push({ inv: x.inv, ok: false, msg: x.msg, status: 0, retryable: x.retryable });
-  });
+    // a breath between invoices - this is what keeps the lock from building up
+    if (job.delay > 0) await nap(job, job.delay);
+  }
 
   return out;
 }
+
 
 // waits here while the job is held, and comes back false if it was stopped
 async function waitWhileHeld(job) {
