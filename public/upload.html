@@ -176,22 +176,12 @@
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('main').classList.remove('hide');
     loadNegatives(function(){
-      restoreInvoices();
-      checkIncoming();
-      refresh(true);          // pick up whatever the server is already doing
+          restoreInvoices();
+    checkIncoming();
+    refresh(true);          // pick up whatever the server is already doing
     });
   });
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
-
-  function loadNegatives(done){
-    fetch('/api/negative-items')
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        (d.items || []).forEach(function(n){ negSet[n.toLowerCase()] = true; });
-        if(done) done();
-      })
-      .catch(function(){ if(done) done(); });
-  }
 
   // a small run is worth keeping for a reload; a big one lives on the server
   function keepInvoices(){
@@ -325,94 +315,9 @@
 
   /* ---------- negative amounts ---------- */
 
-  function buildNegTable(){
-    var names = Object.keys(itemCounts).sort();
-    var body = $('negBody');
-    body.innerHTML = '';
-    var frag = document.createDocumentFragment();
-
-    names.forEach(function(name){
-      var tr = document.createElement('tr');
-      tr.setAttribute('data-name', name.toLowerCase());
-
-      var td1 = document.createElement('td');
-      var cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.style.accentColor = 'var(--qbo)';
-      cb.style.width = '15px';
-      cb.style.height = '15px';
-      cb.checked = !!negSet[name.toLowerCase()];
-      cb.addEventListener('change', function(){
-        if(this.checked) negSet[name.toLowerCase()] = true;
-        else delete negSet[name.toLowerCase()];
-        updateNegAside();
-      });
-      td1.appendChild(cb);
-
-      var td2 = document.createElement('td');
-      td2.textContent = name;
-
-      var td3 = document.createElement('td');
-      td3.className = 'num';
-      td3.textContent = itemCounts[name];
-
-      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
-      frag.appendChild(tr);
-    });
-
-    body.appendChild(frag);
-    var q = $('negSearch').value.trim();
-    if(q) filterNeg(); else updateNegAside();
-  }
-
-  function filterNeg(){
-    var q = $('negSearch').value.trim().toLowerCase();
-    var rows = $('negBody').getElementsByTagName('tr');
-    var shown = 0;
-    for(var i=0;i<rows.length;i++){
-      var name = rows[i].getAttribute('data-name') || '';
-      var hit = !q || name.indexOf(q) > -1;
-      rows[i].style.display = hit ? '' : 'none';
-      if(hit) shown++;
-    }
-    updateNegAside(q ? shown : null);
-  }
-  $('negSearch').addEventListener('input', filterNeg);
-
-  function updateNegAside(shown){
-    var n = 0;
-    Object.keys(itemCounts).forEach(function(name){
-      if(negSet[name.toLowerCase()]) n++;
-    });
-    var txt = n ? (n + ' marked negative') : 'none marked';
-    if(shown !== null && shown !== undefined) txt = shown + ' shown · ' + txt;
-    $('negAside').textContent = txt;
-  }
-
-  $('negNone').addEventListener('click', function(){
-    Object.keys(itemCounts).forEach(function(name){ delete negSet[name.toLowerCase()]; });
-    
-  });
-
-  $('negSave').addEventListener('click', function(){
-    var items = Object.keys(negSet).filter(function(k){ return negSet[k]; });
-    fetch('/api/negative-items', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ items: items })
-    })
-    .then(function(r){ return r.json(); })
-    .then(function(){
-      $('negSaved').textContent = 'Saved';
-      setTimeout(function(){ $('negSaved').textContent = ''; }, 2500);
-    })
-    .catch(function(){ $('negSaved').textContent = 'Save failed'; });
-  });
-
-  function negativeList(){
-    return Object.keys(negSet).filter(function(k){ return negSet[k]; });
-  }
-
+  // the discount is a proper discount line now, so nothing here is marked
+  // negative any more
+  function negativeList(){ return []; }
   /* ---------- talking to the job ---------- */
 
   var CLS = { ok:'ok', fail:'err', retry:'warn', error:'err', log:'info' };
