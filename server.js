@@ -3821,7 +3821,9 @@ app.get('/api/upload/handover', async (req, res) => {
   const held = handovers.get(realmId);
   if (!held) return res.json({ invoices: [] });
 
-  if (req.query.keep !== '1') handovers.delete(realmId);
+    // the page can be reloaded, or the server can restart mid-handover, so the
+  // list stays put until an upload has actually been started with it
+  if (req.query.drop === '1') handovers.delete(realmId);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ invoices: held.invoices, at: held.at });
 });
