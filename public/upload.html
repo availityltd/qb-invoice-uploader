@@ -391,22 +391,7 @@
     clearInterval(poller);
     poller = null;
   }
-  // how long it has been going, and what is left at the pace so far
-  function timeLeft(job){
-    if(!job.startedAt || !job.doneCount) return '';
-    var span = function(ms){
-      var s = Math.round(ms / 1000);
-      var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-      if(h) return h + 'h ' + m + 'm';
-      if(m) return m + 'm';
-      return s + 's';
-    };
-    var gone = (job.finishedAt || Date.now()) - job.startedAt;
-    var per = gone / job.doneCount;
-    var left = Math.max(0, job.total - job.doneCount - job.failedCount);
-    return '  \u00b7  ' + span(gone) + ' so far' +
-           (left && !job.finishedAt ? '  \u00b7  about ' + span(left * per) + ' to go' : '');
-  }
+ 
   /* ---------- drawing ---------- */
 
   function paint(){
@@ -441,7 +426,7 @@
     $('bar').style.width = Math.min(100, pct) + '%';
     $('stat').textContent =
       nf(job.doneCount) + ' done · ' + nf(job.failedCount) + ' failed · ' +
-            nf(Math.max(0, job.total - job.doneCount - job.failedCount)) + ' remaining' + timeLeft(job);
+                  nf(Math.max(0, job.total - job.doneCount - job.failedCount)) + ' remaining';
 
     if(held){
       $('liveNote').classList.remove('hide');
