@@ -63,25 +63,6 @@
             <div class="stat" id="statFile"></div>
           </div>
 
-          <div class="sec hide" id="negSec">
-            <h2><span class="no">02</span> Negative amounts
-              <span class="aside" id="negAside"></span></h2>
-            <p class="hint" style="margin:0 0 12px">Tick any product whose amount should be sent to QuickBooks as a negative figure — discounts, refunds, credits. Your choices are remembered for this company.</p>
-            <div class="acts">
-              <button class="mini" id="negNone">Clear all</button>
-              <button class="mini" id="negSave">Save choices</button>
-              <span class="mono" id="negSaved" style="font-size:12px;color:var(--ok);align-self:center"></span>
-            </div>
-            <input type="text" id="negSearch" placeholder="Search products…"
-                   style="margin-bottom:10px;font-family:var(--sans);font-size:14px">
-            <div class="tbl" style="max-height:300px">
-              <table>
-                <thead><tr><th style="width:60px">Negative</th><th>Product / service</th><th class="num">Lines</th></tr></thead>
-                <tbody id="negBody"></tbody>
-              </table>
-            </div>
-          </div>
-
           <div class="sec hide" id="runSec">
             <h2><span class="no">03</span> Run <span class="aside" id="batchAside"></span></h2>
             <div class="g3">
@@ -327,8 +308,6 @@
       });
     });
     $('srcAside').textContent = nf(list.length) + ' invoices';
-    buildNegTable();
-    $('negSec').classList.remove('hide');
     $('runSec').classList.remove('hide');
     if(!quiet) log('Loaded ' + nf(list.length) + ' invoices.', 'info');
     updateBatchAside();
@@ -412,7 +391,7 @@
 
   $('negNone').addEventListener('click', function(){
     Object.keys(itemCounts).forEach(function(name){ delete negSet[name.toLowerCase()]; });
-    buildNegTable();
+    
   });
 
   $('negSave').addEventListener('click', function(){
@@ -509,7 +488,22 @@
     clearInterval(poller);
     poller = null;
   }
-
+  // how long it has been going, and what is left at the pace so far
+  function timeLeft(job){
+    if(!job.startedAt || !job.doneCount) return '';
+    var span = function(ms){
+      var s = Math.round(ms / 1000);
+      var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+      if(h) return h + 'h ' + m + 'm';
+      if(m) return m + 'm';
+      return s + 's';
+    };
+    var gone = (job.finishedAt || Date.now()) - job.startedAt;
+    var per = gone / job.doneCount;
+    var left = Math.max(0, job.total - job.doneCount - job.failedCount);
+    return '  \u00b7  ' + span(gone) + ' so far' +
+           (left && !job.finishedAt ? '  \u00b7  about ' + span(left * per) + ' to go' : '');
+  }
   /* ---------- drawing ---------- */
 
   function paint(){
@@ -544,7 +538,7 @@
     $('bar').style.width = Math.min(100, pct) + '%';
     $('stat').textContent =
       nf(job.doneCount) + ' done · ' + nf(job.failedCount) + ' failed · ' +
-      nf(Math.max(0, job.total - job.doneCount - job.failedCount)) + ' remaining';
+            nf(Math.max(0, job.total - job.doneCount - job.failedCount)) + ' remaining' + timeLeft(job);
 
     if(held){
       $('liveNote').classList.remove('hide');
