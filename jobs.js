@@ -16,14 +16,16 @@ const COOL_DOWN = 5 * 60 * 1000;
 function push(job, type, msg) {
   // Pakistan is five hours ahead of the server's own clock
   const t = new Date(Date.now() + 5 * 3600 * 1000);
-  const stamp = String(t.getUTCHours()).padStart(2, '0') + ':' +
+  let h = t.getUTCHours();
+  const ampm = h < 12 ? 'am' : 'pm';
+  h = h % 12; if (h === 0) h = 12;
+  const stamp = String(h).padStart(2, '0') + ':' +
                 String(t.getUTCMinutes()).padStart(2, '0') + ':' +
-                String(t.getUTCSeconds()).padStart(2, '0');
+                String(t.getUTCSeconds()).padStart(2, '0') + ' ' + ampm;
   job.lastId++;
   job.events.push({ id: job.lastId, type, msg: stamp + '  ' + msg });
   if (job.events.length > 4000) job.events.splice(0, job.events.length - 4000);
 }
-
 function isAuthError(msg, status) {
   return status === 401 ||
     /AuthenticationFailed|003200|Unauthorized|token expired|invalid_grant/i.test(String(msg || ''));
