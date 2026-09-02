@@ -52,10 +52,30 @@ function buildPayload(inv, customerId, itemMap, termMap, negSet) {
     lines.push(line);
   }
 
+   // the discount sits under the subtotal, the way QuickBooks shows it, rather
+  // than as another product line
+  const disc = Math.round(Number(inv.discount || 0) * 100) / 100;
+  if (disc > 0) {
+    lines.push({
+      DetailType: 'DiscountLineDetail',
+      Amount: disc,
+      DiscountLineDetail: { PercentBased: false }
+    });
+  }
+
   const p = { DocNumber: inv.docNumber, CustomerRef: { value: customerId }, Line: lines };
   if (inv.txnDate) p.TxnDate = inv.txnDate;
   if (inv.dueDate) p.DueDate = inv.dueDate;
   if (inv.memo) p.CustomerMemo = { value: inv.memo };
+
+  // the buyer's own name and address, in the billing block where it belongs
+  if (Array.isArray(inv.billTo) && inv.billTo.length) {
+    const b = inv.billTo.filter(Boolean).map(String);
+    p.BillAddr = {};
+    ['Line1', 'Line2', 'Line3', 'Line4', 'Line5'].forEach((k, i) => {
+      if (b[i]) p.BillAddr[k] = b[i].slice(0, 500);
+    });
+  }
 
   const termId = termMap[String(inv.terms || '').toLowerCase()];
   if (termId) p.SalesTermRef = { value: termId };
