@@ -7,6 +7,7 @@ import {
   pool, initDb, saveCompany, getCompany, logUpload,
   getNegativeItems, setNegativeItems
 } from './db.js';
+
 import { initMappings, getMappings, saveMapping } from './mappings.js';
 import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
@@ -3354,7 +3355,17 @@ app.get('/api/adv/open', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
+// forget the saved columns, so the page asks for them again
+app.post('/api/adv/columns-reset', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    await setSetting(realmId, 'adv:cols', null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.post('/api/adv/columns', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
