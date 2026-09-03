@@ -3369,7 +3369,36 @@ app.post('/api/adv/columns', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// Which QuickBooks account each bank name in the sheet stands for. Asked once
+// per name, then remembered - a name that turns up later is asked about then.
+app.get('/api/adv/banks', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ banks: await getSetting(realmId, 'adv:banks', {}) || {} });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
+app.post('/api/adv/banks', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const pairs = req.body.banks || {};
+  try {
+    const all = (await getSetting(realmId, 'adv:banks', {})) || {};
+    Object.keys(pairs).forEach(name => {
+      const v = pairs[name];
+      if (v) all[name] = String(v); else delete all[name];
+    });
+    await setSetting(realmId, 'adv:banks', all);
+    res.json({ ok: true, banks: all });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // the rows in a chosen span, matched against QuickBooks
 app.get('/api/adv/match', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -3391,7 +3420,16 @@ app.get('/api/adv/match', async (req, res) => {
     const token = await getAccessToken(realmId);
     const found = await findForAdvance(realmId, token, rows.map(r => r.invoice));
 
-    const ready = [], overpaid = [], settled = [], notInQb = [];
+        // every bank name the sheet uses, and what it was mapped to last time
+    const bankMap = (await getSetting(realmId, 'adv:banks', {})) || {};
+    const seenBanks = new Map();
+    rows.forEach(r => {
+      const b = String(r.bank || '').trim();
+      if (!b) return;
+      seenBanks.set(b, (seenBanks.get(b) || 0) + 1);
+    });
+
+    const ready = [], overpaid = [], settled = [], notInQb = [], needsBank = [];
 
     rows.forEach(r => {
       const inv = found.get(cprDigits(r.invoice));
@@ -3409,9 +3447,10 @@ app.get('/api/adv/match', async (req, res) => {
         qbTotal: inv.total,
         qbBalance: inv.balance,
         customerId: inv.customerId,
-        customerName: inv.customerName
+                customerName: inv.customerName,
+        bank: String(r.bank || '').trim(),
+        accountId: bankMap[String(r.bank || '').trim()] || null
       };
-
       if (inv.balance <= 0.005) { settled.push(entry); return; }
 
       // never hand QuickBooks more than the invoice still owes
@@ -3421,7 +3460,10 @@ app.get('/api/adv/match', async (req, res) => {
         return;
       }
 
-      entry.willPay = Math.round(r.amount * 100) / 100;
+            entry.willPay = Math.round(r.amount * 100) / 100;
+
+      // nothing goes to QuickBooks until we know which account it lands in
+      if (!entry.accountId) { needsBank.push(entry); return; }
       ready.push(entry);
     });
 
@@ -3445,6 +3487,7 @@ app.get('/api/adv/match', async (req, res) => {
         overpaid: overpaid.length,
         settled: settled.length,
         notInQb: notInQb.length,
+                needsBank: needsBank.length,
         amount: Math.round(ready.reduce((s, m) => s + m.willPay, 0) * 100) / 100
       },
       customers: [...byCustomer.values()].map(g => ({
@@ -3453,7 +3496,10 @@ app.get('/api/adv/match', async (req, res) => {
         count: g.count,
         amount: Math.round(g.amount * 100) / 100
       })),
-      ready, overpaid, settled, notInQb
+            banks: [...seenBanks.entries()].map(([name, count]) => ({
+        name, count, accountId: bankMap[name] || null
+      })),
+      ready, overpaid, settled, notInQb, needsBank
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
