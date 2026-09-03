@@ -36,7 +36,6 @@ export function startAdvJob(realmId, body) {
     throw new Error('An advance payment run is already going for this company');
   }
 
-  if (!body.accountId) throw new Error('Deposit account required');
   if (!Array.isArray(body.rows) || !body.rows.length) throw new Error('Nothing to receive');
 
   const job = {
@@ -70,7 +69,7 @@ export function startAdvJob(realmId, body) {
 
 async function run(realmId, job) {
   const {
-    rows, accountId, accountName, methodId,
+    rows, methodId,
     txnDate, label, courier
   } = job.body;
 
@@ -79,27 +78,31 @@ async function run(realmId, job) {
 
   const memo = `Advance payment\ndated: ${label}`;
 
-  // QuickBooks will not mix two customers on one payment
-  const byCustomer = new Map();
+  // QuickBooks will not mix two customers on one payment, and each row names
+  // its own bank, so a payment is one customer paid into one account
+  const groups = new Map();
   rows.forEach(r => {
-    const k = r.customerId || 'none';
-    if (!byCustomer.has(k)) byCustomer.set(k, []);
-    byCustomer.get(k).push(r);
+    const k = (r.customerId || 'none') + '|' + (r.accountId || 'none');
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
   });
 
-  async function sendPart(custId, lines, part, parts) {
+  async function sendPart(lines, part, parts) {
     if (job.stop) return;
 
+    const custId = lines[0].customerId;
+    const acct = lines[0].accountId;
     const amount = lines.reduce((s, m) => s + Number(m.willPay || 0), 0);
     const who = lines[0].customerName || custId;
+    const bankName = lines[0].bank || '';
     const tag = parts > 1 ? ` (part ${part} of ${parts})` : '';
 
-    push(job, 'log', `Sending ${lines.length} invoices for ${who}${tag}...`);
+    push(job, 'log', `Sending ${lines.length} invoices for ${who} into ${bankName}${tag}...`);
 
     const payload = {
       CustomerRef: { value: String(custId) },
       TotalAmt: Math.round(amount * 100) / 100,
-      DepositToAccountRef: { value: String(accountId) },
+      DepositToAccountRef: { value: String(acct) },
       PrivateNote: memo + tag,
       Line: lines.map(m => ({
         Amount: Math.round(Number(m.willPay) * 100) / 100,
@@ -122,6 +125,7 @@ async function run(realmId, job) {
           invoice: m.invoice,
           qbDoc: m.qbDoc,
           customer: m.customerName || '',
+          bank: m.bank || '',
           amount: Math.round(Number(m.willPay) * 100) / 100,
           balanceWas: m.qbBalance
         });
@@ -129,12 +133,12 @@ async function run(realmId, job) {
 
       job.results.push({
         ok: true,
-        customer: who + tag,
+        customer: who + ' - ' + bankName + tag,
         count: lines.length,
         amount: Math.round(amount * 100) / 100,
         paymentId: r.id
       });
-      push(job, 'ok', `OK  ${who}${tag} - ${lines.length} invoices, ${amount.toFixed(2)}`);
+      push(job, 'ok', `OK  ${who} - ${bankName}${tag} - ${lines.length} invoices, ${amount.toFixed(2)}`);
       return;
     }
 
@@ -142,8 +146,8 @@ async function run(realmId, job) {
     if (lines.length > 1) {
       push(job, 'log', `QuickBooks refused ${lines.length} at once - splitting in two.`);
       const half = Math.ceil(lines.length / 2);
-      await sendPart(custId, lines.slice(0, half), part, parts);
-      await sendPart(custId, lines.slice(half), part, parts);
+      await sendPart(lines.slice(0, half), part, parts);
+      await sendPart(lines.slice(half), part, parts);
       return;
     }
 
@@ -152,24 +156,29 @@ async function run(realmId, job) {
     push(job, 'fail', `FAILED  ${who}${tag} - ${String(r.msg).slice(0, 200)}`);
   }
 
-  for (const [custId, lines] of byCustomer) {
+  for (const [key, lines] of groups) {
     if (job.stop) break;
 
-    if (!custId || custId === 'none') {
+    // a row with no customer, or a bank we were never told about, is left alone
+    if (!lines[0].customerId || !lines[0].accountId) {
       job.doneCount += lines.length;
-      job.results.push({ ok: false, msg: 'Invoices with no customer were skipped', count: lines.length });
+      job.results.push({
+        ok: false,
+        msg: 'Rows with no customer or no bank were skipped',
+        count: lines.length
+      });
       continue;
     }
 
     if (lines.length < SPLIT_ABOVE) {
-      await sendPart(custId, lines, 1, 1);
+      await sendPart(lines, 1, 1);
       continue;
     }
 
     const parts = Math.ceil(lines.length / CHUNK);
     push(job, 'log', `${lines.length} invoices for this customer - sending as ${parts} payments.`);
     for (let i = 0; i < parts && !job.stop; i++) {
-      await sendPart(custId, lines.slice(i * CHUNK, (i + 1) * CHUNK), i + 1, parts);
+      await sendPart(lines.slice(i * CHUNK, (i + 1) * CHUNK), i + 1, parts);
     }
   }
 
@@ -183,13 +192,7 @@ async function run(realmId, job) {
       unmatched: 0,
       amount: Math.round(job.totalAmount * 100) / 100,
       qbPaymentId: (job.results.find(x => x.ok) || {}).paymentId || null,
-      bankAccount: accountName || null
-    });
-  } catch (e) {}
-
-  try {
-    await setSetting(realmId, 'adv:lastBank', {
-      accountId, methodId: methodId || null
+      bankAccount: 'per row'
     });
   } catch (e) {}
 
