@@ -65,6 +65,16 @@
   .bucket td{padding:6px 14px;border-bottom:1px solid var(--line)}
   .bucket td.num{text-align:right;font-family:var(--mono)}
 
+  .bankbox{border:1px solid var(--warn);background:#FFFBF0;border-radius:8px;
+    padding:14px 16px;margin-bottom:16px}
+  .bankbox h3{margin:0 0 6px;font-size:13px;font-weight:600}
+  .bankbox p{margin:0 0 10px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .bankbox table{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff}
+  .bankbox th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:7px 10px;border-bottom:1px solid var(--line)}
+  .bankbox td{padding:7px 10px;border-bottom:1px solid var(--line)}
+  .bankbox td.num{text-align:right;font-family:var(--mono)}
+  .bankbox select{font-size:12px;padding:4px 7px;margin:0}
   .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;
     margin-bottom:16px}
   .fields label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
@@ -176,6 +186,7 @@
           <h2>What matched</h2>
           <div class="hint" id="matchHint"></div>
           <div class="tally" id="tally"></div>
+          <div id="bankBox"></div>
           <div id="buckets"></div>
         </div>
 
@@ -184,10 +195,6 @@
           <div class="hint" id="payHint"></div>
           <div class="memo" id="memoBox"></div>
           <div class="fields">
-            <div>
-              <label>Deposit to</label>
-              <select id="acct"></select>
-            </div>
             <div>
               <label>Payment method</label>
               <select id="method"></select>
@@ -313,12 +320,11 @@
   function loadOptions(){
     return get('/api/cpr/qb-options').then(function(o){
       S.options = o;
-      fill($('acct'), o.accounts, false);
+      S.accounts = o.accounts || [];
       fill($('method'), o.methods, true);
       return get('/api/adv/last-bank');
     }).then(function(d){
       if(d && d.bank){
-        if(d.bank.accountId) $('acct').value = d.bank.accountId;
         if(d.bank.methodId)  $('method').value = d.bank.methodId;
       }
     }).catch(function(){});
@@ -446,7 +452,8 @@
       ['amount',  'Amount paid'],
       ['payable', 'Payable amount (optional)'],
       ['name',    'Account holder name (optional)'],
-      ['note',    'Comments (optional)']
+      ['note',    'Comments (optional)'],
+      ['bank',    'Bank name']
     ];
 
     var box = $('colsBox');
@@ -483,11 +490,13 @@
       amount:  Number($('col_amount').value),
       payable: Number($('col_payable').value),
       name:    Number($('col_name').value),
-      note:    Number($('col_note').value)
+      note:    Number($('col_note').value),
+      bank:    Number($('col_bank').value)
     };
 
     if(cols.invoice < 0) return say('bad', '<b>Pick the order number column.</b>');
     if(cols.amount < 0)  return say('bad', '<b>Pick the amount paid column.</b>');
+    if(cols.bank < 0)    return say('bad', '<b>Pick the bank name column.</b>');
 
     clearSay();
     $('btnCols').disabled = true;
@@ -634,11 +643,19 @@
              '<td class="num">' + money(r.amount) + '</td><td></td></tr>';
     });
 
+    bucket(box, 'needsBank', 'Waiting on a bank name', d.needsBank || [], true, function(r){
+      return '<tr><td>' + esc(r.invoice) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.bank || '(blank)') + '</td>' +
+             '<td class="num">' + money(r.amount) + '</td><td></td></tr>';
+    });
+
     bucket(box, 'notInQb', 'Not found in QuickBooks', d.notInQb, false, function(r){
       return '<tr><td>' + esc(r.invoice) + '</td>' +
              '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
              '<td class="num">' + money(r.amount) + '</td><td></td></tr>';
     });
+
+    drawBanks(d);
 
     if(!t.ready){
       $('stepPay').classList.add('hide');
@@ -646,6 +663,60 @@
       return;
     }
     showPay(d);
+  }
+
+  /* ---------- which QuickBooks account each bank name means ---------- */
+
+  // The sheet says "AA Traders" or "Easypaisa"; QuickBooks needs an account.
+  // A name is asked about once and then remembered, so only new ones come up.
+  function drawBanks(d){
+    var box = $('bankBox');
+    box.innerHTML = '';
+
+    var missing = (d.banks || []).filter(function(b){ return !b.accountId; });
+    if(!missing.length) return;
+
+    var opts = (S.accounts || []).map(function(a){
+      return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>';
+    }).join('');
+
+    box.innerHTML =
+      '<div class="bankbox">' +
+        '<h3>New bank names in this sheet</h3>' +
+        '<p>Pick the QuickBooks account each one pays into. This is asked once ' +
+          'per name \u2014 next time these go straight through.</p>' +
+        '<table>' +
+          '<thead><tr><th>In the sheet</th><th class="num">Rows</th>' +
+            '<th>QuickBooks account</th></tr></thead>' +
+          '<tbody>' + missing.map(function(b, i){
+            return '<tr><td><b>' + esc(b.name) + '</b></td>' +
+                   '<td class="num">' + nf(b.count) + '</td>' +
+                   '<td><select id="bk_' + i + '">' +
+                     '<option value="">\u2014 choose \u2014</option>' + opts +
+                   '</select></td></tr>';
+          }).join('') + '</tbody>' +
+        '</table>' +
+        '<button class="solid" id="btnBanks" style="margin-top:12px">Save and match again</button>' +
+      '</div>';
+
+    $('btnBanks').addEventListener('click', function(){
+      var pairs = {};
+      var short = 0;
+      missing.forEach(function(b, i){
+        var v = $('bk_' + i).value;
+        if(v) pairs[b.name] = v; else short++;
+      });
+      if(short) return say('bad', '<b>Pick an account for every name first.</b>');
+
+      $('btnBanks').disabled = true;
+      post('/api/adv/banks', { banks: pairs }).then(function(){
+        $('btnBanks').disabled = false;
+        runMatch();
+      }).catch(function(e){
+        $('btnBanks').disabled = false;
+        say('bad', '<b>' + esc(e.message) + '</b>');
+      });
+    });
   }
 
   function bucket(box, key, title, rows, warn, render){
@@ -696,13 +767,11 @@
   $('btnPay').addEventListener('click', function(){
     if(!S.match || !S.match.ready.length) return;
 
-    var acctSel = $('acct');
-    if(!acctSel.value) return say('bad', '<b>Pick a deposit account.</b>');
     if(!$('payDate').value) return say('bad', '<b>Pick a payment date.</b>');
 
     var t = S.match.totals;
     if(!confirm('Receive ' + t.ready + ' part payments totalling ' + money(t.amount) +
-                ' into ' + acctSel.options[acctSel.selectedIndex].textContent + '?\n\n' +
+                ', each into the bank its own row names?\n\n' +
                 'Dated ' + $('payDate').value + ', memo: Advance payment dated ' + S.match.label)) return;
 
     clearSay();
@@ -715,8 +784,6 @@
 
     post('/api/adv/receive', {
       rows: S.match.ready,
-      accountId: acctSel.value,
-      accountName: acctSel.options[acctSel.selectedIndex].textContent,
       methodId: $('method').value || null,
       txnDate: $('payDate').value,
       label: S.match.label,
