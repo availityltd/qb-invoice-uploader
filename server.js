@@ -3440,9 +3440,20 @@ app.get('/api/adv/match', async (req, res) => {
       seenBanks.set(b, (seenBanks.get(b) || 0) + 1);
     });
 
-    const ready = [], overpaid = [], settled = [], notInQb = [], needsBank = [];
+       const ready = [], overpaid = [], settled = [], notInQb = [],
+          needsBank = [], alreadyPosted = [];
 
-    rows.forEach(r => {
+       rows.forEach(r => {
+      // a row the sheet already says was posted is left alone, however much
+      // the invoice still shows as owing - that is what stops a second run
+      // paying the same advance twice
+      if (r.posted) {
+        alreadyPosted.push({
+          sheetRow: r.sheetRow, date: r.date, invoice: r.invoice,
+          amount: r.amount, bank: r.bank || '', posted: r.posted
+        });
+        return;
+      }
       const inv = found.get(cprDigits(r.invoice));
       if (!inv) { notInQb.push(r); return; }
 
@@ -3499,6 +3510,7 @@ app.get('/api/adv/match', async (req, res) => {
         settled: settled.length,
         notInQb: notInQb.length,
                 needsBank: needsBank.length,
+                alreadyPosted: alreadyPosted.length,
         amount: Math.round(ready.reduce((s, m) => s + m.willPay, 0) * 100) / 100
       },
       customers: [...byCustomer.values()].map(g => ({
@@ -3510,7 +3522,7 @@ app.get('/api/adv/match', async (req, res) => {
             banks: [...seenBanks.entries()].map(([name, count]) => ({
         name, count, accountId: bankMap[name] || null
       })),
-      ready, overpaid, settled, notInQb, needsBank
+            ready, overpaid, settled, notInQb, needsBank, alreadyPosted
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
