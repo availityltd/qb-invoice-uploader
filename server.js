@@ -3547,38 +3547,54 @@ app.post('/api/adv/recheck', async (req, res) => {
     // every payment sitting on those invoices, by invoice id
     const invIds = [];
     found.forEach(inv => invIds.push(String(inv.id)));
+    // The invoice tells us which payments are on it; asking QuickBooks for a
+    // payment by a field inside its lines does not work, so we go the other way.
+    const wantIds = [];
+    found.forEach(inv => (inv.paymentIds || []).forEach(id => wantIds.push(String(id))));
+    const uniq = [...new Set(wantIds)];
 
-    const byInvoice = new Map();
-    for (let i = 0; i < invIds.length; i += 30) {
-      const chunk = invIds.slice(i, i + 30);
+    const payById = new Map();
+    for (let i = 0; i < uniq.length; i += 30) {
+      const chunk = uniq.slice(i, i + 30).map(x => `'${x}'`).join(',');
       let q;
       try {
         q = await qbQuery(realmId, token,
-          `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, Line ` +
-          `FROM Payment WHERE Line.LinkedTxn.TxnId IN (${chunk.map(x => `'${x}'`).join(',')}) ` +
-          `MAXRESULTS 1000`);
+          `SELECT Id, TxnDate, TotalAmt, DepositToAccountRef, Line ` +
+          `FROM Payment WHERE Id IN (${chunk}) MAXRESULTS 1000`);
       } catch (e) { continue; }
 
-      (q.Payment || []).forEach(p => {
+      (q.Payment || []).forEach(p => payById.set(String(p.Id), p));
+    }
+
+    const byInvoice = new Map();
+    found.forEach(inv => {
+      const list = [];
+      (inv.paymentIds || []).forEach(id => {
+        const p = payById.get(String(id));
+        if (!p) return;
+
+        // how much of that payment landed on this invoice
+        let mine = 0, lines = 0;
         (p.Line || []).forEach(l => {
           (l.LinkedTxn || []).forEach(t => {
             if (t.TxnType !== 'Invoice') return;
-            const key = String(t.TxnId);
-            if (!byInvoice.has(key)) byInvoice.set(key, []);
-            byInvoice.get(key).push({
-              id: String(p.Id),
-              date: p.TxnDate || '',
-              amount: Number(l.Amount || 0),
-              total: Number(p.TotalAmt || 0),
-              accountId: p.DepositToAccountRef ? String(p.DepositToAccountRef.value) : '',
-              accountName: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : '',
-              shared: (p.Line || []).length > 1
-            });
+            lines++;
+            if (String(t.TxnId) === String(inv.id)) mine += Number(l.Amount || 0);
           });
         });
-      });
-    }
 
+        list.push({
+          id: String(p.Id),
+          date: p.TxnDate || '',
+          amount: mine || Number(p.TotalAmt || 0),
+          total: Number(p.TotalAmt || 0),
+          accountId: p.DepositToAccountRef ? String(p.DepositToAccountRef.value) : '',
+          accountName: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : '',
+          shared: lines > 1
+        });
+      });
+      byInvoice.set(String(inv.id), list);
+    });
     const out = rows.map(r => {
       const inv = found.get(cprDigits(r.invoice));
       if (!inv) {
