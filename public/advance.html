@@ -238,6 +238,7 @@
     match: null, options: null,
     job: null, poller: null, lastEventId: 0,
     open: { ready:true, overpaid:true, settled:false, notInQb:false },
+    takeOver: false,
     logLines: []
   };
 
@@ -637,6 +638,26 @@
              '<td class="num" style="color:var(--warn)">owes ' + money(r.qbBalance) + '</td></tr>';
     });
 
+    // Most of these are out by a rupee or two. Ticking the box sends them with
+    // the rest, and QuickBooks takes only what the invoice still owes.
+    if(d.overpaid.length){
+      var head = box.querySelector('[data-key="overpaid"] h4');
+      if(head){
+        var tick = document.createElement('label');
+        tick.style.cssText = 'display:flex;gap:7px;align-items:center;font-size:11.5px;' +
+                             'font-weight:400;color:var(--muted);cursor:pointer';
+        tick.innerHTML = '<input type="checkbox" id="takeOver" style="width:auto;margin:0"' +
+                         (S.takeOver ? ' checked' : '') + '>' +
+                         'Receive these too \u2014 QuickBooks takes what each invoice owes';
+        tick.addEventListener('click', function(ev){ ev.stopPropagation(); });
+        head.appendChild(tick);
+        document.getElementById('takeOver').addEventListener('change', function(){
+          S.takeOver = this.checked;
+          showPay(S.match);
+        });
+      }
+    }
+
     bucket(box, 'settled', 'Already settled in QuickBooks', d.settled, false, function(r){
       return '<tr><td>' + esc(r.invoice) + '</td>' +
              '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
@@ -723,6 +744,7 @@
     if(!rows.length) return;
     var el = document.createElement('div');
     el.className = 'bucket' + (warn ? ' warn' : '');
+    el.setAttribute('data-key', key);
     var open = !!S.open[key];
 
     el.innerHTML =
@@ -758,19 +780,44 @@
 
     var over = d.overpaid.length;
     if(over){
-      $('payHint').innerHTML +=
-        '<br><span style="color:var(--warn)">' + nf(over) + ' row' + (over === 1 ? '' : 's') +
-        ' where the sheet says more than the invoice owes are left out.</span>';
+      $('payHint').innerHTML += S.takeOver
+        ? '<br><span style="color:var(--ok)">' + nf(over) + ' row' + (over === 1 ? '' : 's') +
+          ' where the sheet says more are included, at what the invoice owes \u2014 ' +
+          money(overAmount()) + '.</span>'
+        : '<br><span style="color:var(--warn)">' + nf(over) + ' row' + (over === 1 ? '' : 's') +
+          ' where the sheet says more than the invoice owes are left out.</span>';
     }
   }
 
+  // the overpaid rows, cut down to what is actually owed
+  function overRows(){
+    if(!S.takeOver || !S.match) return [];
+    return (S.match.overpaid || []).map(function(r){
+      var copy = {};
+      for(var k in r) copy[k] = r[k];
+      copy.willPay = Math.round(Number(r.qbBalance) * 100) / 100;
+      return copy;
+    }).filter(function(r){ return r.willPay > 0 && r.accountId; });
+  }
+
+  function overAmount(){
+    return overRows().reduce(function(s, r){ return s + r.willPay; }, 0);
+  }
+
+  function toSend(){
+    return (S.match.ready || []).concat(overRows());
+  }
+
   $('btnPay').addEventListener('click', function(){
-    if(!S.match || !S.match.ready.length) return;
+    if(!S.match) return;
+
+    var rows = toSend();
+    if(!rows.length) return;
 
     if(!$('payDate').value) return say('bad', '<b>Pick a payment date.</b>');
 
-    var t = S.match.totals;
-    if(!confirm('Receive ' + t.ready + ' part payments totalling ' + money(t.amount) +
+    var sum = rows.reduce(function(s, r){ return s + Number(r.willPay || 0); }, 0);
+    if(!confirm('Receive ' + rows.length + ' part payments totalling ' + money(sum) +
                 ', each into the bank its own row names?\n\n' +
                 'Dated ' + $('payDate').value + ', memo: Advance payment dated ' + S.match.label)) return;
 
@@ -783,7 +830,7 @@
     S.job = null;
 
     post('/api/adv/receive', {
-      rows: S.match.ready,
+      rows: rows,
       methodId: $('method').value || null,
       txnDate: $('payDate').value,
       label: S.match.label,
