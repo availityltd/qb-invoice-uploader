@@ -75,6 +75,22 @@
   .bankbox td{padding:7px 10px;border-bottom:1px solid var(--line)}
   .bankbox td.num{text-align:right;font-family:var(--mono)}
   .bankbox select{font-size:12px;padding:4px 7px;margin:0}
+  .rechk{border:1px solid var(--line);background:#fff;border-radius:8px;
+    padding:14px 16px;margin-top:16px}
+  .rechk h3{margin:0 0 6px;font-size:13px;font-weight:600}
+  .rechk p{margin:0 0 10px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .rechk table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .rechk th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:7px 10px;border-bottom:1px solid var(--line)}
+  .rechk td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .rechk td.num{text-align:right;font-family:var(--mono)}
+  .rechk .why{font-size:11px;color:var(--warn);line-height:1.5}
+  .rechk .good{color:var(--ok);font-weight:600}
+  .rechk button{font-size:11.5px;padding:4px 11px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit;
+    white-space:nowrap;margin:0 0 4px}
+  .rechk button:hover{border-color:var(--qbo)}
+  .rechk .del{border-color:var(--neg);color:var(--neg)}
   .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;
     margin-bottom:16px}
   .fields label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
@@ -188,6 +204,7 @@
           <div class="tally" id="tally"></div>
           <div id="bankBox"></div>
           <div id="buckets"></div>
+          <div id="recheckBox"></div>
         </div>
 
         <div class="step hide" id="stepPay">
@@ -237,8 +254,9 @@
     header: [], cols: null, days: [], picked: {},
     match: null, options: null,
     job: null, poller: null, lastEventId: 0,
-    open: { ready:true, overpaid:true, settled:false, notInQb:false },
+    open: { ready:true, overpaid:true, settled:false, notInQb:false, alreadyPosted:false },
     takeOver: false,
+    recheck: null,
     logLines: []
   };
 
@@ -454,7 +472,8 @@
       ['payable', 'Payable amount (optional)'],
       ['name',    'Account holder name (optional)'],
       ['note',    'Comments (optional)'],
-      ['bank',    'Bank name']
+      ['bank',    'Bank name'],
+      ['posted',  'Posted column']
     ];
 
     var box = $('colsBox');
@@ -492,12 +511,14 @@
       payable: Number($('col_payable').value),
       name:    Number($('col_name').value),
       note:    Number($('col_note').value),
-      bank:    Number($('col_bank').value)
+      bank:    Number($('col_bank').value),
+      posted:  Number($('col_posted').value)
     };
 
     if(cols.invoice < 0) return say('bad', '<b>Pick the order number column.</b>');
     if(cols.amount < 0)  return say('bad', '<b>Pick the amount paid column.</b>');
     if(cols.bank < 0)    return say('bad', '<b>Pick the bank name column.</b>');
+    if(cols.posted < 0)  return say('bad', '<b>Pick the column where "Posted by Rani" is written.</b>');
 
     clearSay();
     $('btnCols').disabled = true;
@@ -618,6 +639,8 @@
         '<div class="l">More than owed</div></div>' +
       '<div><div class="n">' + nf(t.settled) + '</div>' +
         '<div class="l">Already settled</div></div>' +
+      '<div><div class="n">' + nf(t.alreadyPosted || 0) + '</div>' +
+        '<div class="l">Already posted</div></div>' +
       '<div class="bad"><div class="n">' + nf(t.notInQb) + '</div>' +
         '<div class="l">Not in QB</div></div>';
 
@@ -670,6 +693,13 @@
              '<td class="num">' + money(r.amount) + '</td><td></td></tr>';
     });
 
+    bucket(box, 'alreadyPosted', 'Already posted - marked in the sheet', d.alreadyPosted || [], false, function(r){
+      return '<tr><td>' + esc(r.invoice) + '</td>' +
+             '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
+             '<td class="num">' + money(r.amount) + '</td>' +
+             '<td style="color:var(--ok)">' + esc(r.posted) + '</td></tr>';
+    });
+
     bucket(box, 'notInQb', 'Not found in QuickBooks', d.notInQb, false, function(r){
       return '<tr><td>' + esc(r.invoice) + '</td>' +
              '<td style="color:var(--muted)">' + esc(r.date) + '</td>' +
@@ -677,6 +707,7 @@
     });
 
     drawBanks(d);
+    drawRecheck(d);
 
     if(!t.ready){
       $('stepPay').classList.add('hide');
@@ -736,6 +767,134 @@
       }).catch(function(e){
         $('btnBanks').disabled = false;
         say('bad', '<b>' + esc(e.message) + '</b>');
+      });
+    });
+  }
+
+  /* ---------- checking what QuickBooks really did ---------- */
+
+  // Reads the invoices back out of QuickBooks and says, row by row, which
+  // payments are on them, how much, and in which bank. It does not care who
+  // entered them, so payments made by hand are checked the same way.
+  function drawRecheck(d){
+    var box = $('recheckBox');
+    var rows = (d.alreadyPosted || []).concat(d.settled || []);
+    if(!rows.length){ box.innerHTML = ''; return; }
+
+    box.innerHTML =
+      '<div class="rechk">' +
+        '<h3>Check what was received</h3>' +
+        '<p>' + nf(rows.length) + ' row' + (rows.length === 1 ? '' : 's') +
+          ' in this range have already been dealt with. This reads them back out of ' +
+          'QuickBooks and shows the payment on each one \u2014 the amount, and the bank ' +
+          'it went into.</p>' +
+        '<button class="solid" id="btnRecheck">Check these against QuickBooks</button>' +
+        '<span id="rechkNote" style="font-size:12px;color:var(--muted);margin-left:10px"></span>' +
+        '<div id="rechkOut"></div>' +
+      '</div>';
+
+    $('btnRecheck').addEventListener('click', function(){
+      var b = $('btnRecheck');
+      b.disabled = true;
+      b.textContent = 'Checking...';
+      $('rechkOut').innerHTML = '';
+
+      post('/api/adv/recheck', { rows: rows }).then(function(res){
+        b.disabled = false;
+        b.textContent = 'Check these against QuickBooks';
+        $('rechkNote').textContent =
+          nf(res.ok) + ' look right, ' + nf(res.off) + ' need a look';
+        S.recheck = res.rows;
+        drawRecheckRows();
+      }).catch(function(e){
+        b.disabled = false;
+        b.textContent = 'Check these against QuickBooks';
+        say('bad', '<b>' + esc(e.message) + '</b>');
+      });
+    });
+  }
+
+  function drawRecheckRows(){
+    var rows = S.recheck || [];
+    if(!rows.length) return;
+
+    var opts = (S.accounts || []).map(function(a){
+      return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>';
+    }).join('');
+
+    var body = rows.map(function(r, i){
+      var pays = (r.payments || []).map(function(p, k){
+        var wrong = r.wantAccountId && p.accountId &&
+                    String(p.accountId) !== String(r.wantAccountId);
+        return '<div style="margin-bottom:6px">' +
+          '<span class="mono">' + money(p.amount) + '</span> on ' + esc(p.date) +
+          ' \u2014 <span style="color:' + (wrong ? 'var(--warn)' : 'var(--muted)') + '">' +
+          esc(p.accountName || p.accountId || 'no account') + '</span>' +
+          (p.shared ? ' <span style="color:var(--muted)">(covers other invoices too)</span>' : '') +
+          '<br>' +
+          (wrong
+            ? '<select id="rf_' + i + '_' + k + '" style="font-size:12px;padding:3px 6px;margin:4px 0">' +
+              opts + '</select> ' +
+              '<button data-fix="' + i + '_' + k + '" data-pid="' + esc(p.id) + '">Move to this bank</button> '
+            : '') +
+          (r.payments.length > 1 && !p.shared
+            ? '<button class="del" data-del="' + esc(p.id) + '">Delete this payment</button>'
+            : '') +
+          '</div>';
+      }).join('') || '<span style="color:var(--warn)">nothing</span>';
+
+      return '<tr>' +
+        '<td>' + esc(r.invoice) +
+          '<div style="font-size:11px;color:var(--muted)">sheet row ' + r.sheetRow + '</div></td>' +
+        '<td class="num">' + money(r.sheetAmount) + '</td>' +
+        '<td style="color:var(--muted)">' + esc(r.bank || '\u2014') + '</td>' +
+        '<td>' + pays + '</td>' +
+        '<td>' + (r.verdict === 'ok'
+          ? '<span class="good">looks right</span>'
+          : '<span class="why">' + (r.notes || []).map(esc).join('<br>') + '</span>') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    $('rechkOut').innerHTML =
+      '<table style="margin-top:12px">' +
+        '<thead><tr><th>Invoice</th><th class="num">Sheet says</th><th>Bank in sheet</th>' +
+          '<th>In QuickBooks</th><th>Verdict</th></tr></thead>' +
+        '<tbody>' + body + '</tbody></table>';
+
+    $('rechkOut').querySelectorAll('button[data-fix]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var sel = $('rf_' + b.getAttribute('data-fix'));
+        if(!sel || !sel.value) return;
+        b.disabled = true;
+        b.textContent = 'Moving...';
+        post('/api/adv/fix-payment', {
+          paymentId: b.getAttribute('data-pid'),
+          accountId: sel.value
+        }).then(function(){
+          b.textContent = 'Moved';
+          setTimeout(function(){ $('btnRecheck').click(); }, 800);
+        }).catch(function(e){
+          b.disabled = false;
+          b.textContent = 'Move to this bank';
+          say('bad', '<b>' + esc(e.message) + '</b>');
+        });
+      });
+    });
+
+    $('rechkOut').querySelectorAll('button[data-del]').forEach(function(b){
+      b.addEventListener('click', function(){
+        if(!confirm('Delete this payment from QuickBooks? It cannot be undone.')) return;
+        b.disabled = true;
+        b.textContent = 'Deleting...';
+        post('/api/adv/delete-payment', { paymentId: b.getAttribute('data-del') })
+          .then(function(){
+            b.textContent = 'Deleted';
+            setTimeout(function(){ $('btnRecheck').click(); }, 800);
+          }).catch(function(e){
+            b.disabled = false;
+            b.textContent = 'Delete this payment';
+            say('bad', '<b>' + esc(e.message) + '</b>');
+          });
       });
     });
   }
@@ -835,6 +994,9 @@
       txnDate: $('payDate').value,
       label: S.match.label,
       sheetId: S.book.id,
+      tab: S.tab,
+      postedCol: (S.cols && S.cols.posted !== undefined) ? S.cols.posted : -1,
+      stamp: 'Posted by Rani',
       courier: 'Advance payments'
     }).then(function(){
       $('btnPay').disabled = false;
