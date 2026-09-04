@@ -3528,6 +3528,194 @@ app.get('/api/adv/match', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// Look up what QuickBooks actually did with a set of advance rows: which
+// payments are sitting on each invoice, how much, and into which account.
+// Works just as well on payments that were entered by hand.
+app.post('/api/adv/recheck', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'Nothing to check' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const bankMap = (await getSetting(realmId, 'adv:banks', {})) || {};
+
+    const found = await findForAdvance(realmId, token, rows.map(r => r.invoice));
+
+    // every payment sitting on those invoices, by invoice id
+    const invIds = [];
+    found.forEach(inv => invIds.push(String(inv.id)));
+
+    const byInvoice = new Map();
+    for (let i = 0; i < invIds.length; i += 30) {
+      const chunk = invIds.slice(i, i + 30);
+      let q;
+      try {
+        q = await qbQuery(realmId, token,
+          `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, Line ` +
+          `FROM Payment WHERE Line.LinkedTxn.TxnId IN (${chunk.map(x => `'${x}'`).join(',')}) ` +
+          `MAXRESULTS 1000`);
+      } catch (e) { continue; }
+
+      (q.Payment || []).forEach(p => {
+        (p.Line || []).forEach(l => {
+          (l.LinkedTxn || []).forEach(t => {
+            if (t.TxnType !== 'Invoice') return;
+            const key = String(t.TxnId);
+            if (!byInvoice.has(key)) byInvoice.set(key, []);
+            byInvoice.get(key).push({
+              id: String(p.Id),
+              date: p.TxnDate || '',
+              amount: Number(l.Amount || 0),
+              total: Number(p.TotalAmt || 0),
+              accountId: p.DepositToAccountRef ? String(p.DepositToAccountRef.value) : '',
+              accountName: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : '',
+              shared: (p.Line || []).length > 1
+            });
+          });
+        });
+      });
+    }
+
+    const out = rows.map(r => {
+      const inv = found.get(cprDigits(r.invoice));
+      if (!inv) {
+        return { sheetRow: r.sheetRow, invoice: r.invoice, sheetAmount: r.amount,
+                 bank: r.bank || '', verdict: 'notInQb', payments: [] };
+      }
+
+      const pays = byInvoice.get(String(inv.id)) || [];
+      const wantAcct = bankMap[String(r.bank || '').trim()] || null;
+      const paid = pays.reduce((x, p) => x + p.amount, 0);
+
+      const notes = [];
+      if (!pays.length) notes.push('No payment on this invoice');
+      if (pays.length > 1) notes.push(pays.length + ' payments on this invoice');
+      if (pays.length && Math.abs(paid - Number(r.amount || 0)) > 1) {
+        notes.push('QuickBooks has ' + paid.toFixed(2) + ', the sheet says ' +
+                   Number(r.amount || 0).toFixed(2));
+      }
+      const wrongBank = wantAcct
+        ? pays.filter(p => p.accountId && p.accountId !== String(wantAcct))
+        : [];
+      if (wrongBank.length) {
+        notes.push('In ' + [...new Set(wrongBank.map(p => p.accountName || p.accountId))].join(', ') +
+                   ', not the bank the sheet names');
+      }
+
+      return {
+        sheetRow: r.sheetRow,
+        invoice: r.invoice,
+        qbDoc: inv.doc,
+        qbId: inv.id,
+        sheetAmount: Number(r.amount || 0),
+        bank: r.bank || '',
+        wantAccountId: wantAcct,
+        paidTotal: Math.round(paid * 100) / 100,
+        balance: inv.balance,
+        payments: pays,
+        verdict: notes.length ? 'off' : 'ok',
+        notes
+      };
+    });
+
+    res.json({
+      checked: out.length,
+      ok: out.filter(x => x.verdict === 'ok').length,
+      off: out.filter(x => x.verdict !== 'ok').length,
+      rows: out
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// move one payment into the right bank
+app.post('/api/adv/fix-payment', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { paymentId, accountId } = req.body;
+  if (!paymentId || !accountId) {
+    return res.status(400).json({ error: 'paymentId and accountId required' });
+  }
+
+  try {
+    const token = await getAccessToken(realmId);
+    const q = await qbQuery(realmId, token, `SELECT * FROM Payment WHERE Id = '${paymentId}'`);
+    const pay = (q.Payment || [])[0];
+    if (!pay) return res.status(404).json({ error: 'That payment is not in QuickBooks any more' });
+
+    const r = await fetch(`${API}/v3/company/${realmId}/payment?minorversion=70`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        Id: pay.Id, SyncToken: pay.SyncToken, sparse: true,
+        DepositToAccountRef: { value: String(accountId) }
+      })
+    });
+
+    const text = await r.text();
+    if (!r.ok) {
+      let msg = text.slice(0, 300);
+      try {
+        const f = JSON.parse(text).Fault;
+        if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+      } catch (e) {}
+      return res.status(400).json({ error: msg });
+    }
+
+    res.json({ ok: true, id: pay.Id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// remove a payment that went in twice
+app.post('/api/adv/delete-payment', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { paymentId } = req.body;
+  if (!paymentId) return res.status(400).json({ error: 'paymentId required' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const q = await qbQuery(realmId, token, `SELECT * FROM Payment WHERE Id = '${paymentId}'`);
+    const pay = (q.Payment || [])[0];
+    if (!pay) return res.status(404).json({ error: 'That payment is not in QuickBooks any more' });
+
+    const r = await fetch(`${API}/v3/company/${realmId}/payment?operation=delete&minorversion=70`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ Id: pay.Id, SyncToken: pay.SyncToken })
+    });
+
+    const text = await r.text();
+    if (!r.ok) {
+      let msg = text.slice(0, 300);
+      try {
+        const f = JSON.parse(text).Fault;
+        if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+      } catch (e) {}
+      return res.status(400).json({ error: msg });
+    }
+
+    res.json({ ok: true, id: pay.Id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // post the advance payments in the background
 app.post('/api/adv/receive', async (req, res) => {
   const realmId = await requireCompany(req, res);
