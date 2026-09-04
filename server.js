@@ -3673,7 +3673,55 @@ app.post('/api/adv/recheck', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// The sheet says an advance was taken but QuickBooks has no payment for it.
+// This puts that one payment in, on its own, into the bank the sheet names.
+app.post('/api/adv/receive-one', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
 
+  const { qbId, amount, accountId, txnDate, methodId, memo } = req.body;
+  if (!qbId || !accountId) return res.status(400).json({ error: 'qbId and accountId required' });
+
+  const amt = Math.round(Number(amount || 0) * 100) / 100;
+  if (!(amt > 0)) return res.status(400).json({ error: 'Amount must be more than zero' });
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    const q = await qbQuery(realmId, token,
+      `SELECT Id, DocNumber, Balance, CustomerRef FROM Invoice WHERE Id = '${qbId}'`);
+    const inv = (q.Invoice || [])[0];
+    if (!inv) return res.status(404).json({ error: 'That invoice is not in QuickBooks any more' });
+
+    const owed = Number(inv.Balance || 0);
+    if (owed <= 0.005) {
+      return res.status(400).json({ error: 'That invoice is already settled' });
+    }
+
+    // never hand QuickBooks more than the invoice still owes
+    const pay = Math.min(amt, Math.round(owed * 100) / 100);
+
+    const payload = {
+      CustomerRef: inv.CustomerRef,
+      TotalAmt: pay,
+      DepositToAccountRef: { value: String(accountId) },
+      PrivateNote: memo || 'Advance payment',
+      Line: [{
+        Amount: pay,
+        LinkedTxn: [{ TxnId: String(inv.Id), TxnType: 'Invoice' }]
+      }]
+    };
+    if (txnDate) payload.TxnDate = txnDate;
+    if (methodId) payload.PaymentMethodRef = { value: String(methodId) };
+
+    const r = await postPayment(realmId, token, payload);
+    if (!r.ok) return res.status(400).json({ error: r.msg });
+
+    res.json({ ok: true, id: r.id, amount: pay, doc: inv.DocNumber || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 // move one payment into the right bank
 app.post('/api/adv/fix-payment', async (req, res) => {
   const realmId = await requireCompany(req, res);
