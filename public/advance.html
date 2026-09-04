@@ -274,6 +274,7 @@
     open: { ready:true, overpaid:true, settled:false, notInQb:false, alreadyPosted:false },
     takeOver: false,
     recheck: null,
+    recheckSrc: null,
     logLines: []
   };
 
@@ -822,12 +823,34 @@
         $('rechkNote').textContent =
           nf(res.ok) + ' look right, ' + nf(res.off) + ' need a look';
         S.recheck = res.rows;
+        S.recheckSrc = rows;          // so one row can be read again on its own
         drawRecheckRows();
       }).catch(function(e){
         b.disabled = false;
         b.textContent = 'Check these against QuickBooks';
         say('bad', '<b>' + esc(e.message) + '</b>');
       });
+    });
+  }
+
+  // After a change only that one invoice is worth reading again; asking about
+  // all of them would send the whole table back to QuickBooks for nothing.
+  function refreshOne(i, done){
+    var src = (S.recheckSrc || [])[i];
+    if(!src){ if(done) done(); return; }
+
+    post('/api/adv/recheck', { rows: [src] }).then(function(res){
+      if(res.rows && res.rows.length) S.recheck[i] = res.rows[0];
+      var ok = 0, off = 0;
+      (S.recheck || []).forEach(function(r){
+        if(r.verdict === 'ok') ok++; else off++;
+      });
+      $('rechkNote').textContent = nf(ok) + ' look right, ' + nf(off) + ' need a look';
+      drawRecheckRows();
+      if(done) done();
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+      if(done) done();
     });
   }
 
@@ -867,11 +890,21 @@
                 : '') +
               (isDup
                 ? '<div class="act">' +
-                  '<button class="del" data-del="' + esc(p.id) + '">Delete this copy</button>' +
+                  '<button class="del" data-del="' + esc(p.id) + '" data-row="' + i + '">' +
+                  'Delete this copy</button>' +
                   '</div>'
                 : '');
           }).join('')
-        : '<span class="none">no advance payment found</span>';
+        : '<span class="none">no advance payment found</span>' +
+          (r.qbId && r.wantAccountId
+            ? '<div class="act">' +
+              '<button class="solid" data-recv="' + i + '">Receive ' +
+              money(r.sheetAmount) + ' now</button>' +
+              '</div>'
+            : (r.qbId
+                ? '<div class="sub">map ' + esc(r.bank || 'this bank') +
+                  ' to a QuickBooks account first</div>'
+                : ''));
 
       return '<tr>' +
         '<td><b>' + esc(r.invoice) + '</b>' +
@@ -912,10 +945,39 @@
           accountId: sel.value
         }).then(function(){
           b.textContent = 'Moved';
-          setTimeout(function(){ $('btnRecheck').click(); }, 800);
+          refreshOne(Number(b.getAttribute('data-fix').split('_')[0]));
         }).catch(function(e){
           b.disabled = false;
           b.textContent = 'Move here';
+          say('bad', '<b>' + esc(e.message) + '</b>');
+        });
+      });
+    });
+
+    $('rechkOut').querySelectorAll('button[data-recv]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var i = Number(b.getAttribute('data-recv'));
+        var r = S.recheck[i];
+        var src = (S.recheckSrc || [])[i] || {};
+        if(!confirm('Receive ' + money(r.sheetAmount) + ' against ' + r.invoice +
+                    ' into ' + (r.bank || 'the mapped bank') + ', dated ' +
+                    (src.date || 'today') + '?')) return;
+
+        b.disabled = true;
+        b.textContent = 'Receiving...';
+        post('/api/adv/receive-one', {
+          qbId: r.qbId,
+          amount: r.sheetAmount,
+          accountId: r.wantAccountId,
+          txnDate: src.date || null,
+          methodId: $('method') ? ($('method').value || null) : null,
+          memo: 'Advance payment dated: ' + (src.date || '')
+        }).then(function(){
+          b.textContent = 'Received';
+          refreshOne(i);
+        }).catch(function(e){
+          b.disabled = false;
+          b.textContent = 'Receive ' + money(r.sheetAmount) + ' now';
           say('bad', '<b>' + esc(e.message) + '</b>');
         });
       });
@@ -929,7 +991,7 @@
         post('/api/adv/delete-payment', { paymentId: b.getAttribute('data-del') })
           .then(function(){
             b.textContent = 'Deleted';
-            setTimeout(function(){ $('btnRecheck').click(); }, 800);
+            refreshOne(Number(b.getAttribute('data-row')));
           }).catch(function(e){
             b.disabled = false;
             b.textContent = 'Delete this copy';
