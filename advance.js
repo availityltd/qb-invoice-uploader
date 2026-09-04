@@ -164,9 +164,9 @@ export async function findForAdvance(realmId, token, numbers) {
           total,
           balance: bal,
           customerId: inv.CustomerRef ? inv.CustomerRef.value : null,
-          customerName: inv.CustomerRef ? (inv.CustomerRef.name || '') : ''
-                    paymentIds: (inv.LinkedTxn || [])
-            .filter(t => t.TxnType === 'Payment').map(t => String(t.TxnId)),
+                   customerName: inv.CustomerRef ? (inv.CustomerRef.name || '') : '',
+          paymentIds: (inv.LinkedTxn || [])
+            .filter(t => t.TxnType === 'Payment').map(t => String(t.TxnId))
         });
       }
     });
