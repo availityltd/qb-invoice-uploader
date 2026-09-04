@@ -3,7 +3,6 @@ import { clean, num, digitsOf, toISO } from './cpr.js';
 import { qbQuery } from './qb.js';
 
 /* ==================== reading the sheet ==================== */
-
 // The advance sheet runs day by day: a full-width band carrying the date,
 // then that day's rows beneath it, until the next band comes along.
 
