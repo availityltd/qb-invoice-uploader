@@ -13,7 +13,8 @@ const HINTS = {
   payable: ['payable amount', 'payable', 'total amount', 'order amount'],
   name:    ['account holder name', 'account holder', 'customer name', 'name'],
   note:    ['comments', 'comment', 'remarks', 'note'],
-  bank:    ['bank', 'bank name', 'account', 'paid into', 'received in']
+  bank:    ['bank', 'bank name', 'account', 'paid into', 'received in'],
+  posted:  ['accounts department', 'accounts dept', 'posted', 'posted by', 'entered by']
 };
 
 function headerIndex(header, list) {
@@ -57,7 +58,8 @@ export function detectColumns(header, saved) {
     payable: pick('payable'),
     name:    pick('name'),
     note:    pick('note'),
-    bank:    pick('bank')
+    bank:    pick('bank'),
+    posted:  pick('posted')
   };
 }
 
@@ -107,7 +109,8 @@ export async function loadAdvance(sheetId, tab, excel, saved) {
       payable: cols.payable >= 0 ? num(raw[cols.payable]) : 0,
       name: cols.name >= 0 ? clean(raw[cols.name]) : '',
       note: cols.note >= 0 ? clean(raw[cols.note]) : '',
-      bank: cols.bank >= 0 ? clean(raw[cols.bank]) : ''
+      bank: cols.bank >= 0 ? clean(raw[cols.bank]) : '',
+      posted: cols.posted >= 0 ? clean(raw[cols.posted]) : ''
     });
 
     if (day) {
