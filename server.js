@@ -1373,7 +1373,7 @@ app.get('/api/cpr/sheet-status', async (req, res) => {
 
       const notes = [];
       const gap = Math.round((hit.amount - sheetAmount) * 100) / 100;
-      if (Math.abs(gap) > 10) {
+      if (Math.abs(gap) > 100) {
         notes.push({
           kind: 'amount',
           text: `QuickBooks has ${hit.amount.toFixed(2)}, the sheet says ${sheetAmount.toFixed(2)}`
