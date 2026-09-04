@@ -3599,26 +3599,52 @@ app.post('/api/adv/recheck', async (req, res) => {
       const inv = found.get(cprDigits(r.invoice));
       if (!inv) {
         return { sheetRow: r.sheetRow, invoice: r.invoice, sheetAmount: r.amount,
-                 bank: r.bank || '', verdict: 'notInQb', payments: [] };
+                 bank: r.bank || '', verdict: 'notInQb', payments: [], advance: [] };
       }
 
       const pays = byInvoice.get(String(inv.id)) || [];
+      const want = Math.round(Number(r.amount || 0) * 100) / 100;
       const wantAcct = bankMap[String(r.bank || '').trim()] || null;
-      const paid = pays.reduce((x, p) => x + p.amount, 0);
+      const near = (a, b) => Math.abs(a - b) < 1;
+
+      // The CPR settlement lands on the same invoice, so not every payment here
+      // is an advance. The advance is the one - or the few together - that come
+      // to what the sheet says.
+      let advance = pays.filter(p => near(p.amount, want));
+
+      if (!advance.length && want > 0) {
+        // an advance paid in two goes, written up as one figure in the sheet
+        const small = pays.filter(p => p.amount < want + 1)
+                          .sort((a, b) => a.amount - b.amount);
+        const take = [];
+        let sum = 0;
+        for (const p of small) {
+          if (sum + p.amount > want + 1) continue;
+          take.push(p);
+          sum += p.amount;
+          if (near(sum, want)) break;
+        }
+        if (near(sum, want) && take.length) advance = take;
+      }
 
       const notes = [];
-      if (!pays.length) notes.push('No payment on this invoice');
-      if (pays.length > 1) notes.push(pays.length + ' payments on this invoice');
-      if (pays.length && Math.abs(paid - Number(r.amount || 0)) > 1) {
-        notes.push('QuickBooks has ' + paid.toFixed(2) + ', the sheet says ' +
-                   Number(r.amount || 0).toFixed(2));
+      let dup = [];
+
+      if (!advance.length) {
+        notes.push('No advance payment of ' + want.toFixed(2) + ' on this invoice');
+      } else if (advance.length > 1 && advance.every(p => near(p.amount, want))) {
+        // the same figure more than once is the sheet's advance paid twice
+        dup = advance.slice(1);
+        notes.push('Received ' + advance.length + ' times \u2014 ' +
+                   (advance.length - 1) + ' to remove');
       }
-      const wrongBank = wantAcct
-        ? pays.filter(p => p.accountId && p.accountId !== String(wantAcct))
-        : [];
-      if (wrongBank.length) {
-        notes.push('In ' + [...new Set(wrongBank.map(p => p.accountName || p.accountId))].join(', ') +
-                   ', not the bank the sheet names');
+
+      if (advance.length && wantAcct) {
+        const wrong = advance.filter(p => p.accountId && p.accountId !== String(wantAcct));
+        if (wrong.length) {
+          notes.push('In ' + [...new Set(wrong.map(p => p.accountName || p.accountId))].join(', ') +
+                     ', not ' + (r.bank || 'the bank the sheet names'));
+        }
       }
 
       return {
@@ -3626,17 +3652,17 @@ app.post('/api/adv/recheck', async (req, res) => {
         invoice: r.invoice,
         qbDoc: inv.doc,
         qbId: inv.id,
-        sheetAmount: Number(r.amount || 0),
+        sheetAmount: want,
         bank: r.bank || '',
         wantAccountId: wantAcct,
-        paidTotal: Math.round(paid * 100) / 100,
         balance: inv.balance,
-        payments: pays,
+        advance,                                    // the advance payments only
+        dup: dup.map(p => p.id),                    // the extra copies, if any
+        others: pays.filter(p => !advance.includes(p)).length,
         verdict: notes.length ? 'off' : 'ok',
         notes
       };
     });
-
     res.json({
       checked: out.length,
       ok: out.filter(x => x.verdict === 'ok').length,
