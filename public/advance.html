@@ -82,7 +82,21 @@
   .rechk table{width:100%;border-collapse:collapse;font-size:12.5px}
   .rechk th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
     color:var(--faint);font-weight:600;padding:7px 10px;border-bottom:1px solid var(--line)}
-  .rechk td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .rechk td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;
+    line-height:1.5}
+  .rechk .sub{font-size:11px;color:var(--muted);margin-top:3px}
+  .rechk .pay{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;
+    padding:4px 0;font-size:12.5px}
+  .rechk .pay.dup{color:var(--neg)}
+  .rechk .pay .mono{font-family:var(--mono);min-width:82px;text-align:right}
+  .rechk .pay .when{font-size:11px;color:var(--muted)}
+  .rechk .pay .muted{color:var(--muted)}
+  .rechk .pay .off{color:var(--warn);font-weight:600}
+  .rechk .tagdup{font-size:10.5px;background:#FDF3F3;color:var(--neg);
+    border-radius:4px;padding:1px 6px}
+  .rechk .act{display:flex;gap:6px;align-items:center;margin:2px 0 8px}
+  .rechk .act select{font-size:12px;padding:3px 6px;margin:0;max-width:190px}
+  .rechk .none{font-size:12.5px;color:var(--warn)}
   .rechk td.num{text-align:right;font-family:var(--mono)}
   .rechk .why{font-size:11px;color:var(--warn);line-height:1.5}
   .rechk .good{color:var(--ok);font-weight:600}
@@ -814,6 +828,9 @@
     });
   }
 
+  // One invoice can carry both the advance and, later, the CPR settlement.
+  // Only the payments that come to what the sheet says are the advance; the
+  // rest belong to the courier run and are none of this page's business.
   function drawRecheckRows(){
     var rows = S.recheck || [];
     if(!rows.length) return;
@@ -823,42 +840,62 @@
     }).join('');
 
     var body = rows.map(function(r, i){
-      var pays = (r.payments || []).map(function(p, k){
-        var wrong = r.wantAccountId && p.accountId &&
-                    String(p.accountId) !== String(r.wantAccountId);
-        return '<div style="margin-bottom:6px">' +
-          '<span class="mono">' + money(p.amount) + '</span> on ' + esc(p.date) +
-          ' \u2014 <span style="color:' + (wrong ? 'var(--warn)' : 'var(--muted)') + '">' +
-          esc(p.accountName || p.accountId || 'no account') + '</span>' +
-          (p.shared ? ' <span style="color:var(--muted)">(covers other invoices too)</span>' : '') +
-          '<br>' +
-          (wrong
-            ? '<select id="rf_' + i + '_' + k + '" style="font-size:12px;padding:3px 6px;margin:4px 0">' +
-              opts + '</select> ' +
-              '<button data-fix="' + i + '_' + k + '" data-pid="' + esc(p.id) + '">Move to this bank</button> '
-            : '') +
-          (r.payments.length > 1 && !p.shared
-            ? '<button class="del" data-del="' + esc(p.id) + '">Delete this payment</button>'
-            : '') +
-          '</div>';
-      }).join('') || '<span style="color:var(--warn)">nothing</span>';
+      var adv = r.advance || [];
+      var dup = r.dup || [];
+
+      var found = adv.length
+        ? adv.map(function(p, k){
+            var wrong = r.wantAccountId && p.accountId &&
+                        String(p.accountId) !== String(r.wantAccountId);
+            var isDup = dup.indexOf(p.id) >= 0;
+
+            return '<div class="pay' + (isDup ? ' dup' : '') + '">' +
+              '<span class="mono">' + money(p.amount) + '</span>' +
+              '<span class="when">' + esc(p.date) + '</span>' +
+              '<span class="' + (wrong ? 'off' : 'muted') + '">' +
+                esc(p.accountName || p.accountId || 'no account') + '</span>' +
+              (isDup ? '<span class="tagdup">extra copy</span>' : '') +
+              '</div>' +
+              (wrong && !isDup
+                ? '<div class="act">' +
+                  '<select id="rf_' + i + '_' + k + '">' + opts + '</select>' +
+                  '<button data-fix="' + i + '_' + k + '" data-pid="' + esc(p.id) + '">' +
+                  'Move here</button></div>'
+                : '') +
+              (isDup
+                ? '<div class="act">' +
+                  '<button class="del" data-del="' + esc(p.id) + '">Delete this copy</button>' +
+                  '</div>'
+                : '');
+          }).join('')
+        : '<span class="none">no advance payment found</span>';
 
       return '<tr>' +
-        '<td>' + esc(r.invoice) +
-          '<div style="font-size:11px;color:var(--muted)">sheet row ' + r.sheetRow + '</div></td>' +
-        '<td class="num">' + money(r.sheetAmount) + '</td>' +
-        '<td style="color:var(--muted)">' + esc(r.bank || '\u2014') + '</td>' +
-        '<td>' + pays + '</td>' +
+        '<td><b>' + esc(r.invoice) + '</b>' +
+          '<div class="sub">sheet row ' + r.sheetRow + '</div></td>' +
+        '<td class="num">' + money(r.sheetAmount) +
+          '<div class="sub">' + esc(r.bank || '\u2014') + '</div></td>' +
+        '<td>' + found +
+          (r.others
+            ? '<div class="sub">' + nf(r.others) + ' other payment' +
+              (r.others === 1 ? '' : 's') + ' on this invoice, left alone</div>'
+            : '') +
+          '</td>' +
         '<td>' + (r.verdict === 'ok'
           ? '<span class="good">looks right</span>'
-          : '<span class="why">' + (r.notes || []).map(esc).join('<br>') + '</span>') + '</td>' +
+          : '<span class="why">' + (r.notes || []).map(esc).join('<br>') + '</span>') +
+        '</td>' +
         '</tr>';
     }).join('');
 
     $('rechkOut').innerHTML =
-      '<table style="margin-top:12px">' +
-        '<thead><tr><th>Invoice</th><th class="num">Sheet says</th><th>Bank in sheet</th>' +
-          '<th>In QuickBooks</th><th>Verdict</th></tr></thead>' +
+      '<table style="margin-top:14px">' +
+        '<thead><tr>' +
+          '<th style="width:22%">Invoice</th>' +
+          '<th class="num" style="width:16%">Sheet says</th>' +
+          '<th style="width:38%">The advance in QuickBooks</th>' +
+          '<th style="width:24%">Verdict</th>' +
+        '</tr></thead>' +
         '<tbody>' + body + '</tbody></table>';
 
     $('rechkOut').querySelectorAll('button[data-fix]').forEach(function(b){
@@ -875,7 +912,7 @@
           setTimeout(function(){ $('btnRecheck').click(); }, 800);
         }).catch(function(e){
           b.disabled = false;
-          b.textContent = 'Move to this bank';
+          b.textContent = 'Move here';
           say('bad', '<b>' + esc(e.message) + '</b>');
         });
       });
@@ -892,7 +929,7 @@
             setTimeout(function(){ $('btnRecheck').click(); }, 800);
           }).catch(function(e){
             b.disabled = false;
-            b.textContent = 'Delete this payment';
+            b.textContent = 'Delete this copy';
             say('bad', '<b>' + esc(e.message) + '</b>');
           });
       });
