@@ -1,7 +1,7 @@
 import { getAccessToken } from './qb.js';
 import { postPayment } from './cpr.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
-import { writeCell } from './sheets.js';
+import { stampRows } from './sheets.js';
 
 // one advance run per company, kept on the server so leaving the page is safe
 const jobs = new Map();
@@ -205,16 +205,13 @@ async function run(realmId, job) {
   // what the invoice balance cannot tell us - an advance always leaves some
   // owing, so the sheet has to remember instead.
   if (sheetId && tab && postedCol >= 0 && job.toStamp.length) {
-    push(job, 'log', `Writing "${stamp}" against ${job.toStamp.length} rows in the sheet...`);
-    for (const rowNo of job.toStamp) {
-      try {
-        await writeCell(sheetId, tab, Number(rowNo), Number(postedCol), stamp);
-        job.stamped++;
-      } catch (e) {
-        push(job, 'fail', `Could not mark sheet row ${rowNo}: ${e.message}`);
-      }
+     push(job, 'log', `Writing "${stamp}" against ${job.toStamp.length} rows in the sheet...`);
+    try {
+      job.stamped = await stampRows(sheetId, tab, Number(postedCol), job.toStamp, stamp);
+      push(job, 'ok', `Marked ${job.stamped} rows in the sheet.`);
+    } catch (e) {
+      push(job, 'fail', `Could not mark the sheet: ${e.message}`);
     }
-    push(job, 'ok', `Marked ${job.stamped} rows in the sheet.`);
   }
 
   if (job.stop) {
