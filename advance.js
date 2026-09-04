@@ -146,7 +146,7 @@ export async function findForAdvance(realmId, token, numbers) {
     if (!variants.length) continue;
 
     const q = await qbQuery(realmId, token,
-      `      `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn ` + ` +
+      `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn ` +
       `FROM Invoice WHERE DocNumber IN (${variants.join(',')}) MAXRESULTS 1000`);
 
     (q.Invoice || []).forEach(inv => {
