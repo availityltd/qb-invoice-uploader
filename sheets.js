@@ -508,3 +508,24 @@ export async function writeCell(sheetId, tabTitle, row, colIndex, value) {
   });
   return true;
 }
+// Google allows only sixty writes a minute, so marking a few hundred rows one
+// at a time fails after the first sixty. They all go across together instead.
+export async function stampRows(sheetId, tabTitle, colIndex, rows, value) {
+  if (!rows || !rows.length) return 0;
+  const sheets = google.sheets({ version: 'v4', auth: auth() });
+  const L = colLetter(colIndex);
+
+  const data = rows.map(r => ({
+    range: `'${tabTitle}'!${L}${r}`,
+    values: [[value]]
+  }));
+
+  const size = 500;
+  for (let i = 0; i < data.length; i += size) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: { valueInputOption: 'RAW', data: data.slice(i, i + size) }
+    });
+  }
+  return rows.length;
+}
