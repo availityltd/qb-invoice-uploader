@@ -953,7 +953,39 @@
         });
       });
     });
+    // received properly, but the sheet never got its mark - most often because
+    // Google cut the writing short partway through a big run
+    var unmarked = rows.filter(function(r, i){
+      return r.verdict === 'ok' &&
+             !(S.recheckSrc && S.recheckSrc[i] && S.recheckSrc[i].posted);
+    }).map(function(r){ return r.sheetRow; });
 
+    if(unmarked.length){
+      $('rechkOut').insertAdjacentHTML('afterbegin',
+        '<div class="act" style="margin:4px 0 10px">' +
+        '<button class="solid" id="markAll">Mark all ' + nf(unmarked.length) +
+        ' as posted</button></div>');
+
+      $('markAll').addEventListener('click', function(){
+        var b = $('markAll');
+        b.disabled = true;
+        b.textContent = 'Marking...';
+        post('/api/adv/mark-posted', {
+          sheetId: S.book.id,
+          tab: S.tab,
+          postedCol: (S.cols && S.cols.posted !== undefined) ? S.cols.posted : -1,
+          rows: unmarked,
+          stamp: 'Posted by Rani'
+        }).then(function(res){
+          b.textContent = 'Marked ' + nf(res.marked);
+          setTimeout(function(){ runMatch(); }, 900);
+        }).catch(function(e){
+          b.disabled = false;
+          b.textContent = 'Mark all as posted';
+          say('bad', '<b>' + esc(e.message) + '</b>');
+        });
+      });
+    }
     $('rechkOut').querySelectorAll('button[data-recv]').forEach(function(b){
       b.addEventListener('click', function(){
         var i = Number(b.getAttribute('data-recv'));
