@@ -1703,18 +1703,22 @@ app.get('/api/cpr/trace', async (req, res) => {
     if (noRef.length) {
       notes.push({
         kind: 'noref',
-                text: `${noRef.length} payment${noRef.length === 1 ? '' : 's'} on these invoices ` +
+                       text: `${noRef.length} payment${noRef.length === 1 ? '' : 's'} on these invoices ` +
               `carry no CPR number \u2014 ` +
               noRef.map(p => Number(p.amount || 0).toFixed(2) +
-                             (p.date ? ' on ' + p.date : '')).join(', ')
+                             (p.date ? ' on ' + p.date : '') +
+                             (p.accountName || p.accountId
+                               ? ' in ' + (p.accountName || p.accountId) : '')).join(', ')
       });
     }
     if (wrongRef.length) {
       const refs = [...new Set(wrongRef.map(p => p.ref))];
       notes.push({
         kind: 'wrongref',
-                text: `Received under ${refs.join(', ')} instead of ${sheetCpr} \u2014 ` +
-              wrongRef.map(p => Number(p.amount || 0).toFixed(2)).join(', ')
+                       text: `Received under ${refs.join(', ')} instead of ${sheetCpr} \u2014 ` +
+              wrongRef.map(p => Number(p.amount || 0).toFixed(2) +
+                                (p.accountName || p.accountId
+                                  ? ' in ' + (p.accountName || p.accountId) : '')).join(', ')
       });
     }
 
