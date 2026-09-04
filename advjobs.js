@@ -1,6 +1,7 @@
 import { getAccessToken } from './qb.js';
 import { postPayment } from './cpr.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
+import { writeCell } from './sheets.js';
 
 // one advance run per company, kept on the server so leaving the page is safe
 const jobs = new Map();
@@ -49,6 +50,8 @@ export function startAdvJob(realmId, body) {
     totalAmount: 0,
     results: [],
     paid: [],
+    toStamp: [],
+    stamped: 0,
     events: [],
     lastId: 0,
     token: null,
@@ -70,7 +73,8 @@ export function startAdvJob(realmId, body) {
 async function run(realmId, job) {
   const {
     rows, methodId,
-    txnDate, label, courier
+    txnDate, label, courier,
+    sheetId, tab, postedCol, stamp
   } = job.body;
 
   push(job, 'log', 'Connecting to QuickBooks...');
@@ -121,6 +125,7 @@ async function run(realmId, job) {
       job.doneCount += lines.length;
 
       lines.forEach(m => {
+        if (m.sheetRow) job.toStamp.push(m.sheetRow);
         job.paid.push({
           invoice: m.invoice,
           qbDoc: m.qbDoc,
@@ -196,6 +201,22 @@ async function run(realmId, job) {
     });
   } catch (e) {}
 
+  // Mark the rows in the sheet, so a second run leaves them alone. This is
+  // what the invoice balance cannot tell us - an advance always leaves some
+  // owing, so the sheet has to remember instead.
+  if (sheetId && tab && postedCol >= 0 && job.toStamp.length) {
+    push(job, 'log', `Writing "${stamp}" against ${job.toStamp.length} rows in the sheet...`);
+    for (const rowNo of job.toStamp) {
+      try {
+        await writeCell(sheetId, tab, Number(rowNo), Number(postedCol), stamp);
+        job.stamped++;
+      } catch (e) {
+        push(job, 'fail', `Could not mark sheet row ${rowNo}: ${e.message}`);
+      }
+    }
+    push(job, 'ok', `Marked ${job.stamped} rows in the sheet.`);
+  }
+
   if (job.stop) {
     push(job, 'log', 'Stopped.');
     job.state = 'stopped';
@@ -240,6 +261,7 @@ export function advSnapshot(realmId, since, full) {
   };
 
   if (full || job.state !== 'running') {
+    out.stamped = job.stamped;
     out.results = job.results;
     out.paid = job.paid;
   }
