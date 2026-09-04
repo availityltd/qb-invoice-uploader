@@ -24,8 +24,8 @@ import {
   findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits,
         paymentsByCpr, paymentsByIds, copyInvoice
 } from './cpr.js';
-import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages,    
-        readCell, writeCell } from './sheets.js';
+import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages,
+         readCell, writeCell, stampRows } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import {
   startJob, stopJob, pauseJob, resumeJob, clearJob,
@@ -3718,6 +3718,29 @@ app.post('/api/adv/receive-one', async (req, res) => {
     if (!r.ok) return res.status(400).json({ error: r.msg });
 
     res.json({ ok: true, id: r.id, amount: pay, doc: inv.DocNumber || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// Write the stamp against rows that were received properly but never marked,
+// so the next run leaves them where they are.
+app.post('/api/adv/mark-posted', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, postedCol, rows, stamp } = req.body;
+  if (!sheetId || !tab || postedCol === undefined || postedCol < 0) {
+    return res.status(400).json({ error: 'The sheet and its posted column are needed' });
+  }
+  if (!Array.isArray(rows) || !rows.length) {
+    return res.status(400).json({ error: 'No rows to mark' });
+  }
+
+  try {
+    const n = await stampRows(sheetId, tab, Number(postedCol),
+                              rows.map(Number).filter(Boolean),
+                              stamp || 'Posted by Rani');
+    res.json({ ok: true, marked: n });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
