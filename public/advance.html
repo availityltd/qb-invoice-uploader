@@ -864,8 +864,10 @@
     var opts = (S.accounts || []).map(function(a){
       return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>';
     }).join('');
-
+    // only what is wrong is worth looking at - the rest just make the table long
+    var okCount = rows.filter(function(r){ return r.verdict === 'ok'; }).length;
     var body = rows.map(function(r, i){
+            if(r.verdict === 'ok') return '';
       var adv = r.advance || [];
       var dup = r.dup || [];
 
@@ -932,7 +934,11 @@
           '<th style="width:38%">The advance in QuickBooks</th>' +
           '<th style="width:24%">Verdict</th>' +
         '</tr></thead>' +
-        '<tbody>' + body + '</tbody></table>';
+                '<tbody>' + body + '</tbody></table>' +
+        (okCount
+          ? '<div class="sub" style="margin-top:10px">' + nf(okCount) + ' row' +
+            (okCount === 1 ? '' : 's') + ' look right and are not shown.</div>'
+          : '');
 
     $('rechkOut').querySelectorAll('button[data-fix]').forEach(function(b){
       b.addEventListener('click', function(){
