@@ -983,32 +983,43 @@
 
     /* --- what could not be received, with everything about it --- */
 
-    // Where a shortfall actually comes from: parcels this receipt collected on
-    // whose invoices were settled by some other payment. They are paid, so
-    // there is nothing to receive - but they are not this receipt's money, and
-    // that is the difference between what it collected and what went in.
-    if((m.paidElsewhere || []).length){
-      html += '<div class="box"><h3>Paid, but not under this receipt' +
-        '<span class="aside">' + n0(m.paidElsewhere.length) + ' parcels · ' +
-        full(t.paidElsewhere) + '</span>' +
-        '<button class="dl2" id="rDlElse">Download</button></h3>' +
-        '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
-        'These invoices are settled, so nothing more can be received against ' +
-        'them. They are the difference between the ' + full(t.courier) +
-        ' this receipt collected and the ' + full(t.paidHere) +
-        ' that went in under its number.</p>' +
-        detailTable(m.paidElsewhere) + '</div>';
-    }
+    // Everything wrong with this receipt in one place. Three different
+    // troubles - no invoice, paid by something else, an amount that does not
+    // agree - but one person has to chase all of them, so one list.
+    var probs = m.problems || [];
 
-    if(m.missing.length){
-      html += '<div class="box"><h3>Not in QuickBooks' +
-        '<span class="aside">' + n0(m.missing.length) + ' parcels · ' +
-        full(t.missing) + '</span>' +
-        '<button class="dl2" id="rDl">Download</button></h3>' +
+    if(probs.length){
+      var kinds = {};
+      probs.forEach(function(o){
+        if(!kinds[o.kind]) kinds[o.kind] = { n:0, amount:0 };
+        kinds[o.kind].n++;
+        kinds[o.kind].amount += o.received;
+      });
+
+      var WHAT = {
+        'no invoice':     'No invoice in QuickBooks. Make it, then open this receipt again.',
+        'paid elsewhere': 'Settled by another payment, so nothing more can go in against it.',
+        'amount differs': 'It will still be received, at what QuickBooks says is owed.'
+      };
+
+      html += '<div class="box"><h3>Invoices with something wrong' +
+        '<span class="aside">' + n0(probs.length) + ' parcels · ' +
+        full(probs.reduce(function(a,o){ return a + o.received; }, 0)) + '</span>' +
+        '<button class="dl2" id="rDlProb">Download these with their full detail</button></h3>' +
+        '<div class="tally2" style="margin-bottom:12px">' +
+          Object.keys(kinds).map(function(k){
+            return '<div><div class="n">' + n0(kinds[k].n) + '</div>' +
+                   '<div class="l">' + esc(k) + '</div>' +
+                   '<div class="l" style="text-transform:none;letter-spacing:0;color:var(--muted)">' +
+                   full(kinds[k].amount) + '</div></div>';
+          }).join('') +
+        '</div>' +
         '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
-        'No invoice was found for these. Make them in QuickBooks, then open ' +
-        'this receipt again and the rest will go in.</p>' +
-        detailTable(m.missing) + '</div>';
+          Object.keys(kinds).map(function(k){
+            return '<b>' + esc(k) + '</b> — ' + esc(WHAT[k] || '');
+          }).join('<br>') +
+        '</p>' +
+        detailTable(probs) + '</div>';
     }
 
     $('dBody').innerHTML = html;
@@ -1051,14 +1062,9 @@
       });
     }
 
-    var dl = $('rDl');
-    if(dl) dl.addEventListener('click', function(){
-      csvOf(match.missing, match.cpr + ' not in QuickBooks.csv');
-    });
-
-    var dlElse = $('rDlElse');
-    if(dlElse) dlElse.addEventListener('click', function(){
-      csvOf(match.paidElsewhere, match.cpr + ' paid elsewhere.csv');
+    var dlp = $('rDlProb');
+    if(dlp) dlp.addEventListener('click', function(){
+      csvOf(match.problems, match.cpr + ' problems.csv');
     });
   }
 
@@ -1082,6 +1088,7 @@
     ['NET_AMOUNT',       function(o){ return full(o.net); }, 'r'],
     ['Customer',         function(o){ return o.customer || ''; }, ''],
     ['Phone',            function(o){ return o.phone || ''; }, 'mono'],
+    ['Problem',          function(o){ return o.kind || ''; }, ''],
     ['Why',              function(o){ return o.why || ''; }, '']
   ];
 

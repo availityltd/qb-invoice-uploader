@@ -4563,7 +4563,7 @@ app.get('/api/receipts/match', async (req, res) => {
 
     const found = await findInvoices(realmId, token, paying.map(o => o.orderRef));
 
-    const matched = [], alreadyPaid = [], missing = [];
+    const matched = [], alreadyPaid = [], missing = [], mismatched = [];
 
     paying.forEach(o => {
       const inv = found.get(cprDigits(o.orderRef));
@@ -4588,6 +4588,21 @@ app.get('/api/receipts/match', async (req, res) => {
         tracking: o.tracking,
         city: o.city
       });
+
+      // It will still be received - the balance is what QuickBooks says is
+      // owed - but a gap between that and what the courier handed over is
+      // worth seeing before it is posted, not after.
+      const gap = Math.round((o.received - inv.balance) * 100) / 100;
+      if (Math.abs(gap) > 1) {
+        mismatched.push({
+          ...o,
+          qbDoc: inv.doc,
+          qbBalance: inv.balance,
+          why: `QuickBooks is owed ${inv.balance.toFixed(2)} but the courier ` +
+               `collected ${o.received.toFixed(2)} - ` +
+               (gap > 0 ? `${gap.toFixed(2)} more` : `${Math.abs(gap).toFixed(2)} less`)
+        });
+      }
     });
 
     const [accounts, methods] = await Promise.all([
@@ -4660,6 +4675,12 @@ app.get('/api/receipts/match', async (req, res) => {
       alreadyPaid,
       paidElsewhere,
       missing,
+      // everything with something wrong with it, in one list, each saying what
+      problems: [].concat(
+        missing.map(o => ({ ...o, kind: 'no invoice' })),
+        paidElsewhere.map(o => ({ ...o, kind: 'paid elsewhere' })),
+        mismatched.map(o => ({ ...o, kind: 'amount differs' }))
+      ),
       totals: {
         courier:  r2(paying.reduce((s, o) => s + o.received, 0)),
         toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
@@ -4668,6 +4689,7 @@ app.get('/api/receipts/match', async (req, res) => {
                                 .reduce((s, o) => s + o.received, 0)),
         paidElsewhere: r2(paidElsewhere.reduce((s, o) => s + o.received, 0)),
         missing: r2(missing.reduce((s, o) => s + o.received, 0)),
+        mismatched: r2(mismatched.reduce((s, o) => s + o.received, 0)),
         net: detail.summary ? detail.summary.netAmount : 0
       },
       banks: accounts,
