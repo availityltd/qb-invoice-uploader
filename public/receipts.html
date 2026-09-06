@@ -656,16 +656,18 @@
         '<td class="r">'+full(o.fee)+'</td>' +
         '<td class="r">'+full(o.upfrontCharges||0)+'</td>' +
         '<td class="r">'+full(o.tax)+'</td>' +
-        '<td class="r">'+full(o.deduction)+'</td>' +
+        '<td class="r">'+full(o.whIncomeTax)+'</td>' +
+        '<td class="r">'+full(o.whSalesTax)+'</td>' +
         '<td class="r">'+full(o.net)+'</td>' +
       '</tr>';
     }).join('');
 
     var sum = list.reduce(function(a,o){
       a.amount += o.amount; a.upfront += o.upfront; a.reserve += o.reserve;
-      a.fee += o.fee; a.tax += o.tax; a.deduction += o.deduction; a.net += o.net;
+      a.fee += o.fee; a.tax += o.tax; a.net += o.net;
+      a.whIncomeTax += o.whIncomeTax; a.whSalesTax += o.whSalesTax;
       return a;
-    }, {amount:0,upfront:0,reserve:0,fee:0,tax:0,deduction:0,net:0});
+    }, {amount:0,upfront:0,reserve:0,fee:0,tax:0,whIncomeTax:0,whSalesTax:0,net:0});
 
     $('otab').innerHTML =
       '<tr><th>ORDER_REF_NUMBER</th><th>TRACKING_NUMBER</th><th class="r">WEIGHT (Kg)</th>' +
@@ -673,8 +675,9 @@
       '<th class="r">COD_AMOUNT</th><th class="r">UPFRONT_AMOUNT</th>' +
       '<th class="r">RESERVE_AMOUNT</th><th>D/R Date</th>' +
       '<th class="r">SHIPPING_CHARGES</th><th class="r">UPFRONT_CHARGES</th>' +
-      '<th class="r">GST</th><th class="r">DEDUCTION (4%)</th><th class="r">NET_AMOUNT</th></tr>' +
-      (rows || '<tr><td colspan="16" class="empty">Nothing matches.</td></tr>') +
+      '<th class="r">GST</th><th class="r">WH Income Tax</th>' +
+      '<th class="r">WH Sale Tax</th><th class="r">NET_AMOUNT</th></tr>' +
+      (rows || '<tr><td colspan="17" class="empty">Nothing matches.</td></tr>') +
       (list.length ? '<tr style="font-weight:600;background:#FAFCFE">' +
         '<td colspan="7">'+n0(list.length)+' orders</td>' +
         '<td class="r">'+full(sum.amount)+'</td>' +
@@ -682,7 +685,8 @@
         '<td class="r">'+full(sum.reserve)+'</td><td></td>' +
         '<td class="r">'+full(sum.fee)+'</td><td class="r">0.00</td>' +
         '<td class="r">'+full(sum.tax)+'</td>' +
-        '<td class="r">'+full(sum.deduction)+'</td>' +
+        '<td class="r">'+full(sum.whIncomeTax)+'</td>' +
+        '<td class="r">'+full(sum.whSalesTax)+'</td>' +
         '<td class="r">'+full(sum.net)+'</td></tr>' : '');
 
     $('oCount').textContent = n0(list.length) + ' of ' + n0((detail.orders||[]).length);
@@ -834,7 +838,7 @@
     var head = ['ORDER_REF_NUMBER','TRACKING_NUMBER','WEIGHT (Kg)','ORDER_PICKUP_DATE',
                 'ORIGIN_CITY','DELIVERY_CITY','STATUS','COD_AMOUNT','UPFRONT_AMOUNT',
                 'RESERVE_AMOUNT','D/R Date','SHIPPING_CHARGES','UPFRONT_CHARGES',
-                'GST','DEDUCTION (4%)','NET_AMOUNT',
+                'GST','WH Income Tax','WH Sale Tax','NET_AMOUNT',
                 'Customer','Phone','Booked','Settled','Notes','Why not received'];
 
     var cell = function(v){
@@ -845,7 +849,7 @@
       return [o.orderRef,o.tracking,o.weight,o.pickedOn,
               o.originCity,o.city,o.status,o.amount,o.upfront,
               o.reserve,o.deliveredOn,o.fee,o.upfrontCharges||0,
-              o.tax,o.deduction,o.net,
+              o.tax,o.whIncomeTax,o.whSalesTax,o.net,
               o.customer,o.phone,o.bookedOn,o.settledOn,o.notes,o.why].map(cell).join(',');
     });
 

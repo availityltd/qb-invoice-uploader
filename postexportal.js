@@ -251,6 +251,13 @@ export function mapTransaction(row) {
   // left once the charges and the net are taken off what was collected.
   const deduction = reversed ? 0 : Math.round((received - fee - tax - net) * 100) / 100;
 
+  // The 4% is two withholdings of 2% that go to two different accounts in
+  // QuickBooks, so they are split here rather than at posting time. Income
+  // tax is worked out; sales tax takes whatever the rounding leaves, so the
+  // pair always adds back to the deduction that reconciles with the net.
+  const whIncomeTax = reversed ? 0 : Math.round(received * 2) / 100;
+  const whSalesTax  = reversed ? 0 : Math.round((deduction - whIncomeTax) * 100) / 100;
+
   return {
     orderRef:    String(t.orderRefNumber || '').trim(),   // "#91339099" - as QuickBooks has it
     tracking:    String(t.trackingNumber || '').trim(),
@@ -267,6 +274,8 @@ export function mapTransaction(row) {
     fee,
     tax,
     deduction,
+    whIncomeTax,
+    whSalesTax,
     net,
     weight:      n(t.actualWeight) || n(t.bookingWeight),
     items:       Number(t.items || 0),

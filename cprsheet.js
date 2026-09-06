@@ -1,7 +1,8 @@
-// A receipt as a workbook - one sheet, the same sixteen columns the courier's
-// own download has, in the same order and under the same names. Anything
-// extra would mean the two files could not simply be laid side by side, which
-// is the only reason this file exists.
+// A receipt as a workbook - one sheet, the courier's own columns in its own
+// order, so the two files can be laid side by side. The single exception is
+// the 4% deduction, which is split into the two 2% withholdings it is made of
+// because they post to two different accounts in QuickBooks. Add the pair and
+// you have the courier's figure back.
 
 import XLSX from 'xlsx';
 
@@ -11,7 +12,7 @@ export const COLUMNS = [
   'ORDER_REF_NUMBER', 'TRACKING_NUMBER', 'WEIGHT (Kg)', 'ORDER_PICKUP_DATE',
   'ORIGIN_CITY', 'DELIVERY_CITY', 'STATUS', 'COD_AMOUNT', 'UPFRONT_AMOUNT',
   'RESERVE_AMOUNT', 'D/R Date', 'SHIPPING_CHARGES', 'UPFRONT_CHARGES',
-  'GST', 'DEDUCTION (4%)', 'NET_AMOUNT'
+  'GST', 'WH Income Tax', 'WH Sale Tax', 'NET_AMOUNT'
 ];
 
 export function rowOf(o) {
@@ -19,7 +20,7 @@ export function rowOf(o) {
     o.orderRef, o.tracking, money(o.weight), o.pickedOn,
     o.originCity, o.city, o.status, money(o.amount), money(o.upfront),
     money(o.reserve), o.deliveredOn, money(o.fee), money(o.upfrontCharges || 0),
-    money(o.tax), money(o.deduction), money(o.net)
+    money(o.tax), money(o.whIncomeTax), money(o.whSalesTax), money(o.net)
   ];
 }
 
