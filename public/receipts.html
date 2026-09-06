@@ -239,6 +239,42 @@
     fromEl.value = iso(f); toEl.value = iso(t);
   }
 
+  // Two small marks per receipt, the way a ledger is ticked off. Green when
+  // the money that went into QuickBooks matches what the courier collected -
+  // a hundred rupees either way is rounding, not a problem - amber when it
+  // does not, and nothing at all when it has not been done yet.
+  var TOLERANCE = 100;
+
+  function badges(c){
+    var out = '';
+
+    if(c.dcJournalId){
+      out += '<span class="pill ok" title="Delivery charges journalled ' +
+             esc(c.dcPostedOn || '') + '">posted DC</span> ';
+    }
+
+    if(c.qbPaymentId){
+      var gap = (c.expected == null || c.received == null)
+        ? null
+        : Math.round((c.expected - c.received) * 100) / 100;
+
+      if(gap === null){
+        out += '<span class="pill ok" title="Received ' + esc(c.receivedOn || '') +
+               '">received payment</span>';
+      } else if(Math.abs(gap) <= TOLERANCE){
+        out += '<span class="pill ok" title="' + full(c.received) + ' received against ' +
+               full(c.expected) + ' collected">received payment</span>';
+      } else {
+        out += '<span class="pill wait" title="' + full(c.received) +
+               ' received but the courier collected ' + full(c.expected) +
+               ' - short by ' + full(Math.abs(gap)) + '">received · off by ' +
+               full(Math.abs(gap)) + '</span>';
+      }
+    }
+
+    return out || '<span class="pill grey">not done</span>';
+  }
+
   function statusPill(s){
     var k = String(s||'').toUpperCase();
     var cls = k === 'CLOSED' ? 'ok' : (k === 'APPROVED' ? 'done' :
@@ -466,9 +502,7 @@
                 '<td class="mono">'+esc(c.approvedOn||'')+'</td>' +
                 '<td class="r">'+statusPill(c.status)+'</td>' +
                 '<td class="r">'+full(c.netAmount)+'</td>' +
-                '<td>'+(c.qbPaymentId
-                    ? '<span class="pill done">Received '+esc(c.receivedOn||'')+'</span>'
-                    : '<span class="pill grey">Not yet</span>')+'</td></tr>';
+                '<td>'+badges(c)+'</td></tr>';
       });
     });
 
@@ -900,15 +934,36 @@
     });
   }
 
-  // the payment engine is the one payments.html uses, so its progress is read
-  // the same way - poll, append, stop when it says it is done
+  // The payment engine is the one payments.html uses, so its progress is read
+  // the same way. Its route wraps the snapshot in { job: ... } - reading the
+  // state off the envelope instead left this stuck on "Starting" while the
+  // run carried on behind it, which is the worst way to be wrong.
+  var payMisses = 0;
+
   function watchReceive(since){
     clearTimeout(payTimer);
 
     fetch('/api/cpr/receive-status?since='+since, { cache:'no-store' })
       .then(function(r){ return r.json(); })
-      .then(function(s){
-        if(!s || !s.state) return;
+      .then(function(d){
+        var s = d && d.job;
+
+        // no job yet, or it was cleared - give it a few tries before saying so
+        if(!s){
+          if(++payMisses > 6){
+            var l0 = $('rLog');
+            if(l0) l0.textContent += '\n\nLost track of the run. It may still be ' +
+              'going - open Receive payments to see it.';
+            $('dReceive').disabled = false;
+            $('rGo').disabled = false;
+            $('rGo').textContent = 'Try again';
+            return;
+          }
+          payTimer = setTimeout(function(){ watchReceive(since); }, 2000);
+          return;
+        }
+
+        payMisses = 0;
 
         var log = $('rLog');
         if(log && s.events){
@@ -919,31 +974,53 @@
         }
 
         var bar = $('rBarI');
-        if(bar && s.total) bar.style.width = (100 * s.doneCount / s.total).toFixed(1) + '%';
+        if(bar && s.total){
+          bar.style.width = (100 * s.doneCount / s.total).toFixed(1) + '%';
+        }
+        if($('rGo') && s.total){
+          $('rGo').textContent = 'Receiving… ' + n0(s.doneCount) + ' of ' + n0(s.total);
+        }
 
         if(s.state === 'running'){
-          payTimer = setTimeout(function(){ watchReceive(s.lastEventId || since); }, 2000);
+          payTimer = setTimeout(function(){
+            watchReceive(s.lastEventId || since);
+          }, 2000);
           return;
         }
 
-        // done - stamp the receipt so it is never taken twice
-        if(bar) bar.style.width = '100%';
-        if(log) log.textContent += '\n\nFinished. ' + n0(s.posted) + ' payments, ' +
-                                   full(s.amount) + '.';
+        /* ---------- it has finished ---------- */
 
+        if(bar) bar.style.width = '100%';
+        if(log){
+          log.textContent += '\n\nFinished. ' + n0(s.posted) + ' payments, ' +
+                             full(s.amount) + ' received.';
+          log.scrollTop = log.scrollHeight;
+        }
+
+        // what the courier said it collected, against what actually went in
         fetch('/api/receipts/mark', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ id: account.id, cpr: match.cpr, qbPaymentId: 'posted' })
-        }).catch(function(){});
+          body: JSON.stringify({
+            id: account.id,
+            cpr: match.cpr,
+            qbPaymentId: String(s.id || 'posted'),
+            expected: match.totals.courier,
+            received: s.amount
+          })
+        })
+        .then(function(){ load(); })
+        .catch(function(){ load(); });
 
         $('dReceive').disabled = false;
-        $('rGo').textContent = 'Received';
-        load();
+        $('rGo').disabled = false;
+        $('rGo').textContent = 'Received · ' + full(s.amount);
       })
-      .catch(function(){
+      .catch(function(e){
+        // a dropped request is not a finished job - keep asking
         payTimer = setTimeout(function(){ watchReceive(since); }, 4000);
       });
   }
+
 })();
 </script>
 </body>

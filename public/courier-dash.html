@@ -465,6 +465,23 @@
       '<span style="color:#E48B85">\u25AE</span> returned</div>';
   }
 
+  // the same two marks the receipts page uses - green when the money agreed,
+  // amber when it did not, a hundred rupees either way being rounding
+  function cprBadges(c){
+    var out = '';
+    if(c.dcJournalId) out += '<span class="cpill ok">posted DC</span> ';
+
+    if(c.qbPaymentId){
+      var gap = (c.expected == null || c.received == null)
+        ? null : Math.abs(c.expected - c.received);
+      out += (gap === null || gap <= 100)
+        ? '<span class="cpill ok">received</span>'
+        : '<span class="cpill wait">off by ' + full(gap) + '</span>';
+    }
+
+    return out || '<span class="cpill grey">not yet</span>';
+  }
+
   function card(k, v, n, cls){
     return '<div class="card' + (cls ? ' '+cls : '') + '"><div class="k">' + esc(k) + '</div>' +
            '<div class="v">' + esc(v) + '</div><div class="n">' + esc(n) + '</div></div>';
@@ -815,9 +832,7 @@
              '<td class="mono">' + esc(c.createdOn || '') + '</td>' +
              '<td><span class="cpill ' + scls + '">' + esc(c.status || '—') + '</span></td>' +
              '<td class="r">' + full(c.netAmount) + '</td>' +
-             '<td>' + (c.qbPaymentId
-                 ? '<span class="cpill done">received</span>'
-                 : '<span class="cpill grey">not yet</span>') + '</td></tr>';
+             '<td>' + cprBadges(c) + '</td></tr>';
     }).join('');
 
     T.payments += '<div class="box" style="margin-bottom:13px"><h3>Cash payment receipts' +

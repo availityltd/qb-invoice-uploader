@@ -87,6 +87,10 @@ export async function initCouriers() {
       approved_on  TIMESTAMPTZ,
       qb_payment_id TEXT,                 -- set once it is receipted in QB
       received_on  TIMESTAMPTZ,
+      expected_amount NUMERIC(14,2),      -- what the courier said it collected
+      received_amount NUMERIC(14,2),      -- what actually went into QuickBooks
+      dc_journal_id TEXT,                 -- the delivery-charges journal entry
+      dc_posted_on TIMESTAMPTZ,
       raw          JSONB,
       seen_at      TIMESTAMPTZ DEFAULT NOW()
     )
@@ -100,6 +104,14 @@ export async function initCouriers() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS courier_cprs_dates
       ON courier_cprs (realm_id, created_on)
+  `);
+
+  await pool.query(`
+    ALTER TABLE courier_cprs
+      ADD COLUMN IF NOT EXISTS expected_amount NUMERIC(14,2),
+      ADD COLUMN IF NOT EXISTS received_amount NUMERIC(14,2),
+      ADD COLUMN IF NOT EXISTS dc_journal_id   TEXT,
+      ADD COLUMN IF NOT EXISTS dc_posted_on    TIMESTAMPTZ
   `);
 }
 
@@ -146,7 +158,8 @@ export async function listPortalCprs(realmId, opts) {
   const r = await pool.query(
     `SELECT c.cpr_number, c.remote_id, c.account_id, a.label, c.courier,
             c.status, c.status_id, c.net_amount, c.created_on, c.approved_on,
-            c.qb_payment_id, c.received_on
+            c.qb_payment_id, c.received_on, c.expected_amount, c.received_amount,
+            c.dc_journal_id, c.dc_posted_on
        FROM courier_cprs c
        JOIN courier_accounts a ON a.id = c.account_id
       WHERE ${where.join(' AND ')}
@@ -168,17 +181,39 @@ export async function listPortalCprs(realmId, opts) {
     createdOn:  d(x.created_on),
     approvedOn: d(x.approved_on),
     qbPaymentId: x.qb_payment_id,
-    receivedOn: d(x.received_on)
+    receivedOn:  d(x.received_on),
+    expected:    x.expected_amount == null ? null : Math.round(Number(x.expected_amount) * 100) / 100,
+    received:    x.received_amount == null ? null : Math.round(Number(x.received_amount) * 100) / 100,
+    dcJournalId: x.dc_journal_id,
+    dcPostedOn:  d(x.dc_posted_on)
   }));
 }
 
-// stamped once the receipt has been turned into a QuickBooks payment
-export async function markCprReceived(realmId, accountId, cprNumber, qbPaymentId) {
+// Stamped once the receipt has been turned into a QuickBooks payment. Both
+// amounts are kept so the list can say whether they agreed - a receipt that
+// went in short is worth seeing without opening it.
+export async function markCprReceived(realmId, accountId, cprNumber, info) {
+  const i = info || {};
   await pool.query(
     `UPDATE courier_cprs
-        SET qb_payment_id = $4, received_on = NOW()
+        SET qb_payment_id   = $4,
+            received_on     = NOW(),
+            expected_amount = COALESCE($5, expected_amount),
+            received_amount = COALESCE($6, received_amount)
       WHERE realm_id = $1 AND account_id = $2 AND cpr_number = $3`,
-    [realmId, accountId, cprNumber, qbPaymentId || null]
+    [realmId, accountId, cprNumber, i.qbPaymentId || null,
+     i.expected == null ? null : Number(i.expected),
+     i.received == null ? null : Number(i.received)]
+  );
+}
+
+// the delivery charges for a receipt, once they are journalled
+export async function markCprCharges(realmId, accountId, cprNumber, journalId) {
+  await pool.query(
+    `UPDATE courier_cprs
+        SET dc_journal_id = $4, dc_posted_on = NOW()
+      WHERE realm_id = $1 AND account_id = $2 AND cpr_number = $3`,
+    [realmId, accountId, cprNumber, journalId || null]
   );
 }
 

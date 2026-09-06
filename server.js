@@ -4659,7 +4659,11 @@ app.post('/api/receipts/mark', async (req, res) => {
   if (!id || !cpr) return res.status(400).json({ error: 'account and cpr both needed' });
 
   try {
-    await markCprReceived(realmId, id, cpr, req.body.qbPaymentId || null);
+    await markCprReceived(realmId, id, cpr, {
+      qbPaymentId: req.body.qbPaymentId || null,
+      expected: req.body.expected,
+      received: req.body.received
+    });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
