@@ -61,6 +61,22 @@
   .cpill.grey{background:#EEF1F4;color:#5A6672}
   .cpill.done{background:#E9F1FD;color:#14539A}
 
+  /* tabs, the way every courier portal does it */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:16px;
+    overflow-x:auto}
+  .tabs button{border:0;background:none;padding:10px 16px;font:inherit;font-size:13px;
+    cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;width:auto;
+    height:auto;white-space:nowrap;position:relative}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{color:var(--qbo);border-bottom-color:var(--qbo);font-weight:600}
+  .tabs button .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--bad);margin-left:6px;vertical-align:middle}
+  .pane{display:none}
+  .pane.on{display:block}
+
+  /* a box that is telling you something is wrong */
+  .box.attn{border-color:#E9C3C0;background:#FEF8F7}
+
   .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
   @media(max-width:620px){.grid{grid-template-columns:repeat(2,1fr)}}
   .cell{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff;
@@ -381,6 +397,10 @@
 
     var html = '';
 
+    // Everything below is sorted into one of four tabs. The cards stay above
+    // them, because those six numbers are the reason anyone opens this page.
+    var T = { overview:'', orders:'', payments:'', cities:'' };
+
     /* --- the numbers that matter --- */
     html += '<div class="cards">';
     html += card('Booked', n0(t.orders), full(t.amount) + ' worth');
@@ -391,8 +411,43 @@
     html += card('Courier charges', full(t.fee), 'plus tax ' + full(t.tax));
     html += '</div>';
 
+    /* --- parcels that are not moving anywhere good --- */
+    // Lost, damaged and expired parcels are money that may never arrive, and
+    // in a list of twenty statuses they are easy to miss. They get their own
+    // box so nobody has to go looking.
+    var ATTN = [
+      { g:'lost',      label:'Lost' },
+      { g:'damaged',   label:'Damaged' },
+      { g:'expired',   label:'Expired' },
+      { g:'other',     label:'Unknown status' }
+    ];
+
+    var attnRows = '', attnCount = 0, attnAmount = 0;
+    ATTN.forEach(function(a){
+      var x = g[a.g];
+      if(!x || !x.count) return;
+      attnCount += x.count; attnAmount += x.amount;
+      attnRows += '<tr class="click" data-group="' + a.g + '">' +
+                  '<td>' + esc(a.label) + '</td>' +
+                  '<td class="r">' + n0(x.count) + '</td>' +
+                  '<td class="r">' + full(x.amount) + '</td></tr>';
+    });
+
+    T.overview += '<div class="box' + (attnCount ? ' attn' : '') +
+      '" style="margin-bottom:14px"><h3>Needs attention' +
+      '<span class="aside">' + (attnCount
+        ? n0(attnCount) + ' parcels \u00b7 ' + full(attnAmount) + ' at risk'
+        : 'nothing lost or damaged') + '</span></h3>' +
+      (attnCount
+        ? '<table class="t"><tr><th>What happened</th><th class="r">Parcels</th>' +
+          '<th class="r">Worth</th></tr>' + attnRows + '</table>' +
+          '<div class="note">Click a row to see which parcels. ' +
+          'Anything here is worth raising with the courier.</div>'
+        : '<div class="note">No parcels are lost, damaged or expired in this range.</div>') +
+      '</div>';
+
     /* --- day by day, with what each day was worth --- */
-    html += '<div class="box" style="margin-bottom:14px"><h3>Day by day' +
+    T.overview += '<div class="box" style="margin-bottom:14px"><h3>Day by day' +
             '<span class="aside">' + esc(d.from) + ' \u2192 ' + esc(d.to) + '</span></h3>' +
             dayChart(days) + '</div>';
 
@@ -424,15 +479,14 @@
                '<td class="r">' + n0(dt.returned) + '</td>' +
                '<td class="r">' + money(dt.returnedAmount) + '</td></tr>';
 
-    html += '<div class="box" style="margin-bottom:14px"><h3>Every day, in numbers</h3>' +
+    T.orders += '<div class="box" style="margin-bottom:14px"><h3>Every day, in numbers</h3>' +
             '<div style="max-height:320px;overflow:auto"><table class="t">' +
             '<tr><th>Day</th><th class="r">Booked</th><th class="r">Worth</th>' +
             '<th class="r">Delivered</th><th class="r">Collected</th>' +
             '<th class="r">Returned</th><th class="r">Came back</th></tr>' +
             dayRows + '</table></div></div>';
 
-    /* --- receipts and pickups, side by side --- */
-    html += '<div class="row">';
+    /* --- the receipts, on their own tab --- */
 
     // NEW means the courier has not paid this one out yet, CLOSED means it is
     // paid. The badge on the right is our own side of it - whether the money
@@ -451,7 +505,7 @@
                  : '<span class="cpill grey">not yet</span>') + '</td></tr>';
     }).join('');
 
-    html += '<div class="box"><h3>Cash payment receipts' +
+    T.payments += '<div class="box" style="margin-bottom:14px"><h3>Cash payment receipts' +
             '<a href="/receipts.html' + (account ? '?account='+account : '') + '">See detail</a></h3>' +
             '<table class="t"><tr><th>CPR number</th><th>Created</th><th>Status</th>' +
             '<th class="r">Net amount</th><th>QuickBooks</th></tr>' +
@@ -469,17 +523,14 @@
              '<td class="r">' + n0(p.delivered) + '</td></tr>';
     }).join('');
 
-    html += '<div class="box"><h3>Handed over' +
+    T.orders += '<div class="box" style="margin-bottom:14px"><h3>Handed over' +
             '<a href="/pickups.html' + (account ? '?account='+account : '') + '">View every day</a></h3>' +
             '<table class="t"><tr><th>Day</th><th class="r">Parcels</th>' +
             '<th class="r">Worth</th><th class="r">Delivered since</th></tr>' +
             (pickRows || '<tr><td colspan="4" style="color:var(--muted)">Nothing picked up in this range.</td></tr>') +
             '</table></div>';
 
-    html += '</div>';
-
     /* --- statuses and the rings --- */
-    html += '<div class="wide">';
 
     var cells = '<button class="cell tot" data-group=""><div class="l">All orders</div>' +
                 '<div class="n">' + n0(t.orders) + '</div>' +
@@ -492,11 +543,12 @@
                '<div class="m">' + money(s.amount) + '</div></button>';
     });
 
-    html += '<div class="box"><h3>Every status<span class="aside">click any number</span></h3>' +
+    T.orders += '<div class="box" style="margin-bottom:14px"><h3>Every status' +
+            '<span class="aside">click any number</span></h3>' +
             '<div class="grid">' + cells + '</div></div>';
 
     var settled = gc('delivered') + gc('returned');
-    html += '<div class="box"><h3>How it is going</h3>' +
+    T.overview += '<div class="box" style="margin-bottom:14px"><h3>How it is going</h3>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:center">' +
         '<div><div class="k" style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:6px">Delivered</div>' +
           donut(gc('delivered'), settled || t.orders, '#8CE3A8', '#E8EDF3') + '</div>' +
@@ -508,10 +560,7 @@
           donut(gc('transit') + gc('review'), t.orders, '#9EC9EE', '#E8EDF3') + '</div>' +
       '</div></div>';
 
-    html += '</div>';
-
     /* --- recent, accounts, cities --- */
-    html += '<div class="row">';
 
     var tx = (d.recent || []).map(function(o){
       return '<a href="#" data-find="' + esc(o.tracking) + '">' +
@@ -521,7 +570,8 @@
              '<div class="dt">' + esc(o.on || '') + '</div></div></a>';
     }).join('');
 
-    html += '<div class="box"><h3>Latest deliveries<span class="aside">newest first</span></h3>' +
+    T.overview += '<div class="box"><h3>Latest deliveries' +
+            '<span class="aside">newest first</span></h3>' +
             '<div class="tx">' + (tx || '<div class="note">Nothing yet.</div>') + '</div></div>';
 
     var cityRows = '';
@@ -536,11 +586,10 @@
         '<span class="num">' + n0(c.count) + ' \u00b7 ' + c.rate.toFixed(0) + '%</span></div>';
     });
 
-    html += '<div class="box"><h3>Cities<span class="aside">parcels and how many stuck</span></h3>' +
+    T.cities += '<div class="box" style="margin-bottom:14px"><h3>Cities' +
+            '<span class="aside">parcels and how many stuck</span></h3>' +
             '<div class="bars">' + (cityRows || '<div class="note">No cities.</div>') + '</div>' +
             '<div class="note">Green is 90% or better. Red is under 75%.</div></div>';
-
-    html += '</div>';
 
     if((d.accounts || []).length > 1 || !account){
       var accRows = (d.accounts || []).map(function(a){
@@ -553,13 +602,81 @@
                '<td class="r">' + money(a.pendingAmount) + '</td></tr>';
       }).join('');
 
-      html += '<div class="box" style="margin-bottom:14px"><h3>Accounts</h3><table class="t">' +
+      T.cities += '<div class="box" style="margin-bottom:14px"><h3>Accounts</h3><table class="t">' +
               '<tr><th>Account</th><th class="r">Orders</th><th class="r">Delivered</th>' +
               '<th class="r">Returned</th><th class="r">Rate</th>' +
               '<th class="r">Collected</th><th class="r">Pending</th></tr>' +
               (accRows || '<tr><td colspan="7" style="color:var(--muted)">No accounts.</td></tr>') +
               '</table></div>';
     }
+
+    /* --- what the courier still owes --- */
+    // Delivered and returned are settled one way or the other. Everything else
+    // is a parcel whose money has not landed yet, and this is the honest list
+    // of where it is sitting.
+    var OWED = [
+      { g:'unbooked',    label:'Not booked yet' },
+      { g:'booked',      label:'Booked, not picked up' },
+      { g:'transit',     label:'On the way' },
+      { g:'review',      label:'Under verification' },
+      { g:'returning',   label:'Coming back' },
+      { g:'cancelled',   label:'Cancelled' },
+      { g:'transferred', label:'Transferred' },
+      { g:'expired',     label:'Expired' },
+      { g:'lost',        label:'Lost' },
+      { g:'damaged',     label:'Damaged' }
+    ];
+
+    var owedRows = '', owedCount = 0, owedAmount = 0;
+    OWED.forEach(function(o){
+      var x = g[o.g];
+      if(!x || !x.count) return;
+      owedCount += x.count; owedAmount += x.amount;
+      owedRows += '<tr class="click" data-group="' + o.g + '">' +
+                  '<td>' + esc(o.label) + '</td>' +
+                  '<td class="r">' + n0(x.count) + '</td>' +
+                  '<td class="r">' + full(x.amount) + '</td></tr>';
+    });
+
+    if(owedRows){
+      owedRows += '<tr class="tot"><td>Still to come</td>' +
+                  '<td class="r">' + n0(owedCount) + '</td>' +
+                  '<td class="r">' + full(owedAmount) + '</td></tr>';
+    }
+
+    T.payments += '<div class="box" style="margin-bottom:14px"><h3>Money not in yet' +
+      '<span class="aside">click a row to see the parcels</span></h3>' +
+      '<table class="t"><tr><th>Where it is</th><th class="r">Parcels</th>' +
+      '<th class="r">Worth</th></tr>' +
+      (owedRows || '<tr><td colspan="3" style="color:var(--muted)">' +
+        'Every parcel in this range is settled.</td></tr>') +
+      '</table>' +
+      '<div class="note">Delivered ' + full(t.deliveredAmount) + ' has been collected. ' +
+      'What the courier has actually paid out is on the receipts above.</div></div>';
+
+    /* --- the tabs themselves --- */
+    var TABS = [
+      { k:'overview', label:'Overview' },
+      { k:'orders',   label:'Orders' },
+      { k:'payments', label:'Payments' },
+      { k:'cities',   label:'Cities' }
+    ];
+
+    var want = localStorage.getItem('cdTab') || 'overview';
+    if(!T.hasOwnProperty(want)) want = 'overview';
+
+    html += '<div class="tabs">' + TABS.map(function(x){
+      return '<button data-tab="' + x.k + '"' + (x.k === want ? ' class="on"' : '') + '>' +
+             esc(x.label) +
+             (x.k === 'overview' && attnCount ? '<span class="dot"></span>' : '') +
+             '</button>';
+    }).join('') + '</div>';
+
+    TABS.forEach(function(x){
+      html += '<div class="pane' + (x.k === want ? ' on' : '') + '" data-pane="' + x.k + '">' +
+              (T[x.k] || '<div class="box"><div class="note">Nothing here.</div></div>') +
+              '</div>';
+    });
 
     if(t.lastSeen){
       html += '<div class="note">Newest order in the store: ' +
@@ -568,9 +685,31 @@
 
     $('out').innerHTML = html;
 
+    $('out').querySelectorAll('.tabs button').forEach(function(b){
+      b.addEventListener('click', function(){
+        var k = b.getAttribute('data-tab');
+        localStorage.setItem('cdTab', k);
+        $('out').querySelectorAll('.tabs button').forEach(function(x){
+          x.classList.toggle('on', x === b);
+        });
+        $('out').querySelectorAll('.pane').forEach(function(p){
+          p.classList.toggle('on', p.getAttribute('data-pane') === k);
+        });
+      });
+    });
+
     $('out').querySelectorAll('.cell').forEach(function(b){
       b.addEventListener('click', function(){
         openList({ status: b.getAttribute('data-status'), group: b.getAttribute('data-group') });
+      });
+    });
+    // the rows in "Needs attention" and "Money not in yet" open the same list
+    $('out').querySelectorAll('tr[data-group]').forEach(function(tr){
+      tr.addEventListener('click', function(){
+        openList({
+          group: tr.getAttribute('data-group'),
+          title: tr.cells[0] ? tr.cells[0].textContent : ''
+        });
       });
     });
     $('out').querySelectorAll('[data-find]').forEach(function(a){
@@ -628,10 +767,15 @@
   }
 
   function openList(what){
-    var title = what.status || what.cpr || 'All orders';
+    // a group has no name of its own worth showing, so the row that was
+    // clicked passes the words the person actually read
+    var title = what.status || what.cpr || what.title || 'All orders';
     openDrawer(title, '', '<div class="loading">Reading\u2026</div>');
 
-    fetch('/api/courier/rows?'+params(what), { cache:'no-store' })
+    var ask = {};
+    Object.keys(what).forEach(function(k){ if(k !== 'title') ask[k] = what[k]; });
+
+    fetch('/api/courier/rows?'+params(ask), { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
