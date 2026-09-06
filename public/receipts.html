@@ -571,7 +571,7 @@
     var rows = '';
     Object.keys(byMonth).sort().reverse().forEach(function(k){
       var group = byMonth[k];
-      var am = 0;
+      var am = 0, cd = 0;
       group.forEach(function(c){
         am += c.netAmount;
         cd += (c.codAmount == null ? c.netAmount : c.codAmount);
