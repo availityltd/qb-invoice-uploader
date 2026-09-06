@@ -76,10 +76,21 @@
 
   /* Overview is a wall of small panels, not a column of big ones - the point
      is to see how everything is doing without scrolling. */
-  .mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:13px;
-    margin-bottom:13px;align-items:start}
+  .mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px;
+    margin-bottom:14px}
   .p{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-    padding:14px 16px;display:flex;flex-direction:column;min-height:126px}
+    padding:16px 18px;display:flex;flex-direction:column;min-height:206px}
+
+  /* a few rows inside a tile - recent parcels, newest receipts */
+  .rows{margin-top:2px}
+  .rows .r1{display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 0;
+    border-bottom:1px solid var(--line);font-size:12px}
+  .rows .r1:last-child{border-bottom:0}
+  .rows .a{font-family:var(--mono);font-size:12px;color:#2F6FA8;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rows .b2{font-size:11px;color:var(--faint);margin-top:1px}
+  .rows .c1{font-family:var(--mono);font-size:12px;text-align:right}
+  .rows .d1{font-size:10.5px;color:var(--faint);text-align:right;margin-top:1px}
   .p h4{margin:0 0 10px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
     color:var(--faint);font-weight:600;display:flex;align-items:center;gap:7px}
   .p h4 .rt{margin-left:auto;font-size:10.5px;letter-spacing:0;text-transform:none;
@@ -526,30 +537,59 @@
 
     var html = '';
 
-    var picked    = gc('transit') + gc('review') + gc('delivered') +
-                    gc('returning') + gc('returned') + lost;
     var collected = t.deliveredAmount;
     var owed      = t.pendingAmount;
 
-    var track = [
-      { l:'Booked',          n:t.orders,        a:t.amount,        c:'#5B7C99', head:true },
-      { l:'Picked up',       n:picked,          a:null,            c:'#7FA8D4',
-        g:'transit,review,delivered,returning,returned,lost,damaged' },
-      { l:'Delivered',       n:gc('delivered'), a:ga('delivered'), c:'#4FB477', g:'delivered' },
-      { l:'Returned',        n:gc('returned'),  a:ga('returned'),  c:'#E48B85', g:'returned' },
-      { l:'Lost or damaged', n:lost,            a:ga('lost') + ga('damaged'), c:'#B3453F',
-        g:'lost,damaged' },
-      { l:'Still moving',    n:moving,          a:t.pendingAmount, c:'#B9A24A',
-        g:'unbooked,booked,transit,review,returning' }
+    // Where a parcel got to, and what stopped it. Every group the courier can
+    // report appears in exactly one row, so the rows add up to what was booked
+    // - a stage that quietly swallowed a hundred parcels is worse than no
+    // stage at all.
+    var stages = [
+      { l:'Picked up by the courier', n:t.picked, a:null, c:'#7FA8D4', picked:1,
+        note:'stamped with a pickup date' },
+      { l:'Not picked up yet', n:t.unpicked, a:t.unpickedAmount, c:'#C9B8A0', picked:0,
+        note:'still with you, or never collected' }
     ];
 
-    var trackRows = track.map(function(x){
-      return '<tr' + (x.head ? ' class="tot"' : ' class="click" data-group="' + esc(x.g) + '"') +
-        '><td><span class="sw" style="background:' + x.c + '"></span>' + esc(x.l) + '</td>' +
+    var ends = [
+      { l:'Delivered',     g:'delivered',            c:'#4FB477' },
+      { l:'Returned',      g:'returned',             c:'#E48B85' },
+      { l:'Coming back',   g:'returning',            c:'#E9B0A0' },
+      { l:'On the way',    g:'transit',              c:'#9EC9EE' },
+      { l:'Under review',  g:'review',               c:'#B7A6D6' },
+      { l:'Waiting to be booked', g:'unbooked,booked', c:'#C7CDD4' },
+      { l:'Cancelled',     g:'cancelled',            c:'#A8A8A8' },
+      { l:'Transferred',   g:'transferred',          c:'#8FB0A8' },
+      { l:'Expired',       g:'expired',              c:'#B9A24A' },
+      { l:'Lost or damaged', g:'lost,damaged',       c:'#B3453F' },
+      { l:'Unknown status', g:'other',               c:'#D0A0C0' }
+    ].map(function(x){
+      var n = 0, a = 0;
+      x.g.split(',').forEach(function(k){ n += gc(k); a += ga(k); });
+      return { l:x.l, g:x.g, n:n, a:a, c:x.c };
+    }).filter(function(x){ return x.n; });
+
+    function stageRow(x){
+      var attr = x.picked === undefined
+        ? ' class="click" data-group="' + esc(x.g) + '"'
+        : ' class="click" data-picked="' + x.picked + '"';
+      return '<tr' + attr + '>' +
+        '<td><span class="sw" style="background:' + x.c + '"></span>' + esc(x.l) +
+        (x.note ? ' <span style="color:var(--faint)">· ' + esc(x.note) + '</span>' : '') +
+        '</td>' +
         '<td class="r">' + n0(x.n) + '</td>' +
-        '<td class="r">' + (x.head ? '100%' : pc(pct(x.n, t.orders))) + '</td>' +
+        '<td class="r">' + pc(pct(x.n, t.orders)) + '</td>' +
         '<td class="r">' + (x.a === null ? '—' : full(x.a)) + '</td></tr>';
-    }).join('');
+    }
+
+    var trackRows =
+      '<tr class="tot"><td>Booked in this range</td>' +
+      '<td class="r">' + n0(t.orders) + '</td><td class="r">100%</td>' +
+      '<td class="r">' + full(t.amount) + '</td></tr>' +
+      stages.map(stageRow).join('') +
+      '<tr class="tot"><td colspan="4" style="font-size:10px;letter-spacing:.06em;' +
+        'text-transform:uppercase;color:var(--faint)">Where they ended up</td></tr>' +
+      ends.map(stageRow).join('');
 
     T.overview += '<div class="box" style="margin-bottom:13px"><h3>' +
       'What happened to the parcels booked in this range' +
@@ -563,9 +603,9 @@
       '<td class="r">' + pc(pct(owed, collected + owed)) + '</td>' +
       '<td class="r">' + full(owed) + '</td></tr>' +
       '</table>' +
-      '<div class="note">Every row is the parcels booked between ' + esc(d.from) +
-      ' and ' + esc(d.to) + '. Click a row to see them, or download every ' +
-      'parcel with its whole history.</div></div>';
+      '<div class="note">Parcels booked between ' + esc(d.from) + ' and ' + esc(d.to) +
+      '. The rows under "where they ended up" add up to what was booked. ' +
+      'Click any row to see those parcels.</div></div>';
 
     /* --- one grid, every tile the same --- */
 
@@ -619,17 +659,6 @@
       more('orders', 'Every status'),
       lost ? 'warn2' : '');
 
-    var c0 = cprs[0];
-    T.overview += panel('Latest receipt', c0 ? esc(c0.status || '') : '',
-      (c0
-        ? '<div class="big" style="font-size:21px">' + full(c0.netAmount) + '</div>' +
-          '<div class="sub2">' + esc(c0.cpr) + ' · ' + esc(c0.createdOn || '') + '</div>' +
-          '<div class="sub2">' + (c0.qbPaymentId
-            ? 'received in QuickBooks' : 'not in QuickBooks yet') + '</div>'
-        : '<div class="sub2">No receipts pulled in yet. Sign in to the courier ' +
-          'portal on the receipts page.</div>') +
-      more('payments', 'All receipts'));
-
     var cities = (d.cities || []).filter(function(c){ return c.settled >= 5; });
     var best  = cities.slice().sort(function(a, b){ return b.rate - a.rate; })[0];
     var worst = cities.slice().sort(function(a, b){ return a.rate - b.rate; })[0];
@@ -646,17 +675,39 @@
         : '<div class="sub2">Not enough settled orders yet to rank cities.</div>') +
       more('cities', 'Every city'));
 
+    var recent4 = (d.recent || []).slice(0, 4).map(function(o){
+      return '<div class="r1"><div><div class="a">' + esc(o.tracking) + '</div>' +
+             '<div class="b2">' + esc(o.orderRef || '') + ' · ' + esc(o.city || '') + '</div></div>' +
+             '<div><div class="c1">' + full(o.amount) + '</div>' +
+             '<div class="d1">' + esc(o.on || '') + '</div></div></div>';
+    }).join('');
+
+    T.overview += panel('Latest deliveries', n0((d.recent || []).length) + ' newest',
+      '<div class="rows">' + (recent4 ||
+        '<div class="sub2">Nothing delivered yet.</div>') + '</div>' +
+      more('orders', 'See detail'));
+
+    var newCprs = cprs.slice(0, 4).map(function(c){
+      var st = String(c.status || '').toUpperCase();
+      return '<div class="r1"><div><div class="a">' + esc(c.cpr) + '</div>' +
+             '<div class="b2">' + esc(c.createdOn || '') + ' · ' +
+             (c.qbPaymentId ? 'in QuickBooks' : 'not received') + '</div></div>' +
+             '<div><div class="c1">' + full(c.netAmount) + '</div>' +
+             '<div class="d1">' + esc(st || '') + '</div></div></div>';
+    }).join('');
+
+    T.overview += panel('Newest receipts',
+      n0(cprs.filter(function(c){ return !c.qbPaymentId; }).length) + ' not received',
+      '<div class="rows">' + (newCprs ||
+        '<div class="sub2">No receipts pulled in yet. Sign in to the courier ' +
+        'portal on the receipts page.</div>') + '</div>' +
+      more('payments', 'See detail'));
+
     var pickTotal = picks.reduce(function(a, p){ return a + p.parcels; }, 0);
     T.overview += panel('Handed over', picks.length + ' days',
       '<div class="big">' + n0(pickTotal) + '</div>' +
       '<div class="sub2">parcels given to the courier</div>' +
       more('orders', 'Handed over'));
-
-    T.overview += panel('Receipts', n0(cprs.length) + ' pulled in',
-      '<div class="big">' + n0(cprs.filter(function(c){ return c.qbPaymentId; }).length) +
-      ' / ' + n0(cprs.length) + '</div>' +
-      '<div class="sub2">received into QuickBooks</div>' +
-      more('payments', 'All receipts'));
 
     T.overview += '</div>';
 
@@ -936,6 +987,14 @@
       tr.addEventListener('click', function(){
         openList({
           group: tr.getAttribute('data-group'),
+          title: tr.cells[0] ? tr.cells[0].textContent : ''
+        });
+      });
+    });
+    $('out').querySelectorAll('tr[data-picked]').forEach(function(tr){
+      tr.addEventListener('click', function(){
+        openList({
+          picked: tr.getAttribute('data-picked'),
           title: tr.cells[0] ? tr.cells[0].textContent : ''
         });
       });

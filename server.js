@@ -2895,11 +2895,11 @@ app.get('/api/courier/rows', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const { from, to, account, courier, status, group, city, cpr } = req.query;
+  const { from, to, account, courier, status, group, city, cpr, picked } = req.query;
 
   try {
     res.setHeader('Cache-Control', 'no-store');
-    res.json(await ordersBy(realmId, { from, to, account, courier, status, group, city, cpr }));
+    res.json(await ordersBy(realmId, { from, to, account, courier, status, group, city, cpr, picked }));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -2911,11 +2911,11 @@ app.get('/api/courier/export', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const { from, to, account, courier, status, group, city, cpr } = req.query;
+  const { from, to, account, courier, status, group, city, cpr, picked } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
 
   try {
-    const d = await ordersBy(realmId, { from, to, account, courier, status, group, city, cpr });
+    const d = await ordersBy(realmId, { from, to, account, courier, status, group, city, cpr, picked });
 
     // every value quoted, so a tracking number keeps its leading zeros and a
     // comma inside an address cannot split a row

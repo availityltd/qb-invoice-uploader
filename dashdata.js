@@ -63,6 +63,11 @@ export async function dashboard(realmId, opts) {
             COALESCE(SUM(o.amount),0) AS amount,
             COALESCE(SUM(o.fee),0) AS fee,
             COALESCE(SUM(o.tax),0) AS tax,
+            -- whether a parcel was collected is a date the courier stamps,
+            -- not something to be guessed from its status
+            COUNT(*) FILTER (WHERE o.picked_on IS NOT NULL) AS picked,
+            COALESCE(SUM(o.amount) FILTER (WHERE o.picked_on IS NULL),0) AS unpicked_amount,
+            COUNT(*) FILTER (WHERE o.picked_on IS NULL) AS unpicked,
             COALESCE(SUM(o.amount) FILTER (WHERE o.status_group = 'delivered'),0) AS delivered_amount,
             COALESCE(SUM(o.amount) FILTER (WHERE o.status_group NOT IN
               ('delivered','returned','cancelled','expired','lost','damaged')),0) AS pending_amount,
@@ -190,6 +195,9 @@ export async function dashboard(realmId, opts) {
     from, to,
     totals: {
       orders: Number(t.orders || 0),
+      picked: Number(t.picked || 0),
+      unpicked: Number(t.unpicked || 0),
+      unpickedAmount: r2(t.unpicked_amount),
       amount: r2(t.amount),
       fee: r2(t.fee),
       tax: r2(t.tax),
@@ -395,6 +403,9 @@ export async function ordersBy(realmId, opts) {
     }
   }
   if (opts.city)   { args.push(opts.city);   where.push(`o.city = $${args.length}`); }
+  // '1' is collected, '0' is still sitting with the merchant
+  if (opts.picked === '1' || opts.picked === 1) where.push(`o.picked_on IS NOT NULL`);
+  if (opts.picked === '0' || opts.picked === 0) where.push(`o.picked_on IS NULL`);
   if (opts.cpr)    { args.push(opts.cpr);    where.push(`o.cpr_number = $${args.length}`); }
 
   const r = await pool.query(
