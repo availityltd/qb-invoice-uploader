@@ -925,6 +925,43 @@
         '. Check the parcels below before receiving.</div>';
     }
 
+    // Everything is already paid and nothing is left to receive - the receipt
+    // went in some other way, or before this page could record it. Say what
+    // actually paid those invoices and offer to write it down.
+    if(!m.matched.length && m.alreadyPaid.length && (m.paidBy || []).length){
+      var mine = m.paidBy.filter(function(g){ return g.mine; });
+      var them = m.paidBy.filter(function(g){ return !g.mine; });
+      var mineTotal = mine.reduce(function(a,g){ return a + g.amount; }, 0);
+
+      html += '<div class="box"><h3>This receipt looks like it is already in QuickBooks' +
+        '</h3><p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
+        'Nothing here is still owing. These are the payments that settled ' +
+        'its invoices:</p>' +
+        '<table class="t"><tr><th>Reference on the payment</th><th class="r">Payments</th>' +
+        '<th class="r">Amount</th><th>Dates</th><th>This receipt?</th></tr>' +
+        m.paidBy.map(function(g){
+          return '<tr><td class="mono">'+esc(g.ref)+'</td>' +
+                 '<td class="r">'+n0(g.count)+'</td>' +
+                 '<td class="r">'+full(g.amount)+'</td>' +
+                 '<td class="mono">'+esc((g.dates||[]).slice(0,3).join(', '))+'</td>' +
+                 '<td>'+(g.mine
+                    ? '<span class="pill ok">yes</span>'
+                    : '<span class="pill grey">another receipt</span>')+'</td></tr>';
+        }).join('') + '</table>' +
+        (mine.length
+          ? '<div class="note">' + full(mineTotal) + ' was received under this ' +
+            'receipt’s own number. Marking it done will show that on the list.</div>' +
+            '<div style="margin-top:12px"><button class="go2" id="rMark">' +
+            'Mark as received · ' + full(mineTotal) + '</button></div>'
+          : '<div class="warn" style="margin-top:12px">None of these payments carry ' +
+            'this receipt’s number, so its invoices were settled under something ' +
+            'else. Marking it done would be a guess — worth checking in ' +
+            'QuickBooks first.</div>' +
+            '<div style="margin-top:12px"><button class="bk" id="rMark">' +
+            'Mark as received anyway</button></div>') +
+        '<div id="rMarkOut"></div></div>';
+    }
+
     html += '<div class="box"><h3>How this will be posted</h3>' +
       '<div class="rcv">' +
         '<div><label>Date on the payment</label>' +
@@ -973,6 +1010,41 @@
     wireBack();
 
     $('rGo').addEventListener('click', startReceive);
+
+    var mk = $('rMark');
+    if(mk){
+      mk.addEventListener('click', function(){
+        var mineTotal = (m.paidBy || []).filter(function(g){ return g.mine; })
+          .reduce(function(a,g){ return a + g.amount; }, 0);
+
+        mk.disabled = true; mk.textContent = 'Marking…';
+
+        fetch('/api/receipts/mark', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            id: account.id,
+            cpr: m.cpr,
+            qbPaymentId: 'found',
+            expected: m.totals.courier,
+            received: mineTotal || m.totals.paidAlready
+          })
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d.error){
+            $('rMarkOut').innerHTML = '<div class="msg">'+esc(d.error)+'</div>';
+            mk.disabled = false; mk.textContent = 'Try again';
+            return;
+          }
+          close();
+          load();
+        })
+        .catch(function(e){
+          $('rMarkOut').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
+          mk.disabled = false; mk.textContent = 'Try again';
+        });
+      });
+    }
 
     var dl = $('rDl');
     if(dl) dl.addEventListener('click', downloadUnmatched);

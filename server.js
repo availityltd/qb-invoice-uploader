@@ -4501,6 +4501,15 @@ app.get('/api/receipts/detail', async (req, res) => {
 // remembered per account, because two PostEx accounts can settle into two
 // different banks - the older per-courier setting is the fallback so nothing
 // already answered has to be answered again.
+// "CPR-6L4DB532992", "cpr 6l4db532992" and "6L4DB532992" are one receipt.
+// Whoever typed it into QuickBooks first should not decide whether we can
+// recognise it later.
+function sameRef(a, b) {
+  const bare = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^CPR/, '');
+  const x = bare(a), y = bare(b);
+  return !!x && !!y && x === y;
+}
+
 async function bankFor(realmId, accountId, courier) {
   const perAccount = await getSetting(realmId, `cpr:bank:${accountId}`, null);
   if (perAccount) return perAccount;
@@ -4563,7 +4572,7 @@ app.get('/api/receipts/match', async (req, res) => {
 
       if (inv.balance <= 0.005) {
         alreadyPaid.push({ ...o, qbDoc: inv.doc, qbId: inv.id, qbTotal: inv.total,
-                           why: 'already paid' });
+                           paymentIds: inv.paymentIds || [], why: 'already paid' });
         return;
       }
 
@@ -4588,6 +4597,36 @@ app.get('/api/receipts/match', async (req, res) => {
 
     const r2 = v => Math.round(v * 100) / 100;
 
+    // An invoice with nothing owing was paid by something. Reading those
+    // payments back says what reference they carry, which is the only honest
+    // way to tell whether this receipt is the one that paid them - guessing
+    // at the reference format would just be a different way of being wrong.
+    let paidBy = [];
+    if (alreadyPaid.length) {
+      const ids = [];
+      alreadyPaid.forEach(o => (o.paymentIds || []).forEach(id => ids.push(id)));
+
+      try {
+        const pays = await paymentsByIds(realmId, token, ids.slice(0, 400));
+        const byRef = new Map();
+
+        pays.forEach(p => {
+          const key = p.ref || '(no reference)';
+          if (!byRef.has(key)) {
+            byRef.set(key, { ref: key, count: 0, amount: 0, dates: [], account: p.accountName });
+          }
+          const g = byRef.get(key);
+          g.count++;
+          g.amount += p.amount;
+          if (p.date && g.dates.indexOf(p.date) < 0) g.dates.push(p.date);
+        });
+
+        paidBy = [...byRef.values()]
+          .map(g => ({ ...g, amount: r2(g.amount), mine: sameRef(g.ref, req.query.cpr) }))
+          .sort((a, b) => b.amount - a.amount);
+      } catch (e) { /* the panel is still useful without it */ }
+    }
+
     res.json({
       cpr: req.query.cpr || remoteId,
       cprDate: (req.query.created || '').slice(0, 10),
@@ -4604,6 +4643,7 @@ app.get('/api/receipts/match', async (req, res) => {
       },
       banks: accounts,
       methods,
+      paidBy,
       chosen: await bankFor(realmId, account, acc.courier)
     });
   } catch (e) {
@@ -4684,7 +4724,12 @@ app.get('/api/receipts/check', async (req, res) => {
     for (const c of list) {
       if (c.qbPaymentId) continue;              // already known about
 
-      const hit = byRef.get(c.cpr);
+      let hit = byRef.get(c.cpr);
+      if (!hit) {
+        for (const [ref, g] of byRef) {
+          if (sameRef(ref, c.cpr)) { hit = g; break; }
+        }
+      }
       if (!hit || !hit.amount) continue;
 
       const amount = Math.round(hit.amount * 100) / 100;
