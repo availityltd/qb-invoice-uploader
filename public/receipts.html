@@ -937,8 +937,8 @@
         '</h3><p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
         'Nothing here is still owing. These are the payments that settled ' +
         'its invoices:</p>' +
-        '<table class="t"><tr><th>Reference on the payment</th><th class="r">Payments</th>' +
-        '<th class="r">Amount</th><th>Dates</th><th>This receipt?</th></tr>' +
+        '<table class="t"><tr><th>Reference on the payment</th><th class="r">Invoices</th>' +
+        '<th class="r">Put on this receipt</th><th>Dates</th><th>This receipt?</th></tr>' +
         m.paidBy.map(function(g){
           return '<tr><td class="mono">'+esc(g.ref)+'</td>' +
                  '<td class="r">'+n0(g.count)+'</td>' +
@@ -948,6 +948,9 @@
                     ? '<span class="pill ok">yes</span>'
                     : '<span class="pill grey">another receipt</span>')+'</td></tr>';
         }).join('') + '</table>' +
+        '<div class="note">These are the amounts actually put on this ' +
+        'receipt’s invoices, not the payments’ own totals — one payment ' +
+        'usually covers several receipts.</div>' +
         (mine.length
           ? '<div class="note">' + full(mineTotal) + ' was received under this ' +
             'receipt’s own number. Marking it done will show that on the list.</div>' +
@@ -1012,12 +1015,12 @@
       html += '<div class="box"><h3>Nothing here explains the ' +
         full(Math.abs(shortBy)) + ' difference</h3>' +
         '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
-        'Every parcel on this receipt has an invoice, and every one of those ' +
-        'invoices was settled under this receipt’s own number. The gap is ' +
-        'between what the courier says it collected and what those invoices ' +
-        'were worth in QuickBooks — so it is the invoice amounts that ' +
-        'differ, not the parcels. The receipt’s own orders are on the ' +
-        'previous screen with what each was worth.</p></div>';
+        'Every parcel has an invoice, every invoice was settled under this ' +
+        'receipt’s own number, and each was settled for what QuickBooks ' +
+        'said it was owed. So the gap is not in the parcels or the payments — ' +
+        'it is that the invoices themselves were raised for different amounts ' +
+        'than the courier ended up collecting. The receipt’s own orders ' +
+        'are on the previous screen with what each was worth.</p></div>';
     }
 
     html += '<div class="box"><h3>How this will be posted</h3>' +

@@ -4501,6 +4501,48 @@ app.get('/api/receipts/detail', async (req, res) => {
 // remembered per account, because two PostEx accounts can settle into two
 // different banks - the older per-courier setting is the fallback so nothing
 // already answered has to be answered again.
+// A payment's total says nothing about which invoice it went on - one payment
+// covers many. The lines do: each carries an amount and the invoice it paid.
+// Without them a receipt can only be told "some other payment touched these",
+// which is not enough to say how much of it was not yours.
+async function paymentLines(realmId, token, paymentIds) {
+  const ids = [...new Set((paymentIds || []).map(String).filter(Boolean))];
+  const out = new Map();                       // payment id -> { ref, date, onInvoice }
+
+  for (let i = 0; i < ids.length; i += 30) {
+    const list = ids.slice(i, i + 30).map(x => `'${x}'`).join(',');
+
+    let q;
+    try {
+      q = await qbQuery(realmId, token,
+        `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, Line FROM Payment ` +
+        `WHERE Id IN (${list}) MAXRESULTS 1000`);
+    } catch (e) { continue; }
+
+    (q.Payment || []).forEach(p => {
+      const onInvoice = new Map();
+
+      (p.Line || []).forEach(l => {
+        (l.LinkedTxn || []).forEach(t => {
+          if (t.TxnType !== 'Invoice') return;
+          const id = String(t.TxnId);
+          onInvoice.set(id, (onInvoice.get(id) || 0) + Number(l.Amount || 0));
+        });
+      });
+
+      out.set(String(p.Id), {
+        id: String(p.Id),
+        ref: String(p.PaymentRefNum || '').trim(),
+        date: p.TxnDate || '',
+        total: Number(p.TotalAmt || 0),
+        onInvoice
+      });
+    });
+  }
+
+  return out;
+}
+
 // "CPR-6L4DB532992", "cpr 6l4db532992" and "6L4DB532992" are one receipt.
 // Whoever typed it into QuickBooks first should not decide whether we can
 // recognise it later.
@@ -4612,10 +4654,10 @@ app.get('/api/receipts/match', async (req, res) => {
 
     const r2 = v => Math.round(v * 100) / 100;
 
-    // An invoice with nothing owing was paid by something. Reading those
-    // payments back says what reference they carry, which is the only honest
-    // way to tell whether this receipt is the one that paid them - guessing
-    // at the reference format would just be a different way of being wrong.
+    // An invoice with nothing owing was settled by something. A payment's
+    // total says nothing about which invoice it went on - one payment covers
+    // many, across several receipts - so the payment's lines are read and only
+    // the part sitting on these invoices is counted.
     let paidBy = [];
     const paidElsewhere = [];
 
@@ -4624,46 +4666,57 @@ app.get('/api/receipts/match', async (req, res) => {
       alreadyPaid.forEach(o => (o.paymentIds || []).forEach(id => ids.push(id)));
 
       try {
-        const pays = await paymentsByIds(realmId, token, ids.slice(0, 500));
-
-        const refOf = new Map();
-        pays.forEach(p => refOf.set(String(p.id), p.ref || ''));
-
+        const pays = await paymentLines(realmId, token, ids.slice(0, 500));
         const byRef = new Map();
-        pays.forEach(p => {
-          const key = p.ref || '(no reference)';
-          if (!byRef.has(key)) {
-            byRef.set(key, { ref: key, count: 0, amount: 0, dates: [], account: p.accountName });
-          }
-          const g = byRef.get(key);
-          g.count++;
-          g.amount += p.amount;
-          if (p.date && g.dates.indexOf(p.date) < 0) g.dates.push(p.date);
-        });
 
-        paidBy = [...byRef.values()]
-          .map(g => ({ ...g, amount: r2(g.amount), mine: sameRef(g.ref, req.query.cpr) }))
-          .sort((a, b) => b.amount - a.amount);
-
-        // An invoice settled under some other reference is money this receipt
-        // collected but never received - it is where a shortfall comes from,
-        // and the only useful answer to "which ones" is the parcels themselves.
         alreadyPaid.forEach(o => {
-          const refs = (o.paymentIds || []).map(id => refOf.get(String(id)) || '');
-          const mine = refs.some(rf => sameRef(rf, req.query.cpr));
+          let here = 0, other = 0;
+          const otherRefs = [];
 
-          o.paidUnder = refs.filter(Boolean);
-          o.paidHere = mine;
+          (o.paymentIds || []).forEach(id => {
+            const p = pays.get(String(id));
+            if (!p) return;
 
-          if (!mine) {
+            const part = p.onInvoice.get(String(o.qbId)) || 0;
+            if (!part) return;
+
+            const key = p.ref || '(no reference)';
+            const mine = sameRef(p.ref, req.query.cpr);
+
+            if (!byRef.has(key)) {
+              byRef.set(key, { ref: key, count: 0, amount: 0, dates: [], mine });
+            }
+            const g = byRef.get(key);
+            g.count++;
+            g.amount += part;
+            if (p.date && g.dates.indexOf(p.date) < 0) g.dates.push(p.date);
+
+            if (mine) { here += part; }
+            else { other += part; if (otherRefs.indexOf(key) < 0) otherRefs.push(key); }
+          });
+
+          o.paidHereAmount = r2(here);
+          o.paidElseAmount = r2(other);
+          o.paidHere = here > 0.005;
+
+          // Money this receipt collected that arrived under someone else's
+          // name - the whole invoice, or part of it, as when an advance was
+          // taken before the parcel was delivered.
+          if (other > 0.005) {
+            const who = otherRefs.length ? otherRefs.join(', ') : 'a payment with no reference';
             paidElsewhere.push({
               ...o,
-              why: refs.filter(Boolean).length
-                ? 'paid under ' + [...new Set(refs.filter(Boolean))].join(', ')
-                : 'paid with no reference on it'
+              why: here > 0.005
+                ? `${r2(other).toFixed(2)} of this came from ${who}; only ` +
+                  `${r2(here).toFixed(2)} under this receipt`
+                : `settled by ${who}`
             });
           }
         });
+
+        paidBy = [...byRef.values()]
+          .map(g => ({ ...g, amount: r2(g.amount) }))
+          .sort((a, b) => b.amount - a.amount);
       } catch (e) { /* the panel is still useful without it */ }
     }
 
@@ -4685,9 +4738,8 @@ app.get('/api/receipts/match', async (req, res) => {
         courier:  r2(paying.reduce((s, o) => s + o.received, 0)),
         toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
         paidAlready: r2(alreadyPaid.reduce((s, o) => s + o.received, 0)),
-        paidHere: r2(alreadyPaid.filter(o => o.paidHere)
-                                .reduce((s, o) => s + o.received, 0)),
-        paidElsewhere: r2(paidElsewhere.reduce((s, o) => s + o.received, 0)),
+        paidHere: r2(alreadyPaid.reduce((s, o) => s + (o.paidHereAmount || 0), 0)),
+        paidElsewhere: r2(paidElsewhere.reduce((s, o) => s + (o.paidElseAmount || 0), 0)),
         missing: r2(missing.reduce((s, o) => s + o.received, 0)),
         mismatched: r2(mismatched.reduce((s, o) => s + o.received, 0)),
         net: detail.summary ? detail.summary.netAmount : 0
