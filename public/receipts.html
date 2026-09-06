@@ -535,10 +535,9 @@
     // COD is what the courier collected and what a QuickBooks payment has to
     // match. Net is what it pays out after its own charges - useful, but not
     // the number anyone is reconciling against.
-    var cod = 0, net = 0, received = 0, doneCount = 0;
+    var cod = 0, received = 0, doneCount = 0;
     list.forEach(function(c){
       cod += (c.codAmount == null ? c.netAmount : c.codAmount);
-      net += c.netAmount;
       if(c.qbPaymentId){ received += (c.received || 0); doneCount++; }
     });
 
@@ -556,8 +555,6 @@
         '</div><div class="n">'+n0(doneCount)+' of '+n0(list.length)+' receipts</div></div>' +
       '<div class="card"><div class="k">Still to do</div><div class="v">'+full(cod-received)+
         '</div><div class="n">not yet in QuickBooks</div></div>' +
-      '<div class="card"><div class="k">Net paid out</div><div class="v">'+full(net)+
-        '</div><div class="n">after charges and tax</div></div>' +
       '</div>';
 
     // grouped by month, newest first
@@ -571,9 +568,8 @@
     var rows = '';
     Object.keys(byMonth).sort().reverse().forEach(function(k){
       var group = byMonth[k];
-      var am = 0, cd = 0;
+      var cd = 0;
       group.forEach(function(c){
-        am += c.netAmount;
         cd += (c.codAmount == null ? c.netAmount : c.codAmount);
       });
 
@@ -582,8 +578,7 @@
 
       rows += '<tr style="background:#F3F7FB;font-weight:600"><td colspan="3">'+esc(label)+'</td>' +
               '<td class="r">'+n0(group.length)+'</td>' +
-              '<td class="r">'+full(cd)+'</td>' +
-              '<td class="r">'+full(am)+'</td><td></td></tr>';
+              '<td class="r">'+full(cd)+'</td><td></td></tr>';
 
       group.forEach(function(c){
         rows += '<tr class="click'+rowClass(c)+'" data-id="'+esc(c.remoteId)+
@@ -593,7 +588,6 @@
                 '<td class="mono">'+esc(c.approvedOn||'')+'</td>' +
                 '<td class="r">'+statusPill(c.status)+'</td>' +
                 '<td class="r">'+(c.codAmount == null ? '—' : full(c.codAmount))+'</td>' +
-                '<td class="r">'+full(c.netAmount)+'</td>' +
                 '<td>'+badges(c)+'</td></tr>';
       });
     });
@@ -603,8 +597,8 @@
             '<div class="scroll"><table class="t">' +
             '<tr><th>CPR number</th><th>Created</th><th>Approved</th>' +
             '<th class="r">Status</th><th class="r">COD collected</th>' +
-            '<th class="r">Net paid out</th><th>QuickBooks</th></tr>' +
-            (rows || '<tr><td colspan="7" class="empty">Nothing in this range.</td></tr>') +
+            '<th>QuickBooks</th></tr>' +
+            (rows || '<tr><td colspan="6" class="empty">Nothing in this range.</td></tr>') +
             '</table></div></div>';
 
     $('out').innerHTML = html;
@@ -676,7 +670,7 @@
     var s = detail.summary || {};
     var orders = detail.orders || [];
 
-    $('dNote').innerHTML = esc(n0(orders.length) + ' orders · net ' + full(s.netAmount)) +
+    $('dNote').innerHTML = esc(n0(orders.length) + ' orders · COD ' + full(s.grandTotal)) +
       (current && (current.qbPaymentId || current.dcJournalId)
         ? ' &nbsp; ' + badges(current) : '');
 
@@ -689,7 +683,7 @@
     }).join('');
 
     var totals =
-      line('Grand total', s.grandTotal) +
+      line('COD collected', s.grandTotal) +
       line('COD charges (' + n0(s.codChargesCount) + ')', -s.codCharges) +
       (s.upfrontChargesCount
         ? line('Upfront charges (' + n0(s.upfrontChargesCount) + ')', -s.upfrontCharges) : '') +
@@ -903,18 +897,36 @@
         '</div>';
     }
 
+    // Every parcel on the receipt accounted for, in one line of tiles, so the
+    // counts can be read against each other instead of guessed at.
+    var c = m.counts || {};
+
     html += '<div class="tally2">' +
-      '<div class="good"><div class="n">'+n0(m.matched.length)+'</div>' +
-        '<div class="l">Ready to receive</div></div>' +
-      '<div class="good"><div class="n">'+full(t.toReceive)+'</div>' +
-        '<div class="l">Will be received</div></div>' +
-      '<div><div class="n">'+n0(m.alreadyPaid.length)+'</div>' +
+      '<div><div class="n">'+n0(c.orders)+'</div>' +
+        '<div class="l">Orders on this receipt</div></div>' +
+      '<div><div class="n">'+n0(c.noMoney)+'</div>' +
+        '<div class="l">Returned, no money</div></div>' +
+      '<div><div class="n">'+n0(c.withMoney)+'</div>' +
+        '<div class="l">Collected on</div>' +
+        '<div class="l" style="text-transform:none;letter-spacing:0;color:var(--muted)">' +
+        full(t.courier)+'</div></div>' +
+      '<div class="good"><div class="n">'+n0(c.ready)+'</div>' +
+        '<div class="l">Ready to receive</div>' +
+        '<div class="l" style="text-transform:none;letter-spacing:0;color:var(--muted)">' +
+        full(t.toReceive)+'</div></div>' +
+      '<div><div class="n">'+n0(c.alreadyPaid)+'</div>' +
         '<div class="l">Already paid</div></div>' +
-      '<div class="'+(m.missing.length?'bad':'')+'"><div class="n">'+n0(m.missing.length)+'</div>' +
+      '<div class="'+(c.differs?'bad':'')+'"><div class="n">'+n0(c.differs)+'</div>' +
+        '<div class="l">Amount differs</div></div>' +
+      '<div class="'+(c.missing?'bad':'')+'"><div class="n">'+n0(c.missing)+'</div>' +
         '<div class="l">Not in QuickBooks</div></div>' +
-      '<div><div class="n">'+full(t.courier)+'</div>' +
-        '<div class="l">Courier collected</div></div>' +
       '</div>';
+
+    html += '<div class="note" style="margin:-4px 0 14px">' +
+      n0(c.orders) + ' parcels on the receipt. ' + n0(c.noMoney) +
+      ' came back with nothing collected, so they have no invoice to settle. ' +
+      'The other ' + n0(c.withMoney) + ' carried ' + full(t.courier) +
+      ' between them — that is what has to reach QuickBooks.</div>';
 
     // the courier's own total against what QuickBooks says is owed
     var gap = Math.round((t.courier - t.toReceive - t.paidAlready) * 100) / 100;

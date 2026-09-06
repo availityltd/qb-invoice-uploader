@@ -4791,8 +4791,24 @@ app.get('/api/receipts/match', async (req, res) => {
           impact: r2(Math.abs(o.received - (o.qbBalance || 0)))
         }))
       ),
+      // Two different denominators were being shown side by side: 464 orders
+      // on the receipt against 390 already paid, which is out of the 390 that
+      // carried money at all. Both, and everything between them, spelled out.
+      counts: {
+        orders:      (detail.orders || []).length,
+        noMoney:     (detail.orders || []).length - paying.length,
+        withMoney:   paying.length,
+        ready:       matched.length,
+        alreadyPaid: alreadyPaid.length,
+        missing:     missing.length,
+        differs:     offBy.length + mismatched.length,
+        settled:     settled.length
+      },
       totals: {
         courier:  r2(paying.reduce((s, o) => s + o.received, 0)),
+        noMoney:  r2((detail.orders || [])
+                      .filter(o => !(o.received > 0.005))
+                      .reduce((s, o) => s + o.amount, 0)),
         toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
         paidAlready: r2(alreadyPaid.reduce((s, o) => s + o.received, 0)),
         paidHere: r2(alreadyPaid.reduce((s, o) => s + (o.paidHereAmount || 0), 0)),
