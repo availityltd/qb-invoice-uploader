@@ -384,6 +384,84 @@ export async function pickupOrders(realmId, opts) {
 
 /* ==================== the orders behind one number ==================== */
 
+// The same rows as ordersBy but without its ceiling, handed over a page at a
+// time so a month of parcels never sits in memory all at once. ordersBy stops
+// at two thousand because a drawer cannot show more than that; a download is
+// the opposite - it is worth having precisely because it is complete.
+export async function eachOrder(realmId, opts, onBatch) {
+  const PAGE = 2000;
+  let after = null;          // (booked_on, tracking) of the last row sent
+  let sent = 0;
+
+  for (let guard = 0; guard < 500; guard++) {
+    const base = scope(realmId, opts);
+    const where = base.where.slice();
+    const args = base.args.slice();
+
+    if (opts.from) { args.push(opts.from); where.push(`o.booked_on >= $${args.length}`); }
+    if (opts.to)   { args.push(opts.to);   where.push(`o.booked_on <= $${args.length}`); }
+    if (opts.status) { args.push(opts.status); where.push(`o.status = $${args.length}`); }
+    if (opts.city)   { args.push(opts.city);   where.push(`o.city = $${args.length}`); }
+    if (opts.cpr)    { args.push(opts.cpr);    where.push(`o.cpr_number = $${args.length}`); }
+    if (opts.picked === '1' || opts.picked === 1) where.push(`o.picked_on IS NOT NULL`);
+    if (opts.picked === '0' || opts.picked === 0) where.push(`o.picked_on IS NULL`);
+
+    if (opts.group) {
+      const groups = String(opts.group).split(',').map(s => s.trim()).filter(Boolean);
+      if (groups.length === 1) {
+        args.push(groups[0]); where.push(`o.status_group = $${args.length}`);
+      } else if (groups.length > 1) {
+        args.push(groups); where.push(`o.status_group = ANY($${args.length})`);
+      }
+    }
+
+    // Carrying on from the last row read, rather than OFFSET - an offset makes
+    // the database walk everything it already skipped on every page.
+    if (after) {
+      args.push(after.day); args.push(after.tracking);
+      where.push(`(o.booked_on, o.tracking) < ($${args.length - 1}::date, $${args.length})`);
+    }
+
+    const r = await pool.query(
+      `SELECT o.tracking, o.order_ref, o.amount, o.fee, o.tax, o.status, o.status_group,
+              o.city, o.booked_on, o.picked_on, o.delivered_on,
+              o.settled_on, o.cpr_number, a.label
+         FROM courier_orders o
+         JOIN courier_accounts a ON a.id = o.account_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY o.booked_on DESC, o.tracking DESC
+        LIMIT ${PAGE}`, args);
+
+    if (!r.rows.length) break;
+
+    const last = r.rows[r.rows.length - 1];
+    after = { day: day(last.booked_on), tracking: last.tracking };
+
+    await onBatch(r.rows.map(x => ({
+      account: x.label,
+      tracking: x.tracking,
+      orderRef: x.order_ref,
+      amount: r2(x.amount),
+      fee: r2(x.fee),
+      tax: r2(x.tax),
+      status: x.status,
+      statusGroup: x.status_group,
+      city: x.city,
+      bookedOn: day(x.booked_on),
+      pickedOn: day(x.picked_on),
+      deliveredOn: day(x.delivered_on),
+      settledOn: day(x.settled_on),
+      cprNumber: x.cpr_number
+    })));
+
+    sent += r.rows.length;
+    if (r.rows.length < PAGE) break;
+    if (!after.day) break;          // no booking date to page on, so stop here
+  }
+
+  return sent;
+}
+
 export async function ordersBy(realmId, opts) {
   const base = scope(realmId, opts);
   const where = base.where.slice();

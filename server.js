@@ -60,7 +60,7 @@ import {
 } from './backfill.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
 import {
-  dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy
+  dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy, eachOrder
 } from './dashdata.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -2914,34 +2914,47 @@ app.get('/api/courier/export', async (req, res) => {
   const { from, to, account, courier, status, group, city, cpr, picked } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
 
+  // every value quoted, so a tracking number keeps its leading zeros and a
+  // comma inside an address cannot split a row
+  const cell = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const line = a => a.map(cell).join(',');
+  const CRLF = '\r\n';
+
   try {
-    const d = await ordersBy(realmId, { from, to, account, courier, status, group, city, cpr, picked });
-
-    // every value quoted, so a tracking number keeps its leading zeros and a
-    // comma inside an address cannot split a row
-    const cell = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-    const line = a => a.map(cell).join(',');
-
-    const rows = [line([
-      'Account', 'Order ref', 'Tracking', 'City', 'Status', 'Stage',
-      'Amount', 'Fee', 'Tax', 'Booked', 'Picked up', 'Delivered',
-      'Settled', 'CPR number'
-    ])];
-
-    (d.orders || []).forEach(o => rows.push(line([
-      o.account, o.orderRef, o.tracking, o.city, o.status, o.statusGroup,
-      o.amount, o.fee, o.tax, o.bookedOn, o.pickedOn, o.deliveredOn,
-      o.settledOn, o.cprNumber
-    ])));
-
     const name = `courier ${from} to ${to}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="' + name + '"');
     res.setHeader('Cache-Control', 'no-store');
-    res.send('﻿' + rows.join('\r\n') + '\r\n');
+
+    // written out as it is read, so a year of parcels never has to be held
+    res.write('﻿' + line([
+      'Account', 'Order ref', 'Tracking', 'City', 'Status', 'Stage',
+      'Amount', 'Fee', 'Tax', 'Booked', 'Picked up', 'Delivered',
+      'Settled', 'CPR number'
+    ]) + CRLF);
+
+    const sent = await eachOrder(
+      realmId,
+      { from, to, account, courier, status, group, city, cpr, picked },
+      rows => {
+        res.write(rows.map(o => line([
+          o.account, o.orderRef, o.tracking, o.city, o.status, o.statusGroup,
+          o.amount, o.fee, o.tax, o.bookedOn, o.pickedOn, o.deliveredOn,
+          o.settledOn, o.cprNumber
+        ])).join(CRLF) + CRLF);
+      }
+    );
+
+    console.log(`export: ${sent} orders, ${from} to ${to}`);
+    res.end();
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    // the headers are already out by now, so the error has to go in the file
+    if (res.headersSent) {
+      res.end(CRLF + '"Export stopped: ' +
+              String(e.message).replace(/"/g, "'") + '"' + CRLF);
+    }
+    else res.status(500).json({ error: e.message });
   }
 });
 
