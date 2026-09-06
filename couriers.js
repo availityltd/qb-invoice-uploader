@@ -111,7 +111,12 @@ export async function initCouriers() {
       ADD COLUMN IF NOT EXISTS expected_amount NUMERIC(14,2),
       ADD COLUMN IF NOT EXISTS received_amount NUMERIC(14,2),
       ADD COLUMN IF NOT EXISTS dc_journal_id   TEXT,
-      ADD COLUMN IF NOT EXISTS dc_posted_on    TIMESTAMPTZ
+      ADD COLUMN IF NOT EXISTS dc_posted_on    TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS cod_amount      NUMERIC(14,2),
+      ADD COLUMN IF NOT EXISTS charges_amount  NUMERIC(14,2),
+      ADD COLUMN IF NOT EXISTS tax_amount      NUMERIC(14,2),
+      ADD COLUMN IF NOT EXISTS wh_amount       NUMERIC(14,2),
+      ADD COLUMN IF NOT EXISTS orders_count    INTEGER
   `);
 }
 
@@ -159,7 +164,8 @@ export async function listPortalCprs(realmId, opts) {
     `SELECT c.cpr_number, c.remote_id, c.account_id, a.label, c.courier,
             c.status, c.status_id, c.net_amount, c.created_on, c.approved_on,
             c.qb_payment_id, c.received_on, c.expected_amount, c.received_amount,
-            c.dc_journal_id, c.dc_posted_on
+            c.dc_journal_id, c.dc_posted_on, c.cod_amount, c.charges_amount,
+            c.tax_amount, c.wh_amount, c.orders_count
        FROM courier_cprs c
        JOIN courier_accounts a ON a.id = c.account_id
       WHERE ${where.join(' AND ')}
@@ -185,7 +191,12 @@ export async function listPortalCprs(realmId, opts) {
     expected:    x.expected_amount == null ? null : Math.round(Number(x.expected_amount) * 100) / 100,
     received:    x.received_amount == null ? null : Math.round(Number(x.received_amount) * 100) / 100,
     dcJournalId: x.dc_journal_id,
-    dcPostedOn:  d(x.dc_posted_on)
+    dcPostedOn:  d(x.dc_posted_on),
+    codAmount:   x.cod_amount     == null ? null : Math.round(Number(x.cod_amount) * 100) / 100,
+    charges:     x.charges_amount == null ? null : Math.round(Number(x.charges_amount) * 100) / 100,
+    taxAmount:   x.tax_amount     == null ? null : Math.round(Number(x.tax_amount) * 100) / 100,
+    withholding: x.wh_amount      == null ? null : Math.round(Number(x.wh_amount) * 100) / 100,
+    orders:      x.orders_count   == null ? null : Number(x.orders_count)
   }));
 }
 
@@ -215,6 +226,45 @@ export async function markCprReceived(realmId, accountId, cprNumber, info) {
      i.received == null ? null : Number(i.received),
      i.add === true]
   );
+}
+
+// The totals off the receipt's own summary. Net is what the courier pays
+// out; COD is what it collected, and that is the figure a QuickBooks payment
+// has to match. Kept once so the list does not have to ask again.
+export async function saveCprTotals(realmId, accountId, cprNumber, t) {
+  await pool.query(
+    `UPDATE courier_cprs
+        SET cod_amount     = $4,
+            charges_amount = $5,
+            tax_amount     = $6,
+            wh_amount      = $7,
+            orders_count   = $8
+      WHERE realm_id = $1 AND account_id = $2 AND cpr_number = $3`,
+    [realmId, accountId, cprNumber,
+     t.cod == null ? null : Number(t.cod),
+     t.charges == null ? null : Number(t.charges),
+     t.tax == null ? null : Number(t.tax),
+     t.withholding == null ? null : Number(t.withholding),
+     t.orders == null ? null : Number(t.orders)]
+  );
+}
+
+// which receipts have not had their totals read yet
+export async function cprsMissingTotals(realmId, accountId, limit) {
+  const r = await pool.query(
+    `SELECT cpr_number, remote_id, created_on
+       FROM courier_cprs
+      WHERE realm_id = $1 AND account_id = $2 AND cod_amount IS NULL
+        AND remote_id IS NOT NULL
+      ORDER BY created_on DESC NULLS LAST
+      LIMIT $3`,
+    [realmId, accountId, Number(limit) || 12]
+  );
+  return r.rows.map(x => ({
+    cpr: x.cpr_number,
+    remoteId: x.remote_id,
+    createdOn: x.created_on
+  }));
 }
 
 // the delivery charges for a receipt, once they are journalled

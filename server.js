@@ -4649,6 +4649,62 @@ app.post('/api/receipts/receive', async (req, res) => {
   }
 });
 
+// A receipt received into QuickBooks before this page knew how to say so -
+// or through the older sheet page - is still received. QuickBooks holds the
+// proof: the payment carries the receipt's number as its reference. This
+// finds those and stamps them, rather than making anyone receive twice.
+app.get('/api/receipts/check', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const account = Number(req.query.account);
+  const { from, to } = req.query;
+  if (!account || !from || !to) {
+    return res.status(400).json({ error: 'account and a date range are needed' });
+  }
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const token = await getAccessToken(realmId);
+
+    // a receipt dated the 1st is usually paid within days, not the same hour
+    const wide = d => {
+      const x = new Date(d + 'T00:00:00Z');
+      x.setUTCDate(x.getUTCDate() + 45);
+      return x.toISOString().slice(0, 10);
+    };
+
+    const byRef = await paymentsByCpr(realmId, token, from, wide(to));
+    const list = await listLiveCprs(realmId, { account, from, to });
+
+    let stamped = 0;
+    const found = [];
+
+    for (const c of list) {
+      if (c.qbPaymentId) continue;              // already known about
+
+      const hit = byRef.get(c.cpr);
+      if (!hit || !hit.amount) continue;
+
+      const amount = Math.round(hit.amount * 100) / 100;
+
+      await markCprReceived(realmId, account, c.cpr, {
+        qbPaymentId: hit.ids && hit.ids.length ? String(hit.ids[0]) : 'found',
+        expected: c.codAmount == null ? null : c.codAmount,
+        received: amount
+      });
+
+      stamped++;
+      found.push({ cpr: c.cpr, amount, payments: hit.count });
+    }
+
+    res.json({ stamped, found });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Stamped once the money is in, so the receipt is never taken twice.
 app.post('/api/receipts/mark', async (req, res) => {
   const realmId = await requireCompany(req, res);

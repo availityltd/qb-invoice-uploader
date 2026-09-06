@@ -8,7 +8,9 @@
 // already holds once it is posted. It is kept in memory for a few minutes
 // instead, which is all a person clicking around needs.
 
-import { getAccount, saveCprs, listPortalCprs } from './couriers.js';
+import {
+  getAccount, saveCprs, listPortalCprs, saveCprTotals, cprsMissingTotals
+} from './couriers.js';
 import { decrypt } from './secrets.js';
 import {
   tokenFor, forget as forgetToken,
@@ -70,7 +72,34 @@ export async function refreshCprs(realmId, accountId, from, to) {
     raw:        {}                    // the row itself is already in our columns
   })));
 
+  // The list only carries the net - what the courier pays out. The figure a
+  // QuickBooks payment has to match is the COD it collected, and that is in
+  // each receipt's summary. Read once per receipt and kept, so the list stays
+  // a database read afterwards.
+  await fillTotals(realmId, s).catch(() => {});
+
   return rows.length;
+}
+
+async function fillTotals(realmId, s){
+  const need = await cprsMissingTotals(realmId, s.accountId, 12);
+  if (!need.length) return;
+
+  for (const c of need) {
+    try {
+      const sum = await fetchSummary(s, c.remoteId, c.createdOn);
+
+      await saveCprTotals(realmId, s.accountId, c.cpr, {
+        cod: sum.grandTotal,
+        charges: sum.codCharges + sum.upfrontCharges,
+        tax: sum.tax,
+        withholding: sum.salesTax + sum.incomeTax,
+        orders: (sum.lines || []).reduce((a, l) => a + l.orders, 0)
+      });
+    } catch (e) {
+      // one receipt refusing to answer should not stop the rest
+    }
+  }
 }
 
 // What the page draws: our own rows, so the QuickBooks column comes with them.
