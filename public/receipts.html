@@ -987,22 +987,38 @@
     // do about it, and downloads on its own.
     var probs = m.problems || [];
 
+    // Each box shows only what someone needs to act on it, and downloads
+    // exactly that. The receipt's full detail is on the all-in-one download.
+    var ORDER   = ['Order',       function(o){ return o.orderRef; }, 'mono'];
+    var CPRAMT  = ['CPR amount',  function(o){ return full(o.received); }, 'r'];
+    var QBAMT   = ['QuickBooks',  function(o){
+                     return o.qbTotal == null ? '' : full(o.qbTotal); }, 'r'];
+    var DIFF    = ['Difference',  function(o){
+                     return o.unexplained == null ? '' : full(o.unexplained); }, 'r'];
+
     var SECTIONS = [
       { kind: 'amount differs',
-        title: 'Amount differs — sheet against QuickBooks',
+        title: 'Amount differs — CPR against QuickBooks',
+        cols: [ORDER, CPRAMT, QBAMT, DIFF],
         note: 'The invoice was raised for a figure that is neither what the ' +
               'courier collected nor that plus an advance. These are held back ' +
               'rather than posted — posting one marks it paid and buries the ' +
               'difference. Put the invoice right, then open this receipt again.' },
+
       { kind: 'no invoice',
         title: 'Not found in QuickBooks',
+        cols: [ORDER, CPRAMT],
         note: 'No invoice exists for these at all. Make them, then open this ' +
               'receipt again and they will go in with the rest.' },
+
       { kind: 'paid elsewhere',
         title: 'Paid under another payment',
+        cols: [ORDER, CPRAMT,
+               ['Paid under', function(o){
+                  return (o.paidFrom || []).map(function(f){
+                    return f.ref || 'no reference'; }).join(', '); }, '']],
         note: 'Settled by something other than this receipt, so nothing more ' +
-              'can go in against them. The payment that took each one is in ' +
-              'the Why column.' }
+              'can go in against them.' }
     ];
 
     if(probs.length){
@@ -1013,20 +1029,10 @@
       html += '<div class="box"><h3>Invoices with something wrong' +
         '<span class="aside">' + n0(probs.length) + ' parcels · ' +
         full(total) + ' at stake</span>' +
-        '<button class="dl2" id="rDlProb">Download all of them</button></h3>' +
-        '<div class="tally2" style="margin-bottom:0">' +
-          SECTIONS.map(function(sec){
-            var rows = probs.filter(function(o){ return o.kind === sec.kind; });
-            if(!rows.length) return '';
-            var amt = rows.reduce(function(a,o){
-              return a + (o.impact == null ? o.received : o.impact);
-            }, 0);
-            return '<div class="bad"><div class="n">' + n0(rows.length) + '</div>' +
-                   '<div class="l">' + esc(sec.kind) + '</div>' +
-                   '<div class="l" style="text-transform:none;letter-spacing:0;' +
-                   'color:var(--muted)">' + full(amt) + '</div></div>';
-          }).join('') +
-        '</div></div>';
+        '<button class="dl2" id="rDlProb">Download all, with full detail</button></h3>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
+        'Each box below downloads just what it shows. The button above carries ' +
+        'every one of them in the receipt’s own sixteen columns.</p></div>';
 
       SECTIONS.forEach(function(sec, i){
         var rows = probs.filter(function(o){ return o.kind === sec.kind; });
@@ -1042,7 +1048,7 @@
           '<button class="dl2" data-dlsec="' + i + '">Download these</button></h3>' +
           '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
           esc(sec.note) + '</p>' +
-          detailTable(rows) + '</div>';
+          shortTable(rows, sec.cols) + '</div>';
       });
     }
 
@@ -1059,7 +1065,12 @@
         'Whether the invoice was raised at the COD or at the COD plus that ' +
         'advance, it adds up either way: the advance and this receipt between ' +
         'them settled it in full, and the open balance in QuickBooks is nil. ' +
-        'Nothing to chase.</p>' + detailTable(m.settled) + '</div>';
+        'Nothing to chase.</p>' +
+        shortTable(m.settled, [ORDER, CPRAMT, QBAMT,
+          ['Advance', function(o){ return o.advance == null ? '' : full(o.advance); }, 'r'],
+          ['Paid by this CPR', function(o){
+             return o.paidHereAmount == null ? '' : full(o.paidHereAmount); }, 'r']
+        ]) + '</div>';
     }
 
     // A gap with nothing to show for it is worse than no gap at all - it looks
@@ -1171,13 +1182,17 @@
       b.addEventListener('click', function(){
         var sec = SECTIONS[Number(b.getAttribute('data-dlsec'))];
         csvOf((match.problems || []).filter(function(o){ return o.kind === sec.kind; }),
-              match.cpr + ' - ' + sec.kind + '.csv');
+              match.cpr + ' - ' + sec.kind + '.csv', sec.cols);
       });
     });
 
     var dls = $('rDlSettled');
     if(dls) dls.addEventListener('click', function(){
-      csvOf(match.settled, match.cpr + ' - settled with an advance.csv');
+      csvOf(match.settled, match.cpr + ' - settled with an advance.csv',
+            [ORDER, CPRAMT, QBAMT,
+             ['Advance', function(o){ return o.advance == null ? '' : full(o.advance); }, 'r'],
+             ['Paid by this CPR', function(o){
+                return o.paidHereAmount == null ? '' : full(o.paidHereAmount); }, 'r']]);
     });
   }
 
@@ -1213,31 +1228,35 @@
     ['Why',              function(o){ return o.why || ''; }, '']
   ];
 
-  // the receipt's own columns, so a row here can be read against the portal
-  function detailTable(rows){
-    return '<div class="scroll"><table class="t"><tr>' +
-      COLS.map(function(c){
+  // The boxes show the few columns someone needs in order to act, and
+  // download exactly those. Only the all-in-one download carries the
+  // receipt's full sixteen.
+  function shortTable(rows, cols){
+    return '<div class="scroll" style="max-height:320px;overflow:auto">' +
+      '<table class="t"><tr>' +
+      cols.map(function(c){
         return '<th'+(c[2]==='r'?' class="r"':'')+'>'+esc(c[0])+'</th>';
       }).join('') + '</tr>' +
       rows.map(function(o){
-        return '<tr>' + COLS.map(function(c){
+        return '<tr>' + cols.map(function(c){
           return '<td'+(c[2]?' class="'+c[2]+'"':'')+'>'+esc(c[1](o))+'</td>';
         }).join('') + '</tr>';
       }).join('') + '</table></div>';
   }
 
-  function csvOf(rows, name){
+  function csvOf(rows, name, cols){
+    cols = cols || COLS;
     var cell = function(v){
       return '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"';
     };
     var body = rows.map(function(o){
-      return COLS.map(function(c){
+      return cols.map(function(c){
         var v = c[1](o);
         // numbers go in as numbers, not as 1,234.00
         return cell(c[2] === 'r' ? String(v).replace(/,/g,'') : v);
       }).join(',');
     });
-    var csv = '﻿' + [COLS.map(function(c){ return cell(c[0]); }).join(',')]
+    var csv = '﻿' + [cols.map(function(c){ return cell(c[0]); }).join(',')]
       .concat(body).join('\r\n') + '\r\n';
 
     var a = document.createElement('a');
