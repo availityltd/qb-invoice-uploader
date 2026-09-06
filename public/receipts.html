@@ -296,7 +296,7 @@
       go.disabled = true; go.textContent = 'Signing in…';
       $('pxMsg').innerHTML = '';
 
-      fetch('/api/cpr/login', {
+      fetch('/api/receipts/login', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ id: account.id, email: email, password: pass })
       })
@@ -324,7 +324,7 @@
     if(!account) return;
     if(!confirm('Forget the saved PostEx sign-in for ' + account.label + '?')) return;
 
-    fetch('/api/cpr/logout', {
+    fetch('/api/receipts/logout', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ id: account.id })
     })
@@ -345,7 +345,7 @@
     p.set('to', toEl.value);
     p.set('account', account.id);
 
-    fetch('/api/cpr/list?'+p.toString(), { cache:'no-store' })
+    fetch('/api/receipts/list?'+p.toString(), { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error){ $('out').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
@@ -469,7 +469,7 @@
     p.set('created', current.createdOn || '');
     p.set('approved', current.approvedOn || '');
     p.set('status', current.status || '');
-    location.href = '/api/cpr/export?' + p.toString();
+    location.href = '/api/receipts/export?' + p.toString();
   });
 
   function openCpr(remoteId, cprNumber, fresh){
@@ -488,7 +488,7 @@
     if(current.createdOn) p.set('created', current.createdOn);
     if(fresh) p.set('fresh', '1');
 
-    fetch('/api/cpr/detail?'+p.toString(), { cache:'no-store' })
+    fetch('/api/receipts/detail?'+p.toString(), { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }

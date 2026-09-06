@@ -384,7 +384,7 @@
     Promise.all([
       fetch('/api/courier/dash?'+params(), { cache:'no-store' }).then(function(r){ return r.json(); }),
       // receipts come from the courier's own portal now, not our order table
-      fetch('/api/cpr/recent?'+new URLSearchParams({
+      fetch('/api/receipts/recent?'+new URLSearchParams({
         account: account || '', courier: courier || '', limit: 6
       }).toString(), { cache:'no-store' }).then(function(r){ return r.json(); }),
       fetch('/api/courier/pickups?'+params({ limit: 8 }), { cache:'no-store' })

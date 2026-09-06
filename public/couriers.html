@@ -327,7 +327,7 @@
         b.disabled = true; b.textContent = 'Checking\u2026';
         out.className = 'out'; out.textContent = '';
 
-        post('/api/cpr/login', { id: id, email: email, password: pass })
+        post('/api/receipts/login', { id: id, email: email, password: pass })
           .then(function(d){
             out.className = 'out good';
             out.textContent = 'Signed in as ' + (d.merchantName || email) + '.';
@@ -348,7 +348,7 @@
         if(!confirm('Forget the PostEx portal sign-in for ' +
                     (a ? a.label : 'this account') + '?\n\n' +
                     'Receipts will stop loading until it is signed in again.')) return;
-        post('/api/cpr/logout', { id: id })
+        post('/api/receipts/logout', { id: id })
           .then(loadAccounts)
           .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
       });

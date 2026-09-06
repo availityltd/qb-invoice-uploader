@@ -4377,7 +4377,7 @@ import { encrypt as encryptSecret } from './secrets.js';
 
 // Save (or replace) the portal sign-in for one courier account. The password
 // is tried before it is kept, so a typo is caught here and not at midnight.
-app.post('/api/cpr/login', async (req, res) => {
+app.post('/api/receipts/login', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
@@ -4412,7 +4412,7 @@ app.post('/api/cpr/login', async (req, res) => {
   }
 });
 
-app.post('/api/cpr/logout', async (req, res) => {
+app.post('/api/receipts/logout', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
@@ -4427,7 +4427,7 @@ app.post('/api/cpr/logout', async (req, res) => {
 
 // the receipts themselves - asked from PostEx, then read back with the
 // QuickBooks column alongside
-app.get('/api/cpr/list', async (req, res) => {
+app.get('/api/receipts/list', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
@@ -4462,7 +4462,7 @@ app.get('/api/cpr/list', async (req, res) => {
 // The few most recent receipts, read from our own table only. The dashboard
 // uses this, so it must not wait on PostEx - the receipts page is where they
 // get refreshed.
-app.get('/api/cpr/recent', async (req, res) => {
+app.get('/api/receipts/recent', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
@@ -4479,7 +4479,7 @@ app.get('/api/cpr/recent', async (req, res) => {
 });
 
 // everything inside one receipt, exactly as the portal shows it
-app.get('/api/cpr/detail', async (req, res) => {
+app.get('/api/receipts/detail', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
@@ -4496,7 +4496,7 @@ app.get('/api/cpr/detail', async (req, res) => {
 });
 
 // the same receipt as a workbook
-app.get('/api/cpr/export', async (req, res) => {
+app.get('/api/receipts/export', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
