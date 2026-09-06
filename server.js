@@ -2904,6 +2904,47 @@ app.get('/api/courier/rows', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// Every parcel booked in the range, with what became of it - booked, picked,
+// delivered or returned, what it was worth, what the courier charged, and
+// which receipt paid it out. This is the whole tracking story in one file.
+app.get('/api/courier/export', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account, courier, status, group, city, cpr } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
+  try {
+    const d = await ordersBy(realmId, { from, to, account, courier, status, group, city, cpr });
+
+    // every value quoted, so a tracking number keeps its leading zeros and a
+    // comma inside an address cannot split a row
+    const cell = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const line = a => a.map(cell).join(',');
+
+    const rows = [line([
+      'Account', 'Order ref', 'Tracking', 'City', 'Status', 'Stage',
+      'Amount', 'Fee', 'Tax', 'Booked', 'Picked up', 'Delivered',
+      'Settled', 'CPR number'
+    ])];
+
+    (d.orders || []).forEach(o => rows.push(line([
+      o.account, o.orderRef, o.tracking, o.city, o.status, o.statusGroup,
+      o.amount, o.fee, o.tax, o.bookedOn, o.pickedOn, o.deliveredOn,
+      o.settledOn, o.cprNumber
+    ])));
+
+    const name = `courier ${from} to ${to}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + name + '"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send('﻿' + rows.join('\r\n') + '\r\n');
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // the orders behind one status
 
 app.get('/api/courier/orders', async (req, res) => {

@@ -108,6 +108,11 @@
   .split .l2{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;
     color:var(--faint);margin-top:3px}
 
+  .box h3 .dl{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:7px;
+    padding:5px 12px;font:inherit;font-size:11.5px;cursor:pointer;color:var(--ink);
+    width:auto;height:auto;font-weight:400}
+  .box h3 .dl:hover{border-color:var(--qbo);color:var(--qbo)}
+
   /* a box that is telling you something is wrong */
   .box.attn{border-color:#E9C3C0;background:#FEF8F7}
 
@@ -513,22 +518,57 @@
     var returnRate    = pct(gc('returned'), settled);
     var lostRate      = pct(lost, t.orders);
 
-    /* ==================== the six cards ==================== */
+    /* ==================== Overview ==================== */
 
-    var html = '<div class="cards">';
-    html += card('Booked', n0(t.orders), full(t.amount) + ' worth');
-    html += card('Delivered', n0(t.delivered),
-                 pc(deliveredRate) + ' · ' + full(t.deliveredAmount) + ' collected', 'good');
-    html += card('Returned', n0(t.returned),
-                 pc(returnRate) + ' · ' + full(ga('returned')) + ' came back');
-    html += card('Still moving', n0(t.pendingOrders), full(t.pendingAmount) + ' pending', 'warn');
-    html += card('Delivery rate', pc(deliveredRate), 'of settled orders');
-    html += card('Courier charges', full(t.fee), 'plus tax ' + full(t.tax));
-    html += '</div>';
+    // Everything on this page is about the parcels booked inside the chosen
+    // dates - not parcels delivered in them. That is the only way a rate
+    // means anything: of the ones handed over, this many arrived.
 
-    /* ==================== Overview: small panels ==================== */
+    var html = '';
 
-    /* --- how the parcels ended up --- */
+    var picked    = gc('transit') + gc('review') + gc('delivered') +
+                    gc('returning') + gc('returned') + lost;
+    var collected = t.deliveredAmount;
+    var owed      = t.pendingAmount;
+
+    var track = [
+      { l:'Booked',          n:t.orders,        a:t.amount,        c:'#5B7C99', head:true },
+      { l:'Picked up',       n:picked,          a:null,            c:'#7FA8D4',
+        g:'transit,review,delivered,returning,returned,lost,damaged' },
+      { l:'Delivered',       n:gc('delivered'), a:ga('delivered'), c:'#4FB477', g:'delivered' },
+      { l:'Returned',        n:gc('returned'),  a:ga('returned'),  c:'#E48B85', g:'returned' },
+      { l:'Lost or damaged', n:lost,            a:ga('lost') + ga('damaged'), c:'#B3453F',
+        g:'lost,damaged' },
+      { l:'Still moving',    n:moving,          a:t.pendingAmount, c:'#B9A24A',
+        g:'unbooked,booked,transit,review,returning' }
+    ];
+
+    var trackRows = track.map(function(x){
+      return '<tr' + (x.head ? ' class="tot"' : ' class="click" data-group="' + esc(x.g) + '"') +
+        '><td><span class="sw" style="background:' + x.c + '"></span>' + esc(x.l) + '</td>' +
+        '<td class="r">' + n0(x.n) + '</td>' +
+        '<td class="r">' + (x.head ? '100%' : pc(pct(x.n, t.orders))) + '</td>' +
+        '<td class="r">' + (x.a === null ? '—' : full(x.a)) + '</td></tr>';
+    }).join('');
+
+    T.overview += '<div class="box" style="margin-bottom:13px"><h3>' +
+      'What happened to the parcels booked in this range' +
+      '<button class="dl" id="dlBooked">Download the lot</button></h3>' +
+      '<table class="t"><tr><th>Stage</th><th class="r">Parcels</th>' +
+      '<th class="r">Of booked</th><th class="r">Worth</th></tr>' + trackRows +
+      '<tr class="tot"><td>Money collected</td><td class="r">—</td>' +
+      '<td class="r">' + pc(pct(collected, collected + owed)) + '</td>' +
+      '<td class="r">' + full(collected) + '</td></tr>' +
+      '<tr class="tot"><td>Money still to come</td><td class="r">—</td>' +
+      '<td class="r">' + pc(pct(owed, collected + owed)) + '</td>' +
+      '<td class="r">' + full(owed) + '</td></tr>' +
+      '</table>' +
+      '<div class="note">Every row is the parcels booked between ' + esc(d.from) +
+      ' and ' + esc(d.to) + '. Click a row to see them, or download every ' +
+      'parcel with its whole history.</div></div>';
+
+    /* --- one grid, every tile the same --- */
+
     var mix = [
       { l:'Delivered', n:gc('delivered'), c:'#4FB477' },
       { l:'Returned',  n:gc('returned'),  c:'#E48B85' },
@@ -539,39 +579,39 @@
 
     T.overview += '<div class="mini">';
 
+    T.overview += panel('Booked', full(t.amount) + ' worth',
+      '<div class="big">' + n0(t.orders) + '</div>' +
+      '<div class="sub2">parcels handed to the courier</div>' +
+      more('orders', 'Day by day'));
+
     T.overview += panel('Delivery rate', n0(settled) + ' settled',
       '<div class="big" style="color:' + gradeColour(deliveredRate) + '">' +
       pc(deliveredRate) + '</div>' +
-      '<div class="sub2">' + n0(gc('delivered')) + ' delivered of ' + n0(settled) +
-      ' settled</div>' +
+      '<div class="sub2">' + n0(gc('delivered')) + ' delivered of ' + n0(settled) + '</div>' +
       meter([{ n:gc('delivered'), c:'#4FB477' }, { n:gc('returned'), c:'#E48B85' }]) +
       more('orders', 'Every status'));
 
+    T.overview += panel('Return rate', n0(gc('returned')) + ' came back',
+      '<div class="big" style="color:' + gradeColour(100 - returnRate) + '">' +
+      pc(returnRate) + '</div>' +
+      '<div class="sub2">' + full(ga('returned')) + ' did not sell</div>' +
+      more('orders', 'Every status'));
+
     T.overview += panel('Where the parcels went', n0(t.orders) + ' booked',
-      meter(mix) + legend(mix) + more('orders', 'Day by day'));
+      meter(mix) + legend(mix) + more('orders', 'Every status'));
 
-    /* --- the money --- */
-    var collected = t.deliveredAmount;
-    var owed = t.pendingAmount;
-    var moneyRate = pct(collected, collected + owed);
-
-    T.overview += panel('Money collected', pc(moneyRate) + ' of booked',
+    T.overview += panel('Money collected', pc(pct(collected, collected + owed)) + ' of booked',
       '<div class="big">' + full(collected) + '</div>' +
       '<div class="sub2">' + full(owed) + ' still to come</div>' +
       meter([{ n:collected, c:'#4FB477' }, { n:owed, c:'#E8EDF3' }]) +
       more('payments', 'Money not in yet'));
 
-    /* --- what the courier charged --- */
-    var chargeRate = pct(t.fee + t.tax, collected);
-
-    T.overview += panel('Courier charges', pc(chargeRate) + ' of collected',
+    T.overview += panel('Courier charges', pc(pct(t.fee + t.tax, collected)) + ' of collected',
       '<div class="big">' + full(t.fee + t.tax) + '</div>' +
       '<div class="sub2">' + full(t.fee) + ' charges · ' + full(t.tax) + ' tax</div>' +
       more('payments', 'Receipts'));
 
-    /* --- lost and damaged, small on purpose --- */
-    T.overview += panel('Lost or damaged',
-      lost ? pc(lostRate) + ' of booked' : '',
+    T.overview += panel('Lost or damaged', lost ? pc(lostRate) + ' of booked' : '',
       '<div class="big">' + n0(lost) + '</div>' +
       '<div class="sub2">' + (lost
         ? full(ga('lost') + ga('damaged')) + ' at risk'
@@ -579,48 +619,49 @@
       more('orders', 'Every status'),
       lost ? 'warn2' : '');
 
-    /* --- the newest receipt --- */
     var c0 = cprs[0];
     T.overview += panel('Latest receipt', c0 ? esc(c0.status || '') : '',
       (c0
-        ? '<div class="big" style="font-size:20px">' + full(c0.netAmount) + '</div>' +
+        ? '<div class="big" style="font-size:21px">' + full(c0.netAmount) + '</div>' +
           '<div class="sub2">' + esc(c0.cpr) + ' · ' + esc(c0.createdOn || '') + '</div>' +
           '<div class="sub2">' + (c0.qbPaymentId
-            ? 'received in QuickBooks'
-            : 'not in QuickBooks yet') + '</div>'
+            ? 'received in QuickBooks' : 'not in QuickBooks yet') + '</div>'
         : '<div class="sub2">No receipts pulled in yet. Sign in to the courier ' +
           'portal on the receipts page.</div>') +
       more('payments', 'All receipts'));
 
-    /* --- the best and worst cities --- */
     var cities = (d.cities || []).filter(function(c){ return c.settled >= 5; });
-    var best = cities.slice().sort(function(a, b){ return b.rate - a.rate; })[0];
+    var best  = cities.slice().sort(function(a, b){ return b.rate - a.rate; })[0];
     var worst = cities.slice().sort(function(a, b){ return a.rate - b.rate; })[0];
 
-    T.overview += panel('Cities', n0((d.cities || []).length) + ' in range',
+    T.overview += panel('Best and worst city', n0((d.cities || []).length) + ' in range',
       (best
         ? '<div class="split">' +
-            '<div><div class="n2" style="color:#1F9D5A">' + pc(best.rate) + '</div>' +
-              '<div class="l2">' + esc(best.city) + '</div></div>' +
+            '<div><div class="n2" style="color:' + gradeColour(best.rate) + '">' +
+              pc(best.rate) + '</div><div class="l2">' + esc(best.city) + '</div></div>' +
             '<div><div class="n2" style="color:' + gradeColour(worst.rate) + '">' +
               pc(worst.rate) + '</div><div class="l2">' + esc(worst.city) + '</div></div>' +
-          '</div>' +
-          '<div class="sub2" style="margin-top:9px">Best and worst delivery rate, ' +
-          'cities with 5 or more settled</div>'
+          '</div><div class="sub2" style="margin-top:9px">' +
+          'Delivery rate, cities with 5 or more settled</div>'
         : '<div class="sub2">Not enough settled orders yet to rank cities.</div>') +
       more('cities', 'Every city'));
 
-    /* --- handed over --- */
     var pickTotal = picks.reduce(function(a, p){ return a + p.parcels; }, 0);
     T.overview += panel('Handed over', picks.length + ' days',
       '<div class="big">' + n0(pickTotal) + '</div>' +
       '<div class="sub2">parcels given to the courier</div>' +
-      more('orders', 'Day by day'));
+      more('orders', 'Handed over'));
+
+    T.overview += panel('Receipts', n0(cprs.length) + ' pulled in',
+      '<div class="big">' + n0(cprs.filter(function(c){ return c.qbPaymentId; }).length) +
+      ' / ' + n0(cprs.length) + '</div>' +
+      '<div class="sub2">received into QuickBooks</div>' +
+      more('payments', 'All receipts'));
 
     T.overview += '</div>';
 
-    /* --- the chart, full width, and the newest deliveries beside it --- */
-    T.overview += '<div class="box" style="margin-bottom:13px"><h3>Day by day' +
+    /* the chart and the newest deliveries belong with the orders, not the summary */
+    T.orders += '<div class="box" style="margin-bottom:13px"><h3>Day by day' +
       '<span class="aside">' + esc(d.from) + ' → ' + esc(d.to) + '</span></h3>' +
       dayChart(days) + '</div>';
 
@@ -632,7 +673,7 @@
              '<div class="dt">' + esc(o.on || '') + '</div></div></a>';
     }).join('');
 
-    T.overview += '<div class="box"><h3>Latest deliveries' +
+    T.orders += '<div class="box" style="margin-bottom:13px"><h3>Latest deliveries' +
       '<span class="aside">newest first</span></h3>' +
       '<div class="tx">' + (tx || '<div class="note">Nothing yet.</div>') + '</div></div>';
 
@@ -875,6 +916,13 @@
     }
 
     /* ---------- what everything on the page does ---------- */
+
+    var dl = document.getElementById('dlBooked');
+    if(dl){
+      dl.addEventListener('click', function(){
+        location.href = '/api/courier/export?' + params();
+      });
+    }
 
     $('out').querySelectorAll('.more[data-go]').forEach(function(b){
       b.addEventListener('click', function(){ showTab(b.getAttribute('data-go')); });

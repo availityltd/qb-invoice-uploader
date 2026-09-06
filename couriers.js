@@ -310,6 +310,24 @@ export async function saveOrders(realmId, accountId, courier, rows) {
 
   return saved;
 }
+// The courier sends about sixty fields per parcel and we read a dozen. The
+// rest is kept as `raw` only so someone can look at what actually arrived
+// when a field seems wrong - which is only ever useful for something recent.
+// Left alone it is 2.2 KB a parcel against the 250 bytes the columns need,
+// and ten accounts would put gigabytes a year into the database for nothing.
+// The parcels themselves stay; only the untouched copy is let go.
+export async function trimRaw(days) {
+  const r = await pool.query(
+    `UPDATE courier_orders
+        SET raw = '{}'::jsonb
+      WHERE seen_at < NOW() - ($1 || ' days')::interval
+        AND raw IS NOT NULL
+        AND raw <> '{}'::jsonb`,
+    [String(Number(days) || 7)]
+  );
+  return r.rowCount;
+}
+
 // which delivered orders we have not asked about yet
 export async function needCpr(realmId, accountId, limit) {
   const r = await pool.query(

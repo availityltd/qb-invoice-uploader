@@ -384,7 +384,16 @@ export async function ordersBy(realmId, opts) {
   if (opts.from) { args.push(opts.from); where.push(`o.booked_on >= $${args.length}`); }
   if (opts.to)   { args.push(opts.to);   where.push(`o.booked_on <= $${args.length}`); }
   if (opts.status) { args.push(opts.status); where.push(`o.status = $${args.length}`); }
-  if (opts.group)  { args.push(opts.group);  where.push(`o.status_group = $${args.length}`); }
+  // A stage on the dashboard is not always one group - "still moving" covers
+  // five of them - so a comma-separated list is allowed.
+  if (opts.group) {
+    const groups = String(opts.group).split(',').map(s => s.trim()).filter(Boolean);
+    if (groups.length === 1) {
+      args.push(groups[0]); where.push(`o.status_group = $${args.length}`);
+    } else if (groups.length > 1) {
+      args.push(groups); where.push(`o.status_group = ANY($${args.length})`);
+    }
+  }
   if (opts.city)   { args.push(opts.city);   where.push(`o.city = $${args.length}`); }
   if (opts.cpr)    { args.push(opts.cpr);    where.push(`o.cpr_number = $${args.length}`); }
 

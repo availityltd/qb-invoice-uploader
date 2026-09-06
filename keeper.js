@@ -3,7 +3,7 @@
 // after that it refreshes the last few days every ten minutes.
 
 import { pool } from './db.js';
-import { listAccounts, getAccount, saveOrders } from './couriers.js';
+import { listAccounts, getAccount, saveOrders, trimRaw } from './couriers.js';
 import { adapter as postexAdapter } from './postex.js';
 
 const ADAPTERS = { postex: postexAdapter };
@@ -11,6 +11,7 @@ const ADAPTERS = { postex: postexAdapter };
 const EVERY = 10 * 60 * 1000;      // ten minutes
 const RECENT_DAYS = 4;             // what a routine refresh covers
 const MAX_CATCHUP = 120;           // how far back a first fill will reach
+const RAW_DAYS = 7;                // how long the courier's own JSON is kept
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const today = () => new Date().toISOString().slice(0, 10);
@@ -149,6 +150,12 @@ async function sweep() {
         }
       }
     }
+
+    // the untouched copies are only worth keeping while they are recent
+    try {
+      const freed = await trimRaw(RAW_DAYS);
+      if (freed) state.trimmed = freed;
+    } catch (e) { /* not worth failing a sweep over */ }
 
     state.note = '';
   } catch (e) {
