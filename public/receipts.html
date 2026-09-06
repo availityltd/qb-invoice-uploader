@@ -645,14 +645,14 @@
         '<td class="mono">'+esc(o.orderRef)+'</td>' +
         '<td class="mono">'+esc(o.tracking)+'</td>' +
         '<td class="r">'+(o.weight||0).toFixed(2)+'</td>' +
-        '<td class="mono">'+esc(o.pickedOn||'')+'</td>' +
+        '<td class="mono">'+esc(o.pickedAt||o.pickedOn||'')+'</td>' +
         '<td>'+esc(o.originCity||'')+'</td>' +
         '<td>'+esc(o.city||'')+'</td>' +
         '<td>'+esc(o.status)+'</td>' +
         '<td class="r">'+full(o.amount)+'</td>' +
         '<td class="r">'+full(o.upfront)+'</td>' +
         '<td class="r">'+full(o.reserve)+'</td>' +
-        '<td class="mono">'+esc(o.deliveredOn||'')+'</td>' +
+        '<td class="mono">'+esc(o.deliveredAt||o.deliveredOn||'')+'</td>' +
         '<td class="r">'+full(o.fee)+'</td>' +
         '<td class="r">'+full(o.upfrontCharges||0)+'</td>' +
         '<td class="r">'+full(o.tax)+'</td>' +
@@ -846,9 +846,9 @@
     };
 
     var body = rows.map(function(o){
-      return [o.orderRef,o.tracking,o.weight,o.pickedOn,
+      return [o.orderRef,o.tracking,o.weight,o.pickedAt||o.pickedOn,
               o.originCity,o.city,o.status,o.amount,o.upfront,
-              o.reserve,o.deliveredOn,o.fee,o.upfrontCharges||0,
+              o.reserve,o.deliveredAt||o.deliveredOn,o.fee,o.upfrontCharges||0,
               o.tax,o.whIncomeTax,o.whSalesTax,o.net,
               o.customer,o.phone,o.bookedOn,o.settledOn,o.notes,o.why].map(cell).join(',');
     });

@@ -17,9 +17,9 @@ export const COLUMNS = [
 
 export function rowOf(o) {
   return [
-    o.orderRef, o.tracking, money(o.weight), o.pickedOn,
+    o.orderRef, o.tracking, money(o.weight), o.pickedAt || o.pickedOn,
     o.originCity, o.city, o.status, money(o.amount), money(o.upfront),
-    money(o.reserve), o.deliveredOn, money(o.fee), money(o.upfrontCharges || 0),
+    money(o.reserve), o.deliveredAt || o.deliveredOn, money(o.fee), money(o.upfrontCharges || 0),
     money(o.tax), money(o.whIncomeTax), money(o.whSalesTax), money(o.net)
   ];
 }

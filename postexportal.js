@@ -167,9 +167,22 @@ const stamp = v => {
   return isNaN(d.getTime()) ? null : d.toISOString();
 };
 
+// PostEx writes its times in Pakistan time and says so - "...T01:44:00+0500".
+// Reading that through UTC moves anything between midnight and five in the
+// morning back a day, and deliveries are updated late at night, so it was
+// quietly moving four hundred parcels of this receipt into the wrong day.
+// The date on the wire is already the local one; take it as written.
 const day = v => {
-  const s = stamp(v);
-  return s ? s.slice(0, 10) : null;
+  if (!v) return null;
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+};
+
+// The same instant as the portal prints it in its own downloads.
+const moment = v => {
+  if (!v) return null;
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+  return m ? `${m[1]} ${m[2]}` : day(v);
 };
 
 export function mapCpr(row) {
@@ -258,6 +271,9 @@ export function mapTransaction(row) {
   const whIncomeTax = reversed ? 0 : Math.round(received * 2) / 100;
   const whSalesTax  = reversed ? 0 : Math.round((deduction - whIncomeTax) * 100) / 100;
 
+  const dr = reversed ? (t.reversalDate || t.orderDeliveryDate)
+                      : (t.orderDeliveryDate || t.reversalDate);
+
   return {
     orderRef:    String(t.orderRefNumber || '').trim(),   // "#91339099" - as QuickBooks has it
     tracking:    String(t.trackingNumber || '').trim(),
@@ -281,8 +297,14 @@ export function mapTransaction(row) {
     items:       Number(t.items || 0),
     bookedOn:    day(t.transactionDate),
     pickedOn:    day(t.orderPickupDate),
-    deliveredOn: day(t.orderDeliveryDate),      // the D/R date - delivered or returned
+    // D/R is delivery or return. A parcel that came back carries the reversal
+    // date, and the few that were delivered first carry both - the return is
+    // what happened last, and what the courier's own receipt shows.
+    deliveredOn: day(dr),
     settledOn:   day(t.settlementDate),
+    // the same two with their time, for the columns the portal prints
+    pickedAt:    moment(t.orderPickupDate),
+    deliveredAt: moment(dr),
     settled:     t.settled === true,
     reversed,
     dispute:     t.disputeInd === true,
