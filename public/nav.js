@@ -153,10 +153,6 @@
       '.ctree .grp .soon{font-size:10px;opacity:.5}',
       '.ctree .kids{display:none}',
       '.ctree .kids.open{display:block}',
-      '.ctree a.sub{padding:4px 14px 4px 60px;font-size:11.5px;',
-      '  color:rgba(255,255,255,.5)}',
-      '.ctree a.sub:hover{color:#fff}',
-      '.ctree a.sub.on{color:#fff;background:rgba(255,255,255,.09);font-weight:600}',
       '.ctree a.add{padding-left:58px;color:rgba(255,255,255,.4);font-size:12px}',
       '.ctree a.add:hover{color:#fff}',
       '.ctree a.wide{padding-left:34px;margin-top:6px;font-size:12px;',
@@ -209,20 +205,13 @@
                  (c.ready ? '' : ' <span class="soon">soon</span>') + '</div>';
 
           out += '<div class="kids' + (mine ? ' open' : '') + '">';
+          // An account is one entry here. What can be done with it - orders,
+          // payments, receipts - are tabs inside the account's own page, not
+          // more lines in this tree.
           c.accounts.forEach(function(a){
-            var open = here.indexOf('account=' + a.id) > -1;
-
-            out += '<a class="acc' + (open ? ' on' : '') +
+            out += '<a class="acc' + (here.indexOf('account=' + a.id) > -1 ? ' on' : '') +
                    '" href="/courier-dash.html?account=' + a.id + '">' +
                    esc(a.label) + '</a>';
-
-            // Receipts are the account's own, not the courier's - two PostEx
-            // accounts settle separately - so the link hangs off the account
-            // rather than sitting on its own above all of them.
-            if(open){
-              out += '<a class="sub' + (path === '/receipts.html' ? ' on' : '') +
-                     '" href="/receipts.html?account=' + a.id + '">Cash payment receipts</a>';
-            }
           });
           out += '<a class="add" href="/couriers.html?add=' + esc(c.key) + '">+ add an account</a>';
           out += '</div>';

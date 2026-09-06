@@ -12,6 +12,14 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 <style>
+  /* the same tabs the account's dashboard has - this page is one of them */
+  .tabs{display:flex;gap:26px;border-bottom:1px solid var(--line);margin:0 0 18px;
+    overflow-x:auto}
+  .tabs a{padding:0 0 11px;font-size:13.5px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;white-space:nowrap}
+  .tabs a:hover{color:var(--ink)}
+  .tabs a.on{color:var(--ink);border-bottom-color:var(--qbo);font-weight:600}
+
   .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
   .bar input[type=date],.bar input[type=text],.bar input[type=email],
   .bar input[type=password],.bar select{border:1px solid var(--line);border-radius:7px;
@@ -175,6 +183,8 @@
 
       <div id="body" class="hide">
 
+        <div class="tabs" id="tabs"></div>
+
         <div class="bar">
           <select id="acct"></select>
           <button data-days="29">30 days</button>
@@ -334,6 +344,18 @@
     loadAccounts();
   });
 
+  // This page is the Receipts tab of the account's own section, so it shows
+  // the same bar and leads back to the rest of it.
+  function drawTabs(){
+    var back = '/courier-dash.html?account=' + account.id + '&tab=';
+    $('tabs').innerHTML =
+      ['overview','orders','payments','cities'].map(function(k){
+        return '<a href="' + back + k + '">' +
+               k.charAt(0).toUpperCase() + k.slice(1) + '</a>';
+      }).join('') +
+      '<a class="on" href="#">Receipts</a>';
+  }
+
   function loadAccounts(){
     fetch('/api/courier/accounts', { cache:'no-store' })
       .then(function(r){ return r.json(); })
@@ -357,6 +379,7 @@
         var want = new URLSearchParams(location.search).get('account');
         account = accounts.filter(function(a){ return String(a.id) === want; })[0] || accounts[0];
         $('acct').value = account.id;
+        drawTabs();
 
         load();
       })

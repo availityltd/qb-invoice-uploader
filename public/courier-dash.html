@@ -202,6 +202,7 @@
           <button data-tab="orders">Orders</button>
           <button data-tab="payments">Payments</button>
           <button data-tab="cities">Cities</button>
+          <button data-go="receipts">Receipts</button>
         </div>
 
         <div class="cdbar">
@@ -247,7 +248,8 @@
   // The tab bar lives in the page, not in the drawn output, so it stays put
   // while the numbers underneath it reload. The choice is remembered.
   var TABS = ['overview','orders','payments','cities'];
-  var tab = localStorage.getItem('cdTab');
+  // ?tab= wins, so coming back from the receipts page lands where it said
+  var tab = qs.get('tab') || localStorage.getItem('cdTab');
   if(TABS.indexOf(tab) < 0) tab = 'overview';
 
   function showTab(k){
@@ -255,7 +257,7 @@
     tab = k;
     localStorage.setItem('cdTab', k);
 
-    document.querySelectorAll('#tabs button').forEach(function(b){
+    document.querySelectorAll('#tabs button[data-tab]').forEach(function(b){
       b.classList.toggle('on', b.getAttribute('data-tab') === k);
     });
     document.querySelectorAll('#out .pane').forEach(function(p){
@@ -264,9 +266,18 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  document.querySelectorAll('#tabs button').forEach(function(b){
+  document.querySelectorAll('#tabs button[data-tab]').forEach(function(b){
     b.addEventListener('click', function(){ showTab(b.getAttribute('data-tab')); });
   });
+
+  // Receipts belongs to this account like the others, but a receipt of two
+  // thousand orders needs a page of its own rather than a panel.
+  document.querySelectorAll('#tabs button[data-go]').forEach(function(b){
+    b.addEventListener('click', function(){
+      location.href = '/receipts.html' + (account ? '?account=' + account : '');
+    });
+  });
+
   showTab(tab);
 
   var COLOR = {
@@ -836,7 +847,7 @@
     }).join('');
 
     T.payments += '<div class="box" style="margin-bottom:13px"><h3>Cash payment receipts' +
-      '<a href="/receipts.html' + (account ? '?account='+account : '') + '">See detail</a></h3>' +
+      '<a href="/receipts.html' + (account ? '?account='+account : '') + '">Open receipts</a></h3>' +
       '<table class="t"><tr><th>CPR number</th><th>Created</th><th>Status</th>' +
       '<th class="r">Net amount</th><th>QuickBooks</th></tr>' +
       (cprRows || '<tr><td colspan="5" style="color:var(--muted)">' +
