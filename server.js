@@ -4609,6 +4609,7 @@ app.get('/api/receipts/match', async (req, res) => {
     const found = await findInvoices(realmId, token, paying.map(o => o.orderRef));
 
     const matched = [], alreadyPaid = [], missing = [], mismatched = [];
+    const heldBack = [];       // matched, but the amounts do not agree
 
     paying.forEach(o => {
       const inv = found.get(cprDigits(o.orderRef));
@@ -4621,7 +4622,7 @@ app.get('/api/receipts/match', async (req, res) => {
         return;
       }
 
-      matched.push({
+      const line = {
         invoice: o.orderRef,
         qbId: inv.id,
         qbDoc: inv.doc,
@@ -4632,21 +4633,29 @@ app.get('/api/receipts/match', async (req, res) => {
         courierAmount: o.received,
         tracking: o.tracking,
         city: o.city
-      });
+      };
 
-      // It will still be received - the balance is what QuickBooks says is
-      // owed - but a gap between that and what the courier handed over is
-      // worth seeing before it is posted, not after.
+      // A payment settles the balance QuickBooks is owed, not what the courier
+      // handed over. Where those disagree, posting it marks the invoice paid
+      // and buries the difference in the receipt's total - so it is held back
+      // instead. The invoice can be corrected and the receipt run again.
       const gap = Math.round((o.received - inv.balance) * 100) / 100;
+
       if (Math.abs(gap) > 1) {
+        heldBack.push(line);
         mismatched.push({
           ...o,
           qbDoc: inv.doc,
           qbBalance: inv.balance,
+          qbTotal: inv.total,
+          unexplained: Math.abs(gap),
           why: `QuickBooks is owed ${inv.balance.toFixed(2)} but the courier ` +
                `collected ${o.received.toFixed(2)} - ` +
-               (gap > 0 ? `${gap.toFixed(2)} more` : `${Math.abs(gap).toFixed(2)} less`)
+               (gap > 0 ? `${gap.toFixed(2)} more` : `${Math.abs(gap).toFixed(2)} less`) +
+               '. Held back until the invoice is put right.'
         });
+      } else {
+        matched.push(line);
       }
     });
 
@@ -4769,6 +4778,7 @@ app.get('/api/receipts/match', async (req, res) => {
       cprDate: (req.query.created || '').slice(0, 10),
       account: acc.label,
       matched,
+      heldBack,
       alreadyPaid,
       settled,
       missing,
@@ -4799,6 +4809,7 @@ app.get('/api/receipts/match', async (req, res) => {
         noMoney:     (detail.orders || []).length - paying.length,
         withMoney:   paying.length,
         ready:       matched.length,
+        heldBack:    heldBack.length,
         alreadyPaid: alreadyPaid.length,
         missing:     missing.length,
         differs:     offBy.length + mismatched.length,
@@ -4810,6 +4821,7 @@ app.get('/api/receipts/match', async (req, res) => {
                       .filter(o => !(o.received > 0.005))
                       .reduce((s, o) => s + o.amount, 0)),
         toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
+        heldBack:  r2(heldBack.reduce((s, m) => s + m.qbBalance, 0)),
         paidAlready: r2(alreadyPaid.reduce((s, o) => s + o.received, 0)),
         paidHere: r2(alreadyPaid.reduce((s, o) => s + (o.paidHereAmount || 0), 0)),
         settled: r2(settled.reduce((s, o) => s + (o.advance || 0), 0)),

@@ -916,6 +916,10 @@
         full(t.toReceive)+'</div></div>' +
       '<div><div class="n">'+n0(c.alreadyPaid)+'</div>' +
         '<div class="l">Already paid</div></div>' +
+      '<div class="'+(c.heldBack?'bad':'')+'"><div class="n">'+n0(c.heldBack)+'</div>' +
+        '<div class="l">Held back</div>' +
+        '<div class="l" style="text-transform:none;letter-spacing:0;color:var(--muted)">' +
+        full(t.heldBack)+'</div></div>' +
       '<div class="'+(c.differs?'bad':'')+'"><div class="n">'+n0(c.differs)+'</div>' +
         '<div class="l">Amount differs</div></div>' +
       '<div class="'+(c.missing?'bad':'')+'"><div class="n">'+n0(c.missing)+'</div>' +
@@ -1070,6 +1074,17 @@
       '<div class="note">The date is the receipt’s own date and the reference is its ' +
       'number, so a payment can always be traced back. The bank is remembered for ' +
       esc(m.account) + ' — change it here whenever it needs changing.</div>' +
+      ((m.heldBack || []).length
+        ? '<div class="warn" style="margin-top:12px">' +
+          n0(m.heldBack.length) + ' invoices worth ' + full(t.heldBack) +
+          ' are held back because what QuickBooks is owed is not what the ' +
+          'courier collected. Posting them would mark them paid and bury the ' +
+          'difference. Put the invoices right and open this receipt again — ' +
+          'or take them anyway, at what QuickBooks is owed.' +
+          '<div style="margin-top:10px"><label style="font-size:12.5px;cursor:pointer">' +
+          '<input type="checkbox" id="rForce" style="margin-right:7px;vertical-align:middle">' +
+          'Receive the held-back ones too</label></div></div>'
+        : '') +
       '<div style="margin-top:14px"><button class="go2" id="rGo">' +
       'Receive ' + n0(m.matched.length) + ' payments · ' + full(t.toReceive) +
       '</button></div>' +
@@ -1081,6 +1096,15 @@
     wireBack();
 
     $('rGo').addEventListener('click', startReceive);
+
+    var force = $('rForce');
+    if(force){
+      force.addEventListener('change', function(){
+        var n = match.matched.length + (force.checked ? match.heldBack.length : 0);
+        var amt = t.toReceive + (force.checked ? t.heldBack : 0);
+        $('rGo').textContent = 'Receive ' + n0(n) + ' payments · ' + full(amt);
+      });
+    }
 
     var mk = $('rMark');
     if(mk){
@@ -1193,6 +1217,16 @@
     var bank = $('rBank').value;
     if(!bank){ $('rOut').innerHTML = '<div class="msg">Pick the bank first.</div>'; return; }
 
+    var force = $('rForce');
+    var lines = (force && force.checked)
+      ? match.matched.concat(match.heldBack || [])
+      : match.matched;
+
+    if(!lines.length){
+      $('rOut').innerHTML = '<div class="msg">Nothing to receive.</div>';
+      return;
+    }
+
     $('rGo').disabled = true;
     $('rGo').textContent = 'Receiving…';
     $('dReceive').disabled = true;
@@ -1205,7 +1239,7 @@
         cprDate: $('rDate').value,
         accountId: bank,
         methodId: $('rMethod').value || null,
-        matched: match.matched
+        matched: lines
       })
     })
     .then(function(r){ return r.json(); })
