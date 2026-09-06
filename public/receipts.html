@@ -983,27 +983,32 @@
 
     /* --- what could not be received, with everything about it --- */
 
-    if(m.missing.length || m.alreadyPaid.length){
-      var rows = m.missing.concat(m.alreadyPaid).map(function(o){
-        return '<tr><td class="mono">'+esc(o.orderRef||'')+'</td>' +
-               '<td class="mono">'+esc(o.tracking)+'</td>' +
-               '<td>'+esc(o.customer||'')+'</td>' +
-               '<td>'+esc(o.city||'')+'</td>' +
-               '<td>'+esc(o.status||'')+'</td>' +
-               '<td class="r">'+full(o.received)+'</td>' +
-               '<td class="r">'+full(o.fee)+'</td>' +
-               '<td class="mono">'+esc(o.deliveredOn||'')+'</td>' +
-               '<td>'+esc(o.why||'')+'</td></tr>';
-      }).join('');
+    // Where a shortfall actually comes from: parcels this receipt collected on
+    // whose invoices were settled by some other payment. They are paid, so
+    // there is nothing to receive - but they are not this receipt's money, and
+    // that is the difference between what it collected and what went in.
+    if((m.paidElsewhere || []).length){
+      html += '<div class="box"><h3>Paid, but not under this receipt' +
+        '<span class="aside">' + n0(m.paidElsewhere.length) + ' parcels · ' +
+        full(t.paidElsewhere) + '</span>' +
+        '<button class="dl2" id="rDlElse">Download</button></h3>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
+        'These invoices are settled, so nothing more can be received against ' +
+        'them. They are the difference between the ' + full(t.courier) +
+        ' this receipt collected and the ' + full(t.paidHere) +
+        ' that went in under its number.</p>' +
+        detailTable(m.paidElsewhere) + '</div>';
+    }
 
-      html += '<div class="box"><h3>Not received' +
-        '<button class="dl2" id="rDl">Download these with their full detail</button></h3>' +
-        '<div class="scroll"><table class="t">' +
-        '<tr><th>Order ref</th><th>Tracking</th><th>Customer</th><th>City</th>' +
-        '<th>Status</th><th class="r">Collected</th><th class="r">Fee</th>' +
-        '<th>Delivered</th><th>Why</th></tr>' + rows + '</table></div>' +
-        '<div class="note">These are left alone. The download carries every column ' +
-        'the receipt has for them, not just the invoice number.</div></div>';
+    if(m.missing.length){
+      html += '<div class="box"><h3>Not in QuickBooks' +
+        '<span class="aside">' + n0(m.missing.length) + ' parcels · ' +
+        full(t.missing) + '</span>' +
+        '<button class="dl2" id="rDl">Download</button></h3>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
+        'No invoice was found for these. Make them in QuickBooks, then open ' +
+        'this receipt again and the rest will go in.</p>' +
+        detailTable(m.missing) + '</div>';
     }
 
     $('dBody').innerHTML = html;
@@ -1047,35 +1052,69 @@
     }
 
     var dl = $('rDl');
-    if(dl) dl.addEventListener('click', downloadUnmatched);
+    if(dl) dl.addEventListener('click', function(){
+      csvOf(match.missing, match.cpr + ' not in QuickBooks.csv');
+    });
+
+    var dlElse = $('rDlElse');
+    if(dlElse) dlElse.addEventListener('click', function(){
+      csvOf(match.paidElsewhere, match.cpr + ' paid elsewhere.csv');
+    });
   }
 
-  function downloadUnmatched(){
-    var rows = match.missing.concat(match.alreadyPaid);
-    // the receipt's own columns, plus the customer and the reason, because
-    // whoever chases these needs both the money and someone to ring
-    var head = ['ORDER_REF_NUMBER','TRACKING_NUMBER','WEIGHT (Kg)','ORDER_PICKUP_DATE',
-                'ORIGIN_CITY','DELIVERY_CITY','STATUS','COD_AMOUNT','UPFRONT_AMOUNT',
-                'RESERVE_AMOUNT','D/R Date','SHIPPING_CHARGES','UPFRONT_CHARGES',
-                'GST','WH Income Tax','WH Sale Tax','NET_AMOUNT',
-                'Customer','Phone','Booked','Settled','Notes','Why not received'];
+  var COLS = [
+    ['ORDER_REF_NUMBER', function(o){ return o.orderRef; }, 'mono'],
+    ['TRACKING_NUMBER',  function(o){ return o.tracking; }, 'mono'],
+    ['WEIGHT (Kg)',      function(o){ return (o.weight||0).toFixed(2); }, 'r'],
+    ['ORDER_PICKUP_DATE',function(o){ return o.pickedAt || o.pickedOn || ''; }, 'mono'],
+    ['ORIGIN_CITY',      function(o){ return o.originCity || ''; }, ''],
+    ['DELIVERY_CITY',    function(o){ return o.city || ''; }, ''],
+    ['STATUS',           function(o){ return o.status || ''; }, ''],
+    ['COD_AMOUNT',       function(o){ return full(o.amount); }, 'r'],
+    ['UPFRONT_AMOUNT',   function(o){ return full(o.upfront); }, 'r'],
+    ['RESERVE_AMOUNT',   function(o){ return full(o.reserve); }, 'r'],
+    ['D/R Date',         function(o){ return o.deliveredAt || o.deliveredOn || ''; }, 'mono'],
+    ['SHIPPING_CHARGES', function(o){ return full(o.fee); }, 'r'],
+    ['UPFRONT_CHARGES',  function(o){ return full(o.upfrontCharges||0); }, 'r'],
+    ['GST',              function(o){ return full(o.tax); }, 'r'],
+    ['WH Income Tax',    function(o){ return full(o.whIncomeTax); }, 'r'],
+    ['WH Sale Tax',      function(o){ return full(o.whSalesTax); }, 'r'],
+    ['NET_AMOUNT',       function(o){ return full(o.net); }, 'r'],
+    ['Customer',         function(o){ return o.customer || ''; }, ''],
+    ['Phone',            function(o){ return o.phone || ''; }, 'mono'],
+    ['Why',              function(o){ return o.why || ''; }, '']
+  ];
 
+  // the receipt's own columns, so a row here can be read against the portal
+  function detailTable(rows){
+    return '<div class="scroll"><table class="t"><tr>' +
+      COLS.map(function(c){
+        return '<th'+(c[2]==='r'?' class="r"':'')+'>'+esc(c[0])+'</th>';
+      }).join('') + '</tr>' +
+      rows.map(function(o){
+        return '<tr>' + COLS.map(function(c){
+          return '<td'+(c[2]?' class="'+c[2]+'"':'')+'>'+esc(c[1](o))+'</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</table></div>';
+  }
+
+  function csvOf(rows, name){
     var cell = function(v){
       return '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"';
     };
-
     var body = rows.map(function(o){
-      return [o.orderRef,o.tracking,o.weight,o.pickedAt||o.pickedOn,
-              o.originCity,o.city,o.status,o.amount,o.upfront,
-              o.reserve,o.deliveredAt||o.deliveredOn,o.fee,o.upfrontCharges||0,
-              o.tax,o.whIncomeTax,o.whSalesTax,o.net,
-              o.customer,o.phone,o.bookedOn,o.settledOn,o.notes,o.why].map(cell).join(',');
+      return COLS.map(function(c){
+        var v = c[1](o);
+        // numbers go in as numbers, not as 1,234.00
+        return cell(c[2] === 'r' ? String(v).replace(/,/g,'') : v);
+      }).join(',');
     });
+    var csv = '﻿' + [COLS.map(function(c){ return cell(c[0]); }).join(',')]
+      .concat(body).join('\r\n') + '\r\n';
 
-    var csv = '﻿' + [head.map(cell).join(',')].concat(body).join('\r\n') + '\r\n';
     var a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
-    a.download = match.cpr + ' not received.csv';
+    a.download = name;
     a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
   }

@@ -4602,14 +4602,19 @@ app.get('/api/receipts/match', async (req, res) => {
     // way to tell whether this receipt is the one that paid them - guessing
     // at the reference format would just be a different way of being wrong.
     let paidBy = [];
+    const paidElsewhere = [];
+
     if (alreadyPaid.length) {
       const ids = [];
       alreadyPaid.forEach(o => (o.paymentIds || []).forEach(id => ids.push(id)));
 
       try {
-        const pays = await paymentsByIds(realmId, token, ids.slice(0, 400));
-        const byRef = new Map();
+        const pays = await paymentsByIds(realmId, token, ids.slice(0, 500));
 
+        const refOf = new Map();
+        pays.forEach(p => refOf.set(String(p.id), p.ref || ''));
+
+        const byRef = new Map();
         pays.forEach(p => {
           const key = p.ref || '(no reference)';
           if (!byRef.has(key)) {
@@ -4624,6 +4629,26 @@ app.get('/api/receipts/match', async (req, res) => {
         paidBy = [...byRef.values()]
           .map(g => ({ ...g, amount: r2(g.amount), mine: sameRef(g.ref, req.query.cpr) }))
           .sort((a, b) => b.amount - a.amount);
+
+        // An invoice settled under some other reference is money this receipt
+        // collected but never received - it is where a shortfall comes from,
+        // and the only useful answer to "which ones" is the parcels themselves.
+        alreadyPaid.forEach(o => {
+          const refs = (o.paymentIds || []).map(id => refOf.get(String(id)) || '');
+          const mine = refs.some(rf => sameRef(rf, req.query.cpr));
+
+          o.paidUnder = refs.filter(Boolean);
+          o.paidHere = mine;
+
+          if (!mine) {
+            paidElsewhere.push({
+              ...o,
+              why: refs.filter(Boolean).length
+                ? 'paid under ' + [...new Set(refs.filter(Boolean))].join(', ')
+                : 'paid with no reference on it'
+            });
+          }
+        });
       } catch (e) { /* the panel is still useful without it */ }
     }
 
@@ -4633,11 +4658,15 @@ app.get('/api/receipts/match', async (req, res) => {
       account: acc.label,
       matched,
       alreadyPaid,
+      paidElsewhere,
       missing,
       totals: {
         courier:  r2(paying.reduce((s, o) => s + o.received, 0)),
         toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
         paidAlready: r2(alreadyPaid.reduce((s, o) => s + o.received, 0)),
+        paidHere: r2(alreadyPaid.filter(o => o.paidHere)
+                                .reduce((s, o) => s + o.received, 0)),
+        paidElsewhere: r2(paidElsewhere.reduce((s, o) => s + o.received, 0)),
         missing: r2(missing.reduce((s, o) => s + o.received, 0)),
         net: detail.summary ? detail.summary.netAmount : 0
       },
