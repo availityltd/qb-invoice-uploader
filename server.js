@@ -4662,7 +4662,8 @@ app.get('/api/receipts/match', async (req, res) => {
     // many, across several receipts - so the payment's lines are read and only
     // the part sitting on these invoices is counted.
     let paidBy = [];
-    const paidElsewhere = [];
+    const offBy = [];        // this receipt did not settle what the courier collected
+    const settled = [];      // an advance was involved, and everything still adds up
 
     if (alreadyPaid.length) {
       const ids = [];
@@ -4714,27 +4715,40 @@ app.get('/api/receipts/match', async (req, res) => {
           // Money this receipt collected that arrived under someone else's
           // name - the whole invoice, or part of it, as when an advance was
           // taken before the parcel was delivered.
-          if (other > 0.005) {
-            // A payment with no receipt number, into a bank, with a memo -
-            // that is what an advance taken before delivery looks like, and
-            // saying so is more use than calling it "another payment".
-            const say = from.map(f => {
-              const bits = [];
-              if (f.ref) bits.push(f.ref);
-              if (f.bank) bits.push(f.bank);
-              if (f.memo) bits.push('“' + f.memo + '”');
-              if (f.date) bits.push(f.date);
-              return f.amount.toFixed(2) + (bits.length ? ' from ' + bits.join(' · ') : '');
-            });
+          // What matters is not that an advance exists - that is normal, and
+          // QuickBooks carried the invoice at COD plus advance so the balance
+          // left was exactly the COD. What matters is whether this receipt
+          // settled what the courier says it collected. If it did, the advance
+          // did its job and there is nothing to chase.
+          const gap = r2(o.received - here);
+          o.shortHere = gap;
 
-            paidElsewhere.push({
+          const say = from.map(f => {
+            const bits = [];
+            if (f.ref) bits.push(f.ref);
+            if (f.bank) bits.push(f.bank);
+            if (f.memo) bits.push('“' + f.memo.replace(/\s+/g, ' ') + '”');
+            if (f.date) bits.push(f.date);
+            return f.amount.toFixed(2) + (bits.length ? ' from ' + bits.join(' · ') : '');
+          });
+
+          o.paidFrom = from;
+          o.settledElsewhere = say.join('; ');
+
+          if (Math.abs(gap) > 1) {
+            offBy.push({
               ...o,
-              paidFrom: from,
-              why: (here > 0.005
-                     ? `only ${r2(here).toFixed(2)} of this invoice came from this receipt. `
-                     : 'none of this invoice came from this receipt. ') +
-                   'The rest: ' + say.join('; ')
+              why: `the courier collected ${o.received.toFixed(2)} but only ` +
+                   `${r2(here).toFixed(2)} came in under this receipt` +
+                   (o.qbTotal != null
+                      ? `. QuickBooks had the invoice at ${o.qbTotal.toFixed(2)}` : '') +
+                   (say.length ? `, with ${say.join('; ')}` : '')
             });
+          } else if (other > 0.005) {
+            // reconciled, and worth saying so - these were the ones that
+            // looked wrong until the advance was accounted for
+            settled.push({ ...o, why: 'settled in full: ' + r2(here).toFixed(2) +
+                                       ' from this receipt, ' + say.join('; ') });
           }
         });
 
@@ -4750,7 +4764,7 @@ app.get('/api/receipts/match', async (req, res) => {
       account: acc.label,
       matched,
       alreadyPaid,
-      paidElsewhere,
+      settled,
       missing,
       // everything with something wrong with it, in one list, each saying what
       problems: [].concat(
@@ -4759,8 +4773,9 @@ app.get('/api/receipts/match', async (req, res) => {
 
         // an advance, usually - what is at stake is the part that came from
         // somewhere other than this receipt
-        paidElsewhere.map(o => ({
-          ...o, kind: 'advance or other payment', impact: o.paidElseAmount || 0
+        // the receipt did not settle what the courier collected
+        offBy.map(o => ({
+          ...o, kind: 'amount differs', impact: r2(Math.abs(o.shortHere || 0))
         })),
 
         // the invoice was raised for a different figure than the courier
@@ -4775,7 +4790,8 @@ app.get('/api/receipts/match', async (req, res) => {
         toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
         paidAlready: r2(alreadyPaid.reduce((s, o) => s + o.received, 0)),
         paidHere: r2(alreadyPaid.reduce((s, o) => s + (o.paidHereAmount || 0), 0)),
-        paidElsewhere: r2(paidElsewhere.reduce((s, o) => s + (o.paidElseAmount || 0), 0)),
+        settled: r2(settled.reduce((s, o) => s + (o.paidElseAmount || 0), 0)),
+        settledCount: settled.length,
         missing: r2(missing.reduce((s, o) => s + o.received, 0)),
         mismatched: r2(mismatched.reduce((s, o) => s + o.received, 0)),
         net: detail.summary ? detail.summary.netAmount : 0

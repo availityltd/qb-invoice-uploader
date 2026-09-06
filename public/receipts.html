@@ -981,14 +981,11 @@
       var WHAT = {
         'no invoice':
           'No invoice in QuickBooks. Make it, then open this receipt again.',
-        'advance or other payment':
-          'Part of the invoice was already settled — usually an advance taken ' +
-          'before delivery. That part is in QuickBooks under a different payment, ' +
-          'so it can never come in under this receipt. The bank and memo of the ' +
-          'payment that took it are in the Why column.',
         'amount differs':
-          'The invoice was raised for a different figure than the courier ' +
-          'collected. It will still be received, at what QuickBooks says is owed.'
+          'What came in under this receipt is not what the courier says it ' +
+          'collected. Compare the sheet’s COD against what QuickBooks had ' +
+          'the invoice at — an advance is already taken off, so it is not the ' +
+          'cause. Something was raised for the wrong figure.'
       };
 
       html += '<div class="box"><h3>Invoices with something wrong' +
@@ -1011,6 +1008,21 @@
           }).join('<br>') +
         '</p>' +
         detailTable(probs) + '</div>';
+    }
+
+    // The advance ones are not a problem - the invoice carried COD plus the
+    // advance, the advance came off, and this receipt paid exactly the COD.
+    // Saying so stops anyone chasing them a second time.
+    if((m.settled || []).length){
+      html += '<div class="box"><h3>Settled, nothing to chase' +
+        '<span class="aside">' + n0(m.settled.length) + ' invoices · ' +
+        full(t.settled || 0) + ' of advances</span></h3>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
+        'An advance had already been received on these before delivery, so ' +
+        'QuickBooks carried each invoice at its COD plus that advance and the ' +
+        'balance left was exactly the COD. This receipt paid that balance in ' +
+        'full — they reconcile, and their open balance in QuickBooks is nil.' +
+        '</p></div>';
     }
 
     // A gap with nothing to show for it is worse than no gap at all - it looks
@@ -1119,15 +1131,15 @@
     ['NET_AMOUNT',       function(o){ return full(o.net); }, 'r'],
     ['Customer',         function(o){ return o.customer || ''; }, ''],
     ['Phone',            function(o){ return o.phone || ''; }, 'mono'],
-    ['In QuickBooks',    function(o){ return o.qbTotal == null ? '' : full(o.qbTotal); }, 'r'],
-    ['Sheet minus QB',   function(o){
-        return o.qbTotal == null ? '' : full(Math.round((o.amount - o.qbTotal)*100)/100);
-      }, 'r'],
-    ['From this receipt',function(o){
+    ['Invoice in QB',    function(o){ return o.qbTotal == null ? '' : full(o.qbTotal); }, 'r'],
+    ['Paid by this CPR', function(o){
         return o.paidHereAmount == null ? '' : full(o.paidHereAmount);
       }, 'r'],
-    ['From elsewhere',   function(o){
+    ['Advance already in',function(o){
         return o.paidElseAmount == null ? '' : full(o.paidElseAmount);
+      }, 'r'],
+    ['Sheet minus CPR',  function(o){
+        return o.shortHere == null ? '' : full(o.shortHere);
       }, 'r'],
     ['Problem',          function(o){ return o.kind || ''; }, ''],
     ['Why',              function(o){ return o.why || ''; }, '']
