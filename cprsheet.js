@@ -68,19 +68,42 @@ export function buildWorkbook(cpr, detail) {
 
   /* ---------- every order ---------- */
 
+  // The columns the courier's own receipt download uses, in its order, under
+  // its names - so this file can be read, compared or filed exactly as that
+  // one would be, and nobody has to learn a second layout.
   const headers = [
-    'Order ref', 'Tracking', 'Customer', 'Phone', 'City', 'Status', 'Type',
-    'Amount', 'Received', 'Fee', 'Tax', 'Net',
-    'Booked', 'Picked', 'Delivered', 'Settled', 'Notes'
+    'ORDER_REF_NUMBER', 'TRACKING_NUMBER', 'WEIGHT (Kg)', 'ORDER_PICKUP_DATE',
+    'ORIGIN_CITY', 'DELIVERY_CITY', 'STATUS', 'COD_AMOUNT', 'UPFRONT_AMOUNT',
+    'RESERVE_AMOUNT', 'D/R Date', 'SHIPPING_CHARGES', 'UPFRONT_CHARGES',
+    'GST', 'DEDUCTION (4%)', 'NET_AMOUNT'
   ];
 
   const rows = (detail.orders || []).map(o => ([
-    o.orderRef, o.tracking, o.customer, o.phone, o.city, o.status, o.type,
-    money(o.amount), money(o.received), money(o.fee), money(o.tax), money(o.net),
-    o.bookedOn, o.pickedOn, o.deliveredOn, o.settledOn, o.notes
+    o.orderRef, o.tracking, money(o.weight), o.pickedOn,
+    o.originCity, o.city, o.status, money(o.amount), money(o.upfront),
+    money(o.reserve), o.deliveredOn, money(o.fee), money(o.upfrontCharges || 0),
+    money(o.tax), money(o.deduction), money(o.net)
   ]));
 
   XLSX.utils.book_append_sheet(wb, sheet(headers, rows), 'Orders');
+
+  /* ---------- everything else about those parcels ---------- */
+
+  // The courier's own file stops at the money. Who it went to and when it
+  // moved is on its own sheet rather than crowding the one people compare.
+  const extra = [
+    'ORDER_REF_NUMBER', 'TRACKING_NUMBER', 'Customer', 'Phone', 'Type',
+    'Items', 'Booked', 'Picked up', 'Delivered or returned', 'Settled',
+    'Received', 'Notes'
+  ];
+
+  const extraRows = (detail.orders || []).map(o => ([
+    o.orderRef, o.tracking, o.customer, o.phone, o.type,
+    o.items, o.bookedOn, o.pickedOn, o.deliveredOn, o.settledOn,
+    money(o.received), o.notes
+  ]));
+
+  XLSX.utils.book_append_sheet(wb, sheet(extra, extraRows), 'Parcel detail');
 
   /* ---------- what each status is worth ---------- */
 

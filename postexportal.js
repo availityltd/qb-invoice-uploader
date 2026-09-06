@@ -236,26 +236,46 @@ export async function fetchSummary(session, cprMasterId, createdOn) {
 export function mapTransaction(row) {
   const t = (row && row.transaction) || {};
 
+  // A parcel that came back has its charge under the reversal fields instead
+  // of the ordinary ones, and no withholding is taken because no cash was
+  // kept. Adding both pairs is what makes the column totals agree with the
+  // receipt's own summary, to the paisa.
+  const reversed = n(t.reversalFee) > 0 || n(t.reversalTax) > 0;
+
+  const received = n(t.receivedAmount);
+  const fee      = n(t.transactionFee) + n(t.reversalFee);
+  const tax      = n(t.transactionTax) + n(t.reversalTax);
+  const net      = n(t.netAmount);
+
+  // PostEx does not send the 4% withholding as a field, but it is what is
+  // left once the charges and the net are taken off what was collected.
+  const deduction = reversed ? 0 : Math.round((received - fee - tax - net) * 100) / 100;
+
   return {
     orderRef:    String(t.orderRefNumber || '').trim(),   // "#91339099" - as QuickBooks has it
     tracking:    String(t.trackingNumber || '').trim(),
     customer:    t.customerName || '',
     phone:       String(t.customerPhone || '').trim(),
-    city:        t.cityName || '',
+    originCity:  t.originCity || '',
+    city:        t.cityName || t.destinationCity || '',
     status:      t.transactionStatus || '',
     type:        t.transactionType || '',
     amount:      n(t.invoicePayment),
-    received:    n(t.receivedAmount),
-    fee:         n(t.transactionFee) + n(t.reversalFee),
-    tax:         n(t.transactionTax) + n(t.reversalTax),
-    net:         n(t.netAmount),
+    received,
+    upfront:     n(t.upfrontPayment),
+    reserve:     n(t.reservePayment),
+    fee,
+    tax,
+    deduction,
+    net,
     weight:      n(t.actualWeight) || n(t.bookingWeight),
     items:       Number(t.items || 0),
     bookedOn:    day(t.transactionDate),
     pickedOn:    day(t.orderPickupDate),
-    deliveredOn: day(t.orderDeliveryDate),
+    deliveredOn: day(t.orderDeliveryDate),      // the D/R date - delivered or returned
     settledOn:   day(t.settlementDate),
     settled:     t.settled === true,
+    reversed,
     dispute:     t.disputeInd === true,
     notes:       t.transactionNotes || ''
   };

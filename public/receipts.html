@@ -639,35 +639,51 @@
 
     var slice = list.slice(page * PER, page * PER + PER);
 
+    // the same columns, in the same order, as the receipt the portal hands out
     var rows = slice.map(function(o){
       return '<tr>' +
         '<td class="mono">'+esc(o.orderRef)+'</td>' +
         '<td class="mono">'+esc(o.tracking)+'</td>' +
-        '<td>'+esc(o.customer)+'</td>' +
-        '<td>'+esc(o.city)+'</td>' +
+        '<td class="r">'+(o.weight||0).toFixed(2)+'</td>' +
+        '<td class="mono">'+esc(o.pickedOn||'')+'</td>' +
+        '<td>'+esc(o.originCity||'')+'</td>' +
+        '<td>'+esc(o.city||'')+'</td>' +
         '<td>'+esc(o.status)+'</td>' +
         '<td class="r">'+full(o.amount)+'</td>' +
-        '<td class="r">'+full(o.fee)+'</td>' +
-        '<td class="r">'+full(o.tax)+'</td>' +
+        '<td class="r">'+full(o.upfront)+'</td>' +
+        '<td class="r">'+full(o.reserve)+'</td>' +
         '<td class="mono">'+esc(o.deliveredOn||'')+'</td>' +
-        '<td class="mono">'+esc(o.settledOn||'')+'</td>' +
+        '<td class="r">'+full(o.fee)+'</td>' +
+        '<td class="r">'+full(o.upfrontCharges||0)+'</td>' +
+        '<td class="r">'+full(o.tax)+'</td>' +
+        '<td class="r">'+full(o.deduction)+'</td>' +
+        '<td class="r">'+full(o.net)+'</td>' +
       '</tr>';
     }).join('');
 
     var sum = list.reduce(function(a,o){
-      a.amount += o.amount; a.fee += o.fee; a.tax += o.tax; return a;
-    }, {amount:0,fee:0,tax:0});
+      a.amount += o.amount; a.upfront += o.upfront; a.reserve += o.reserve;
+      a.fee += o.fee; a.tax += o.tax; a.deduction += o.deduction; a.net += o.net;
+      return a;
+    }, {amount:0,upfront:0,reserve:0,fee:0,tax:0,deduction:0,net:0});
 
     $('otab').innerHTML =
-      '<tr><th>Order ref</th><th>Tracking</th><th>Customer</th><th>City</th><th>Status</th>' +
-      '<th class="r">Amount</th><th class="r">Fee</th><th class="r">Tax</th>' +
-      '<th>Delivered</th><th>Settled</th></tr>' +
-      (rows || '<tr><td colspan="10" class="empty">Nothing matches.</td></tr>') +
+      '<tr><th>ORDER_REF_NUMBER</th><th>TRACKING_NUMBER</th><th class="r">WEIGHT (Kg)</th>' +
+      '<th>ORDER_PICKUP_DATE</th><th>ORIGIN_CITY</th><th>DELIVERY_CITY</th><th>STATUS</th>' +
+      '<th class="r">COD_AMOUNT</th><th class="r">UPFRONT_AMOUNT</th>' +
+      '<th class="r">RESERVE_AMOUNT</th><th>D/R Date</th>' +
+      '<th class="r">SHIPPING_CHARGES</th><th class="r">UPFRONT_CHARGES</th>' +
+      '<th class="r">GST</th><th class="r">DEDUCTION (4%)</th><th class="r">NET_AMOUNT</th></tr>' +
+      (rows || '<tr><td colspan="16" class="empty">Nothing matches.</td></tr>') +
       (list.length ? '<tr style="font-weight:600;background:#FAFCFE">' +
-        '<td colspan="5">'+n0(list.length)+' orders</td>' +
+        '<td colspan="7">'+n0(list.length)+' orders</td>' +
         '<td class="r">'+full(sum.amount)+'</td>' +
-        '<td class="r">'+full(sum.fee)+'</td>' +
-        '<td class="r">'+full(sum.tax)+'</td><td colspan="2"></td></tr>' : '');
+        '<td class="r">'+full(sum.upfront)+'</td>' +
+        '<td class="r">'+full(sum.reserve)+'</td><td></td>' +
+        '<td class="r">'+full(sum.fee)+'</td><td class="r">0.00</td>' +
+        '<td class="r">'+full(sum.tax)+'</td>' +
+        '<td class="r">'+full(sum.deduction)+'</td>' +
+        '<td class="r">'+full(sum.net)+'</td></tr>' : '');
 
     $('oCount').textContent = n0(list.length) + ' of ' + n0((detail.orders||[]).length);
 
@@ -813,18 +829,24 @@
 
   function downloadUnmatched(){
     var rows = match.missing.concat(match.alreadyPaid);
-    var head = ['Order ref','Tracking','Customer','Phone','City','Status','Type',
-                'Amount','Collected','Fee','Tax','Net','Booked','Picked up',
-                'Delivered','Settled','Notes','Why not received'];
+    // the receipt's own columns, plus the customer and the reason, because
+    // whoever chases these needs both the money and someone to ring
+    var head = ['ORDER_REF_NUMBER','TRACKING_NUMBER','WEIGHT (Kg)','ORDER_PICKUP_DATE',
+                'ORIGIN_CITY','DELIVERY_CITY','STATUS','COD_AMOUNT','UPFRONT_AMOUNT',
+                'RESERVE_AMOUNT','D/R Date','SHIPPING_CHARGES','UPFRONT_CHARGES',
+                'GST','DEDUCTION (4%)','NET_AMOUNT',
+                'Customer','Phone','Booked','Settled','Notes','Why not received'];
 
     var cell = function(v){
       return '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"';
     };
 
     var body = rows.map(function(o){
-      return [o.orderRef,o.tracking,o.customer,o.phone,o.city,o.status,o.type,
-              o.amount,o.received,o.fee,o.tax,o.net,o.bookedOn,o.pickedOn,
-              o.deliveredOn,o.settledOn,o.notes,o.why].map(cell).join(',');
+      return [o.orderRef,o.tracking,o.weight,o.pickedOn,
+              o.originCity,o.city,o.status,o.amount,o.upfront,
+              o.reserve,o.deliveredOn,o.fee,o.upfrontCharges||0,
+              o.tax,o.deduction,o.net,
+              o.customer,o.phone,o.bookedOn,o.settledOn,o.notes,o.why].map(cell).join(',');
     });
 
     var csv = '﻿' + [head.map(cell).join(',')].concat(body).join('\r\n') + '\r\n';
