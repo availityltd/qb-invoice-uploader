@@ -153,6 +153,10 @@
       '.ctree .grp .soon{font-size:10px;opacity:.5}',
       '.ctree .kids{display:none}',
       '.ctree .kids.open{display:block}',
+      '.ctree a.sub{padding:4px 14px 4px 60px;font-size:11.5px;',
+      '  color:rgba(255,255,255,.5)}',
+      '.ctree a.sub:hover{color:#fff}',
+      '.ctree a.sub.on{color:#fff;background:rgba(255,255,255,.09);font-weight:600}',
       '.ctree a.add{padding-left:58px;color:rgba(255,255,255,.4);font-size:12px}',
       '.ctree a.add:hover{color:#fff}',
       '.ctree a.wide{padding-left:34px;margin-top:6px;font-size:12px;',
@@ -164,8 +168,9 @@
     var car  = document.getElementById('couriersCar');
     var here = location.pathname + location.search;
 
-    // nothing is open until it is asked for
-    var onCourierPage = path.indexOf('/courier') === 0;
+    // nothing is open until it is asked for - but a page that belongs to an
+    // account should show where it sits
+    var onCourierPage = path.indexOf('/courier') === 0 || path === '/receipts.html';
     var open = onCourierPage || localStorage.getItem('ctreeOpen') === '1';
 
     function setOpen(v){
@@ -193,11 +198,6 @@
         out += '<a class="all' + (here.indexOf('scope=all') > -1 ? ' on' : '') +
                '" href="/courier-dash.html?scope=all">All courier companies</a>';
 
-        // the receipts read the courier's portal, not our own table, so they
-        // sit beside the dashboards rather than under one of them
-        out += '<a class="all' + (path === '/receipts.html' ? ' on' : '') +
-               '" href="/receipts.html">Cash payment receipts</a>';
-
         (d.couriers || []).forEach(function(c){
           // only the company whose account is on screen opens itself
           var mine = c.accounts.some(function(a){
@@ -210,9 +210,19 @@
 
           out += '<div class="kids' + (mine ? ' open' : '') + '">';
           c.accounts.forEach(function(a){
-            out += '<a class="acc' + (here.indexOf('account=' + a.id) > -1 ? ' on' : '') +
+            var open = here.indexOf('account=' + a.id) > -1;
+
+            out += '<a class="acc' + (open ? ' on' : '') +
                    '" href="/courier-dash.html?account=' + a.id + '">' +
                    esc(a.label) + '</a>';
+
+            // Receipts are the account's own, not the courier's - two PostEx
+            // accounts settle separately - so the link hangs off the account
+            // rather than sitting on its own above all of them.
+            if(open){
+              out += '<a class="sub' + (path === '/receipts.html' ? ' on' : '') +
+                     '" href="/receipts.html?account=' + a.id + '">Cash payment receipts</a>';
+            }
           });
           out += '<a class="add" href="/couriers.html?add=' + esc(c.key) + '">+ add an account</a>';
           out += '</div>';
