@@ -22,6 +22,17 @@ export async function initCouriers() {
       ON courier_accounts (realm_id, courier, label)
   `);
 
+  // A courier's own portal is a second door with its own key. PostEx needs
+  // this for cash payment receipts; the integration token above cannot see
+  // them. Added on rather than built in, so accounts that predate it carry on
+  // working with the token alone.
+  await pool.query(`
+    ALTER TABLE courier_accounts
+      ADD COLUMN IF NOT EXISTS portal_email  TEXT,
+      ADD COLUMN IF NOT EXISTS portal_secret TEXT,
+      ADD COLUMN IF NOT EXISTS merchant_id   TEXT
+  `);
+
   // every order any courier hands back, flattened into one shape
   await pool.query(`
     CREATE TABLE IF NOT EXISTS courier_orders (
@@ -57,12 +68,127 @@ export async function initCouriers() {
     CREATE INDEX IF NOT EXISTS courier_orders_dates
       ON courier_orders (realm_id, booked_on)
   `);
+
+  // The receipt as the courier's own portal knows it - one row per CPR, with
+  // its number, its status and what it is worth. What is inside a receipt
+  // stays in courier_orders; this is only the cover sheet.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS courier_cprs (
+      id           SERIAL PRIMARY KEY,
+      realm_id     TEXT NOT NULL,
+      account_id   INTEGER NOT NULL,
+      courier      TEXT NOT NULL,
+      cpr_number   TEXT NOT NULL,
+      remote_id    TEXT,                  -- the courier's own id for it
+      status       TEXT,
+      status_id    INTEGER,
+      net_amount   NUMERIC(14,2) DEFAULT 0,
+      created_on   TIMESTAMPTZ,
+      approved_on  TIMESTAMPTZ,
+      qb_payment_id TEXT,                 -- set once it is receipted in QB
+      received_on  TIMESTAMPTZ,
+      raw          JSONB,
+      seen_at      TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS courier_cprs_key
+      ON courier_cprs (realm_id, account_id, cpr_number)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS courier_cprs_dates
+      ON courier_cprs (realm_id, created_on)
+  `);
+}
+
+// A receipt seen again is updated, never duplicated. What we have already
+// done with it in QuickBooks is ours, so those columns are left alone.
+export async function saveCprs(realmId, accountId, courier, rows) {
+  if (!rows.length) return 0;
+
+  for (const c of rows) {
+    if (!c || !c.cprNumber) continue;
+    await pool.query(
+      `INSERT INTO courier_cprs
+         (realm_id, account_id, courier, cpr_number, remote_id, status, status_id,
+          net_amount, created_on, approved_on, raw, seen_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NOW())
+       ON CONFLICT (realm_id, account_id, cpr_number) DO UPDATE SET
+         remote_id   = EXCLUDED.remote_id,
+         status      = EXCLUDED.status,
+         status_id   = EXCLUDED.status_id,
+         net_amount  = EXCLUDED.net_amount,
+         created_on  = EXCLUDED.created_on,
+         approved_on = EXCLUDED.approved_on,
+         raw         = EXCLUDED.raw,
+         seen_at     = NOW()`,
+      [realmId, accountId, courier, c.cprNumber, c.remoteId || null,
+       c.status || null, c.statusId || null, c.netAmount || 0,
+       c.createdOn || null, c.approvedOn || null,
+       JSON.stringify(c.raw || {})]
+    );
+  }
+
+  return rows.length;
+}
+
+export async function listPortalCprs(realmId, opts) {
+  const where = ['c.realm_id = $1'];
+  const args = [realmId];
+
+  if (opts && opts.account) { args.push(Number(opts.account)); where.push(`c.account_id = $${args.length}`); }
+  if (opts && opts.courier) { args.push(String(opts.courier)); where.push(`c.courier = $${args.length}`); }
+  if (opts && opts.from)    { args.push(opts.from); where.push(`c.created_on >= $${args.length}`); }
+  if (opts && opts.to)      { args.push(opts.to + ' 23:59:59'); where.push(`c.created_on <= $${args.length}`); }
+
+  const r = await pool.query(
+    `SELECT c.cpr_number, c.remote_id, c.account_id, a.label, c.courier,
+            c.status, c.status_id, c.net_amount, c.created_on, c.approved_on,
+            c.qb_payment_id, c.received_on
+       FROM courier_cprs c
+       JOIN courier_accounts a ON a.id = c.account_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY c.created_on DESC NULLS LAST`,
+    args
+  );
+
+  const d = v => v ? new Date(v).toISOString().slice(0, 10) : null;
+
+  return r.rows.map(x => ({
+    cpr:        x.cpr_number,
+    remoteId:   x.remote_id,
+    accountId:  x.account_id,
+    account:    x.label,
+    courier:    x.courier,
+    status:     x.status,
+    statusId:   x.status_id,
+    netAmount:  Math.round(Number(x.net_amount || 0) * 100) / 100,
+    createdOn:  d(x.created_on),
+    approvedOn: d(x.approved_on),
+    qbPaymentId: x.qb_payment_id,
+    receivedOn: d(x.received_on)
+  }));
+}
+
+// stamped once the receipt has been turned into a QuickBooks payment
+export async function markCprReceived(realmId, accountId, cprNumber, qbPaymentId) {
+  await pool.query(
+    `UPDATE courier_cprs
+        SET qb_payment_id = $4, received_on = NOW()
+      WHERE realm_id = $1 AND account_id = $2 AND cpr_number = $3`,
+    [realmId, accountId, cprNumber, qbPaymentId || null]
+  );
 }
 
 export async function listAccounts(realmId) {
   const r = await pool.query(
     `SELECT id, courier, label, active, last_sync, last_error,
-            LENGTH(token) AS token_len
+            LENGTH(token) AS token_len,
+            portal_email,
+            (portal_secret IS NOT NULL) AS portal_ready,
+            merchant_id
        FROM courier_accounts
       WHERE realm_id = $1
       ORDER BY courier, label`,
@@ -89,6 +215,28 @@ export async function addAccount(realmId, { courier, label, token }) {
     [realmId, courier, label, token]
   );
   return r.rows[0].id;
+}
+
+// The portal sign-in for an account. The password arrives already encrypted -
+// this file never sees the real one.
+export async function setPortalLogin(realmId, id, { email, secret, merchantId }) {
+  await pool.query(
+    `UPDATE courier_accounts
+        SET portal_email  = $3,
+            portal_secret = COALESCE($4, portal_secret),
+            merchant_id   = COALESCE($5, merchant_id)
+      WHERE realm_id = $1 AND id = $2`,
+    [realmId, id, email || null, secret || null, merchantId || null]
+  );
+}
+
+export async function clearPortalLogin(realmId, id) {
+  await pool.query(
+    `UPDATE courier_accounts
+        SET portal_email = NULL, portal_secret = NULL
+      WHERE realm_id = $1 AND id = $2`,
+    [realmId, id]
+  );
 }
 
 export async function removeAccount(realmId, id) {

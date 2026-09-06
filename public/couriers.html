@@ -34,6 +34,28 @@
   .acc button:hover{border-color:var(--qbo)}
   .acc button.danger:hover{border-color:var(--bad);color:var(--bad)}
 
+  /* the courier's own portal, a second sign-in some couriers need */
+  .accwrap{display:flex;flex-direction:column}
+  .plog{border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;background:#FAFCFE;
+    padding:14px 16px;display:none}
+  .plog.open{display:block}
+  .plog .row{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}
+  @media (max-width:640px){.plog .row{grid-template-columns:1fr}}
+  .plog label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+  .plog input{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;
+    font:inherit;font-size:13px;background:#fff}
+  .plog .save{background:var(--qbo);border:1px solid var(--qbo);color:#fff;border-radius:7px;
+    padding:9px 16px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;height:auto}
+  .plog .save[disabled]{opacity:.55;cursor:default}
+  .plog .why{font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.55}
+  .plog .out{font-size:12.5px;margin-top:10px}
+  .plog .out.bad{color:var(--bad)}
+  .plog .out.good{color:var(--qbo)}
+  .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:600}
+  .tag.on{background:#E7F5EC;color:#1B7A44}
+  .tag.off{background:#EEF1F4;color:#5A6672}
+
   .range{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;
     margin-bottom:14px}
   .range label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
@@ -220,6 +242,9 @@
     }
 
     S.accounts.forEach(function(a){
+      var wrap = document.createElement('div');
+      wrap.className = 'accwrap';
+
       var el = document.createElement('div');
       el.className = 'acc' + (a.last_error ? ' bad' : '');
 
@@ -227,17 +252,106 @@
         ? 'last pulled ' + new Date(a.last_sync).toLocaleString()
         : 'never pulled';
 
+      // Cash payment receipts live behind the courier's own portal, which is a
+      // separate sign-in from the API token. Only PostEx has one so far.
+      var hasPortal = a.courier === 'postex';
+      var portalLine = hasPortal
+        ? ' \u00b7 receipts ' + (a.portal_ready
+            ? '<span class="tag on">signed in</span> ' + esc(a.portal_email || '')
+            : '<span class="tag off">not signed in</span>')
+        : '';
+
       el.innerHTML =
         '<div class="who"><b>' + esc(a.label) + '</b>' +
-        '<small>' + esc(a.courier) + ' \u00b7 ' + when +
+        '<small>' + esc(a.courier) + ' \u00b7 ' + when + portalLine +
         (a.last_error ? ' \u00b7 <span style="color:var(--bad)">' + esc(a.last_error) + '</span>' : '') +
         '</small></div>' +
         '<div class="acts">' +
+          (hasPortal
+            ? '<button data-portal="' + a.id + '">' +
+              (a.portal_ready ? 'Change sign-in' : 'Sign in for receipts') + '</button>' +
+              (a.portal_ready
+                ? '<button data-pout="' + a.id + '">Forget</button>' : '')
+            : '') +
           '<button data-test="' + a.id + '">Test</button>' +
           '<button class="danger" data-del="' + a.id + '">Remove</button>' +
         '</div>';
 
-      box.appendChild(el);
+      wrap.appendChild(el);
+
+      if(hasPortal){
+        var form = document.createElement('div');
+        form.className = 'plog';
+        form.id = 'plog' + a.id;
+        form.innerHTML =
+          '<p class="why">The same email and password you use on ' +
+          'merchant.postex.pk. It is kept encrypted so the app can sign in again ' +
+          'on its own \u2014 PostEx sign-ins only last a few hours. ' +
+          'It is checked before it is saved.</p>' +
+          '<div class="row">' +
+            '<div><label>Email</label>' +
+              '<input type="email" id="pe' + a.id + '" autocomplete="off" value="' +
+              esc(a.portal_email || '') + '"></div>' +
+            '<div><label>Password</label>' +
+              '<input type="password" id="pp' + a.id + '" autocomplete="off"></div>' +
+            '<button class="save" data-psave="' + a.id + '">Sign in</button>' +
+          '</div>' +
+          '<div class="out" id="po' + a.id + '"></div>';
+        wrap.appendChild(form);
+      }
+
+      box.appendChild(wrap);
+    });
+
+    /* ---------- the portal sign-in ---------- */
+
+    box.querySelectorAll('button[data-portal]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var f = $('plog' + b.getAttribute('data-portal'));
+        if(f) f.classList.toggle('open');
+      });
+    });
+
+    box.querySelectorAll('button[data-psave]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var id = Number(b.getAttribute('data-psave'));
+        var email = $('pe' + id).value.trim();
+        var pass = $('pp' + id).value;
+        var out = $('po' + id);
+
+        if(!email || !pass){
+          out.className = 'out bad'; out.textContent = 'Email and password both needed.';
+          return;
+        }
+
+        b.disabled = true; b.textContent = 'Checking\u2026';
+        out.className = 'out'; out.textContent = '';
+
+        post('/api/cpr/login', { id: id, email: email, password: pass })
+          .then(function(d){
+            out.className = 'out good';
+            out.textContent = 'Signed in as ' + (d.merchantName || email) + '.';
+            $('pp' + id).value = '';
+            setTimeout(loadAccounts, 1200);
+          })
+          .catch(function(e){
+            b.disabled = false; b.textContent = 'Sign in';
+            out.className = 'out bad'; out.textContent = e.message;
+          });
+      });
+    });
+
+    box.querySelectorAll('button[data-pout]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var id = Number(b.getAttribute('data-pout'));
+        var a = S.accounts.filter(function(x){ return x.id === id; })[0];
+        if(!confirm('Forget the PostEx portal sign-in for ' +
+                    (a ? a.label : 'this account') + '?\n\n' +
+                    'Receipts will stop loading until it is signed in again.')) return;
+        post('/api/cpr/logout', { id: id })
+          .then(loadAccounts)
+          .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+      });
     });
 
     box.querySelectorAll('button[data-test]').forEach(function(b){

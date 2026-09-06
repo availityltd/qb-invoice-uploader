@@ -236,10 +236,115 @@ export async function fetchPayment(token, tracking) {
   };
 }
 
+/* ==================== the merchant portal ====================
+
+PostEx has two APIs, not one. The integration API above takes the merchant's
+long-lived `token` header and knows about orders. Cash payment receipts live
+only on the portal API, which takes the same Bearer JWT the browser gets when
+someone signs in - and that JWT is good for about five hours, so it cannot be
+pasted in and left. Whatever calls this has to hand in a fresh one.
+
+*/
+
+const PORTAL = BASE + '/services/merchant/api';
+
+async function askPortal(jwt, path, params) {
+  const url = new URL(PORTAL + path);
+  Object.keys(params || {}).forEach(k => {
+    if (params[k] !== undefined && params[k] !== null) {
+      url.searchParams.set(k, params[k]);
+    }
+  });
+
+  const r = await fetch(url.toString(), {
+    method: 'GET',
+    headers: {
+      'authorization': 'Bearer ' + jwt,
+      'accept': 'application/json',
+      'origin': 'https://merchant.postex.pk',
+      'referer': 'https://merchant.postex.pk/'
+    }
+  });
+
+  const text = await r.text();
+
+  if (r.status === 401 || r.status === 403) {
+    throw new Error('PostEx portal sign-in has expired');
+  }
+  if (!r.ok) {
+    let msg = text.slice(0, 300);
+    try { const j = JSON.parse(text); msg = j.statusMessage || j.message || msg; } catch (e) {}
+    throw new Error(`PostEx portal said ${r.status}: ${msg}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error('PostEx portal sent something that was not JSON: ' + text.slice(0, 200));
+  }
+}
+
+// The merchant id is not something anyone should have to look up - the JWT
+// the portal hands out already carries it.
+export function merchantFromJwt(jwt) {
+  try {
+    const body = String(jwt).split('.')[1];
+    const json = JSON.parse(Buffer.from(body, 'base64').toString('utf8'));
+    const d = json.userDetails || {};
+    return {
+      merchantId: d.merchantId ? String(d.merchantId) : null,
+      merchantName: d.merchantName || '',
+      userId: d.userId ? String(d.userId) : null,
+      expiresAt: json.exp ? new Date(json.exp * 1000) : null
+    };
+  } catch (e) {
+    return { merchantId: null, merchantName: '', userId: null, expiresAt: null };
+  }
+}
+
+function stamp(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+export function mapCpr(row) {
+  const c = row || {};
+  return {
+    cprNumber:  String(c.cashPaymentReceiptNumber || '').trim(),
+    remoteId:   c.cashPaymentReceiptMasterId ? String(c.cashPaymentReceiptMasterId) : null,
+    status:     c.cashPaymentReceiptStatus || '',
+    statusId:   c.cashPaymentReceiptStatusId == null ? null : Number(c.cashPaymentReceiptStatusId),
+    netAmount:  num(c.netAmount),
+    createdOn:  stamp(c.createDatetime),
+    approvedOn: stamp(c.approveDate),
+    raw:        c
+  };
+}
+
+// Every receipt in a span of days. `pagination=disable` is what the portal
+// itself sends when it wants the lot, so there is nothing to page through.
+export async function fetchCprs(jwt, merchantId, from, to) {
+  const id = merchantId || merchantFromJwt(jwt).merchantId;
+  if (!id) throw new Error('No merchant id - the PostEx sign-in did not carry one');
+
+  const j = await askPortal(jwt, `/payment/merchant/${id}/cpr`, {
+    fromDate: from,
+    toDate: to,
+    direction: 'desc',
+    pagination: 'disable'
+  });
+
+  const list = j.dist || [];
+  return Array.isArray(list) ? list.map(mapCpr).filter(x => x.cprNumber) : [];
+}
+
 export const adapter = {
   key: 'postex',
   name: 'PostEx',
   testToken,
   fetchOrders,
-  fetchPayment
+  fetchPayment,
+  fetchCprs,
+  merchantFromJwt
 };

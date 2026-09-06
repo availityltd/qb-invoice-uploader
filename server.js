@@ -4309,6 +4309,170 @@ app.get('/api/upload/remaining-file', async (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="remaining-invoices-import.csv"');
   res.send('\uFEFF' + rows.join('\r\n') + '\r\n');
 });
+// ==================== Cash payment receipts, from the courier's portal ====
+// New, and self-contained. Nothing above this line is involved: the older
+// receipt pages read our own courier_orders table, these read PostEx itself.
+
+import {
+  refreshCprs, listCprs as listLiveCprs, cprDetail, forget as forgetCpr
+} from './cprlive.js';
+import { buildWorkbook, fileName as cprFileName } from './cprsheet.js';
+import { setPortalLogin, clearPortalLogin } from './couriers.js';
+import { login as portalLogin } from './postexportal.js';
+import { encrypt as encryptSecret } from './secrets.js';
+
+// Save (or replace) the portal sign-in for one courier account. The password
+// is tried before it is kept, so a typo is caught here and not at midnight.
+app.post('/api/cpr/login', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const id = Number(req.body.id);
+  const email = String(req.body.email || '').trim();
+  const password = String(req.body.password || '');
+
+  if (!id) return res.status(400).json({ error: 'Which account?' });
+  if (!email || !password) return res.status(400).json({ error: 'Email and password both needed' });
+
+  try {
+    const acc = await getCourierAccount(realmId, id);
+    if (!acc) return res.status(404).json({ error: 'No such account' });
+
+    const who = await portalLogin(email, password);
+
+    await setPortalLogin(realmId, id, {
+      email,
+      secret: encryptSecret(password),
+      merchantId: who.merchantId
+    });
+
+    forgetCpr(id);
+
+    res.json({
+      ok: true,
+      merchantId: who.merchantId,
+      merchantName: who.merchantName
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/cpr/logout', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    await clearPortalLogin(realmId, Number(req.body.id));
+    forgetCpr(Number(req.body.id));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// the receipts themselves - asked from PostEx, then read back with the
+// QuickBooks column alongside
+app.get('/api/cpr/list', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { from, to, account } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'Pick a date range' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    let asked = null;
+    let trouble = null;
+
+    if (account) {
+      try {
+        asked = await refreshCprs(realmId, Number(account), from, to);
+      } catch (e) {
+        // the list we already have is still worth showing
+        trouble = e.message;
+      }
+    }
+
+    res.json({
+      cprs: await listLiveCprs(realmId, { account, from, to }),
+      asked,
+      trouble
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// The few most recent receipts, read from our own table only. The dashboard
+// uses this, so it must not wait on PostEx - the receipts page is where they
+// get refreshed.
+app.get('/api/cpr/recent', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { account, courier } = req.query;
+  const limit = Math.min(Number(req.query.limit) || 6, 50);
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const all = await listLiveCprs(realmId, { account, courier });
+    res.json({ cprs: all.slice(0, limit), total: all.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// everything inside one receipt, exactly as the portal shows it
+app.get('/api/cpr/detail', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const account = Number(req.query.account);
+  const remoteId = String(req.query.id || '').trim();
+  if (!account || !remoteId) return res.status(400).json({ error: 'account and id both needed' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await cprDetail(realmId, account, remoteId, req.query.created, req.query.fresh === '1'));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// the same receipt as a workbook
+app.get('/api/cpr/export', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const account = Number(req.query.account);
+  const remoteId = String(req.query.id || '').trim();
+  if (!account || !remoteId) return res.status(400).json({ error: 'account and id both needed' });
+
+  try {
+    const detail = await cprDetail(realmId, account, remoteId, req.query.created, false);
+
+    const cpr = {
+      cpr: String(req.query.cpr || remoteId),
+      status: req.query.status || '',
+      createdOn: req.query.created || '',
+      approvedOn: req.query.approved || ''
+    };
+
+    const buf = buildWorkbook(cpr, detail);
+
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition',
+      'attachment; filename="' + cprFileName(cpr) + '"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buf);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ==================== Start ====================
 const PORT = process.env.PORT || 3000;
 

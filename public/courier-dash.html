@@ -53,6 +53,14 @@
   table.t tr.click{cursor:pointer}
   table.t tr.click:hover td{background:#F5FAFD}
 
+  /* one meaning per colour, the same as everywhere else in the app */
+  .cpill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;
+    font-weight:600;letter-spacing:.02em;white-space:nowrap}
+  .cpill.ok{background:#E7F5EC;color:#1B7A44}
+  .cpill.wait{background:#FFF4E0;color:#8A5A00}
+  .cpill.grey{background:#EEF1F4;color:#5A6672}
+  .cpill.done{background:#E9F1FD;color:#14539A}
+
   .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
   @media(max-width:620px){.grid{grid-template-columns:repeat(2,1fr)}}
   .cell{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff;
@@ -277,9 +285,9 @@
 
     Promise.all([
       fetch('/api/courier/dash?'+params(), { cache:'no-store' }).then(function(r){ return r.json(); }),
-      fetch('/api/courier/receipts?'+new URLSearchParams({
-        from: monthStart(), to: toEl.value,
-        account: account || '', courier: courier || '', limit: 8
+      // receipts come from the courier's own portal now, not our order table
+      fetch('/api/cpr/recent?'+new URLSearchParams({
+        account: account || '', courier: courier || '', limit: 6
       }).toString(), { cache:'no-store' }).then(function(r){ return r.json(); }),
       fetch('/api/courier/pickups?'+params({ limit: 8 }), { cache:'no-store' })
         .then(function(r){ return r.json(); })
@@ -426,19 +434,31 @@
     /* --- receipts and pickups, side by side --- */
     html += '<div class="row">';
 
+    // NEW means the courier has not paid this one out yet, CLOSED means it is
+    // paid. The badge on the right is our own side of it - whether the money
+    // has been taken into QuickBooks.
     var cprRows = cprs.map(function(c){
-      return '<tr class="click" data-cpr="' + esc(c.cpr) + '">' +
+      var s = String(c.status || '').toUpperCase();
+      var scls = s === 'CLOSED' ? 'ok' : (s === 'NEW' || s === 'OPEN' ? 'wait' : 'grey');
+
+      return '<tr class="click" data-goto="' + esc(c.remoteId) + '">' +
              '<td class="mono">' + esc(c.cpr) + '</td>' +
-             '<td class="mono">' + esc(c.settledOn || '') + '</td>' +
-             '<td class="r">' + n0(c.orders) + '</td>' +
-             '<td class="r">' + full(c.amount) + '</td></tr>';
+             '<td class="mono">' + esc(c.createdOn || '') + '</td>' +
+             '<td><span class="cpill ' + scls + '">' + esc(c.status || '—') + '</span></td>' +
+             '<td class="r">' + full(c.netAmount) + '</td>' +
+             '<td>' + (c.qbPaymentId
+                 ? '<span class="cpill done">received</span>'
+                 : '<span class="cpill grey">not yet</span>') + '</td></tr>';
     }).join('');
 
-    html += '<div class="box"><h3>Receipts this month' +
-            '<a href="/cprs.html' + (account ? '?account='+account : '') + '">View all receipts</a></h3>' +
-            '<table class="t"><tr><th>CPR number</th><th>Date</th>' +
-            '<th class="r">Orders</th><th class="r">Amount</th></tr>' +
-            (cprRows || '<tr><td colspan="4" style="color:var(--muted)">Nothing settled this month yet.</td></tr>') +
+    html += '<div class="box"><h3>Cash payment receipts' +
+            '<a href="/receipts.html' + (account ? '?account='+account : '') + '">See detail</a></h3>' +
+            '<table class="t"><tr><th>CPR number</th><th>Created</th><th>Status</th>' +
+            '<th class="r">Net amount</th><th>QuickBooks</th></tr>' +
+            (cprRows || '<tr><td colspan="5" style="color:var(--muted)">' +
+              'No receipts yet. Open <a href="/receipts.html' +
+              (account ? '?account='+account : '') + '">See detail</a> to sign in to the ' +
+              'courier portal and pull them in.</td></tr>') +
             '</table></div>';
 
     var pickRows = picks.map(function(p){
@@ -562,6 +582,14 @@
     });
     $('out').querySelectorAll('[data-cpr]').forEach(function(tr){
       tr.addEventListener('click', function(){ openList({ cpr: tr.getAttribute('data-cpr') }); });
+    });
+    // a receipt is not something this page can show in full - the receipts
+    // page reads the courier's portal, so it opens there
+    $('out').querySelectorAll('[data-goto]').forEach(function(tr){
+      tr.addEventListener('click', function(){
+        location.href = '/receipts.html' + (account ? '?account=' + account : '') +
+                        '#cpr=' + encodeURIComponent(tr.getAttribute('data-goto'));
+      });
     });
     $('out').querySelectorAll('[data-pickup]').forEach(function(tr){
       tr.addEventListener('click', function(){ openPickup(tr.getAttribute('data-pickup')); });

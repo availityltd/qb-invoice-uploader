@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cash payment receipts</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .bar input[type=date],.bar input[type=text],.bar input[type=email],
+  .bar input[type=password],.bar select{border:1px solid var(--line);border-radius:7px;
+    padding:7px 9px;font:inherit;font-size:12.5px;background:#fff;height:auto;width:auto}
+  .bar button{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;
+    font:inherit;font-size:12.5px;cursor:pointer;width:auto;height:auto;color:var(--ink)}
+  .bar button:hover{border-color:var(--qbo)}
+  .bar button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+  .bar .right{margin-left:auto;display:flex;gap:6px;align-items:center}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;
+    margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px}
+  .card .k{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .card .v{font-family:var(--mono);font-size:22px;font-weight:500;margin-top:6px;line-height:1.1}
+  .card .n{font-size:11.5px;color:var(--muted);margin-top:4px}
+
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;
+    margin-bottom:14px}
+  .box h3{margin:0 0 14px;font-size:13.5px;font-weight:600;display:flex;align-items:baseline;gap:9px}
+  .box h3 .aside{margin-left:auto;font-size:11.5px;color:var(--faint);font-weight:400}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--faint);border-bottom:1px solid var(--line);padding:8px;font-weight:600}
+  table.t td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.t td.r,table.t th.r{text-align:right;font-family:var(--mono)}
+  table.t td.mono{font-family:var(--mono);font-size:12px;white-space:nowrap}
+  table.t tr:last-child td{border-bottom:0}
+  table.t tr.click{cursor:pointer}
+  table.t tr.click:hover td{background:#F5FAFD}
+  .scroll{overflow-x:auto}
+
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;
+    font-weight:600;letter-spacing:.02em;white-space:nowrap}
+  .pill.ok{background:#E7F5EC;color:#1B7A44}
+  .pill.wait{background:#FFF4E0;color:#8A5A00}
+  .pill.grey{background:#EEF1F4;color:#5A6672}
+  .pill.done{background:#E9F1FD;color:#14539A}
+
+  .drawer{position:fixed;inset:0;background:rgba(12,24,20,.45);display:none;z-index:60}
+  .drawer.open{display:block}
+  .drawer .panel{position:absolute;right:0;top:0;bottom:0;width:min(1180px,97vw);background:#fff;
+    box-shadow:-8px 0 28px rgba(0,0,0,.18);display:flex;flex-direction:column}
+  .drawer .hd{padding:15px 20px;border-bottom:1px solid var(--line);display:flex;
+    align-items:center;gap:12px;flex-wrap:wrap}
+  .drawer .hd b{font-size:14px;font-family:var(--mono)}
+  .drawer .hd .note{font-size:12px;color:var(--faint)}
+  .drawer .hd .acts{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .drawer .hd button{border:1px solid var(--line);background:#fff;border-radius:7px;
+    padding:6px 11px;font:inherit;font-size:12.5px;cursor:pointer;width:auto;height:auto;
+    color:var(--ink)}
+  .drawer .hd button:hover{border-color:var(--qbo)}
+  .drawer .hd .x{width:30px;height:30px;padding:0;font-size:15px;line-height:1}
+  .drawer .bd{overflow:auto;padding:8px 20px 28px;flex:1}
+
+  .sum{display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start}
+  @media (max-width:900px){.sum{grid-template-columns:1fr}}
+  .tot{font-size:12.5px}
+  .tot div{display:flex;justify-content:space-between;gap:12px;padding:6px 0;
+    border-bottom:1px dashed var(--line)}
+  .tot div:last-child{border-bottom:0}
+  .tot .num{font-family:var(--mono)}
+  .tot .big{font-weight:700;font-size:14px;border-top:2px solid var(--line);
+    border-bottom:0;margin-top:6px;padding-top:10px}
+
+  .note{font-size:11.5px;color:var(--faint);margin-top:11px}
+  .msg{padding:13px 15px;border-radius:8px;background:#FDF3F3;border:1px solid var(--neg);
+    color:var(--neg);font-size:12.5px;margin-bottom:12px}
+  .warn{padding:11px 14px;border-radius:8px;background:#FFF8E8;border:1px solid var(--warn);
+    color:#7A5200;font-size:12.5px;margin-bottom:12px}
+  .loading{color:var(--muted);font-size:12.5px;padding:22px 0}
+  .empty{color:var(--muted);font-size:12.5px;padding:16px 0}
+
+  .signin{max-width:430px}
+  .signin label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px}
+  .signin input{width:100%;border:1px solid var(--line);border-radius:7px;padding:9px 10px;
+    font:inherit;font-size:13px;background:#fff}
+  .signin .go{margin-top:14px;background:var(--qbo);border:1px solid var(--qbo);color:#fff;
+    border-radius:7px;padding:9px 16px;font:inherit;font-size:13px;font-weight:600;
+    cursor:pointer;width:auto}
+  .signin .go[disabled]{opacity:.55;cursor:default}
+
+  .pager{display:flex;gap:6px;align-items:center;margin:12px 0 0;font-size:12px;
+    color:var(--muted);flex-wrap:wrap}
+  .pager button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 10px;
+    font:inherit;font-size:12px;cursor:pointer;width:auto;height:auto;color:var(--ink)}
+  .pager button[disabled]{opacity:.4;cursor:default}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Cash payment receipts</h1>
+        <div class="sub" id="sub">Read straight from the courier</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Courier accounts are kept per company.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="bar">
+          <select id="acct"></select>
+          <button data-days="29">30 days</button>
+          <button data-days="89" class="on">3 months</button>
+          <button data-days="364">A year</button>
+          <input type="date" id="from">
+          <input type="date" id="to">
+          <button class="on" id="go">Show</button>
+          <div class="right">
+            <input type="text" id="q" placeholder="CPR number">
+            <button id="signout" class="hide" title="Forget the saved PostEx sign-in">Sign out</button>
+          </div>
+        </div>
+
+        <div id="out"><div class="loading">Reading…</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="drawer" id="drawer">
+  <div class="panel">
+    <div class="hd">
+      <b id="dTitle">Receipt</b>
+      <span class="note" id="dNote"></span>
+      <div class="acts">
+        <button id="dExport">Export to Excel</button>
+        <button id="dFresh" title="Ask the courier again">Refresh</button>
+        <button class="x" id="dClose">&times;</button>
+      </div>
+    </div>
+    <div class="bd" id="dBody"></div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var accounts = [];
+  var account = null;          // the chosen one
+  var all = [];                // receipts in view
+  var current = null;          // the receipt open in the drawer
+  var detail = null;           // what is inside it
+  var page = 0;
+  var PER = 100;
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function n0(v){ return Number(v||0).toLocaleString('en-US'); }
+  function full(v){
+    return Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  function iso(d){ return d.toISOString().slice(0,10); }
+
+  var MONTHS = ['','January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+  var fromEl = $('from'), toEl = $('to');
+
+  function setRange(days){
+    var t = new Date(), f = new Date();
+    f.setDate(f.getDate() - days);
+    fromEl.value = iso(f); toEl.value = iso(t);
+  }
+
+  function statusPill(s){
+    var k = String(s||'').toUpperCase();
+    var cls = k === 'CLOSED' ? 'ok' : (k === 'APPROVED' ? 'done' :
+              (k === 'PENDING' || k === 'OPEN' ? 'wait' : 'grey'));
+    return '<span class="pill '+cls+'">'+esc(s||'—')+'</span>';
+  }
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  /* ==================== start ==================== */
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    setRange(89);
+
+    document.querySelectorAll('.bar button[data-days]').forEach(function(b){
+      b.addEventListener('click', function(){
+        document.querySelectorAll('.bar button[data-days]').forEach(function(x){
+          x.classList.remove('on');
+        });
+        b.classList.add('on');
+        setRange(Number(b.getAttribute('data-days')));
+        load();
+      });
+    });
+
+    $('go').addEventListener('click', load);
+    $('q').addEventListener('input', draw);
+    $('acct').addEventListener('change', function(){
+      account = accounts.filter(function(a){ return String(a.id) === $('acct').value; })[0] || null;
+      load();
+    });
+    $('signout').addEventListener('click', signOut);
+
+    loadAccounts();
+  });
+
+  function loadAccounts(){
+    fetch('/api/courier/accounts', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        accounts = (d.accounts || []).filter(function(a){ return a.courier === 'postex'; });
+
+        if(!accounts.length){
+          $('out').innerHTML = '<div class="box"><h3>No PostEx account yet</h3>' +
+            '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
+            'Add one on the <a href="/couriers.html">Couriers</a> page first, ' +
+            'then come back here to sign in to the PostEx portal.</p></div>';
+          $('acct').classList.add('hide');
+          return;
+        }
+
+        $('acct').innerHTML = accounts.map(function(a){
+          return '<option value="'+a.id+'">'+esc(a.label)+'</option>';
+        }).join('');
+
+        // ?account=N when arriving from somewhere that already knows which one
+        var want = new URLSearchParams(location.search).get('account');
+        account = accounts.filter(function(a){ return String(a.id) === want; })[0] || accounts[0];
+        $('acct').value = account.id;
+
+        load();
+      })
+      .catch(function(e){ $('out').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
+  }
+
+  /* ==================== the portal sign-in ==================== */
+
+  function askSignIn(why){
+    $('signout').classList.add('hide');
+
+    $('out').innerHTML =
+      '<div class="box signin">' +
+        '<h3>Sign in to PostEx</h3>' +
+        (why ? '<div class="warn">'+esc(why)+'</div>' : '') +
+        '<p style="font-size:12.5px;color:var(--muted);margin:0 0 4px">' +
+          'The same email and password you use on merchant.postex.pk. ' +
+          'It is kept encrypted so the app can sign in again on its own — ' +
+          'PostEx sign-ins only last a few hours.</p>' +
+        '<label for="pxEmail">Email</label>' +
+        '<input type="email" id="pxEmail" autocomplete="off">' +
+        '<label for="pxPass">Password</label>' +
+        '<input type="password" id="pxPass" autocomplete="off">' +
+        '<div id="pxMsg"></div>' +
+        '<button class="go" id="pxGo">Sign in</button>' +
+      '</div>';
+
+    var go = $('pxGo');
+
+    function submit(){
+      var email = $('pxEmail').value.trim();
+      var pass = $('pxPass').value;
+      if(!email || !pass){ $('pxMsg').innerHTML = '<div class="msg">Both are needed.</div>'; return; }
+
+      go.disabled = true; go.textContent = 'Signing in…';
+      $('pxMsg').innerHTML = '';
+
+      fetch('/api/cpr/login', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ id: account.id, email: email, password: pass })
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){
+          $('pxMsg').innerHTML = '<div class="msg">'+esc(d.error)+'</div>';
+          go.disabled = false; go.textContent = 'Sign in';
+          return;
+        }
+        account.portal_ready = true;
+        load();
+      })
+      .catch(function(e){
+        $('pxMsg').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
+        go.disabled = false; go.textContent = 'Sign in';
+      });
+    }
+
+    go.addEventListener('click', submit);
+    $('pxPass').addEventListener('keydown', function(e){ if(e.key === 'Enter') submit(); });
+  }
+
+  function signOut(){
+    if(!account) return;
+    if(!confirm('Forget the saved PostEx sign-in for ' + account.label + '?')) return;
+
+    fetch('/api/cpr/logout', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: account.id })
+    })
+    .then(function(){ account.portal_ready = false; askSignIn(''); })
+    .catch(function(e){ alert(e.message); });
+  }
+
+  /* ==================== the list ==================== */
+
+  function load(){
+    if(!account) return;
+
+    $('sub').textContent = account.label;
+    $('out').innerHTML = '<div class="loading">Asking PostEx…</div>';
+
+    var p = new URLSearchParams();
+    p.set('from', fromEl.value);
+    p.set('to', toEl.value);
+    p.set('account', account.id);
+
+    fetch('/api/cpr/list?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('out').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+
+        // no sign-in saved yet, or it stopped working
+        if(d.trouble && /sign-in|sign in|password/i.test(d.trouble) && !(d.cprs||[]).length){
+          askSignIn(/no PostEx sign-in/i.test(d.trouble) ? '' : d.trouble);
+          return;
+        }
+
+        $('signout').classList.remove('hide');
+        all = d.cprs || [];
+        draw(d.trouble);
+
+        // arrived from the dashboard with one receipt in mind
+        var want = (location.hash.match(/cpr=([^&]+)/) || [])[1];
+        if(want){
+          location.hash = '';
+          var c = all.filter(function(x){ return String(x.remoteId) === decodeURIComponent(want); })[0];
+          if(c) openCpr(c.remoteId, c.cpr);
+        }
+      })
+      .catch(function(e){ $('out').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
+  }
+
+  function draw(trouble){
+    var q = $('q').value.trim().toLowerCase();
+    var list = q
+      ? all.filter(function(c){ return String(c.cpr).toLowerCase().indexOf(q) > -1; })
+      : all;
+
+    var amount = 0, received = 0;
+    list.forEach(function(c){ amount += c.netAmount; if(c.qbPaymentId) received += c.netAmount; });
+
+    var html = '';
+    if(typeof trouble === 'string' && trouble){
+      html += '<div class="warn">Showing what we already had. PostEx said: '+esc(trouble)+'</div>';
+    }
+
+    html += '<div class="cards">' +
+      '<div class="card"><div class="k">Receipts</div><div class="v">'+n0(list.length)+
+        '</div><div class="n">in this range</div></div>' +
+      '<div class="card"><div class="k">Net amount</div><div class="v">'+full(amount)+
+        '</div><div class="n">PKR</div></div>' +
+      '<div class="card"><div class="k">Received in QB</div><div class="v">'+full(received)+
+        '</div><div class="n">'+n0(list.filter(function(c){return c.qbPaymentId;}).length)+
+        ' of '+n0(list.length)+' receipts</div></div>' +
+      '<div class="card"><div class="k">Still to do</div><div class="v">'+full(amount-received)+
+        '</div><div class="n">not yet in QuickBooks</div></div>' +
+      '</div>';
+
+    // grouped by month, newest first
+    var byMonth = {};
+    list.forEach(function(c){
+      var k = (c.createdOn || '0000-00').slice(0,7);
+      if(!byMonth[k]) byMonth[k] = [];
+      byMonth[k].push(c);
+    });
+
+    var rows = '';
+    Object.keys(byMonth).sort().reverse().forEach(function(k){
+      var group = byMonth[k];
+      var am = 0;
+      group.forEach(function(c){ am += c.netAmount; });
+
+      var label = k === '0000-00' ? 'No date'
+                : MONTHS[Number(k.slice(5,7))] + ' ' + k.slice(0,4);
+
+      rows += '<tr style="background:#F3F7FB;font-weight:600"><td colspan="3">'+esc(label)+'</td>' +
+              '<td class="r">'+n0(group.length)+'</td><td class="r">'+full(am)+'</td><td></td></tr>';
+
+      group.forEach(function(c){
+        rows += '<tr class="click" data-id="'+esc(c.remoteId)+'" data-cpr="'+esc(c.cpr)+'">' +
+                '<td class="mono">'+esc(c.cpr)+'</td>' +
+                '<td class="mono">'+esc(c.createdOn||'')+'</td>' +
+                '<td class="mono">'+esc(c.approvedOn||'')+'</td>' +
+                '<td class="r">'+statusPill(c.status)+'</td>' +
+                '<td class="r">'+full(c.netAmount)+'</td>' +
+                '<td>'+(c.qbPaymentId
+                    ? '<span class="pill done">Received '+esc(c.receivedOn||'')+'</span>'
+                    : '<span class="pill grey">Not yet</span>')+'</td></tr>';
+      });
+    });
+
+    html += '<div class="box"><h3>Receipts' +
+            '<span class="aside">click one to see everything inside it</span></h3>' +
+            '<div class="scroll"><table class="t">' +
+            '<tr><th>CPR number</th><th>Created</th><th>Approved</th>' +
+            '<th class="r">Status</th><th class="r">Net amount</th><th>QuickBooks</th></tr>' +
+            (rows || '<tr><td colspan="6" class="empty">Nothing in this range.</td></tr>') +
+            '</table></div></div>';
+
+    $('out').innerHTML = html;
+
+    $('out').querySelectorAll('[data-id]').forEach(function(tr){
+      tr.addEventListener('click', function(){
+        openCpr(tr.getAttribute('data-id'), tr.getAttribute('data-cpr'));
+      });
+    });
+  }
+
+  /* ==================== one receipt ==================== */
+
+  $('dClose').addEventListener('click', close);
+  $('drawer').addEventListener('click', function(e){ if(e.target === $('drawer')) close(); });
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && $('drawer').classList.contains('open')) close();
+  });
+  function close(){ $('drawer').classList.remove('open'); }
+
+  $('dFresh').addEventListener('click', function(){
+    if(current) openCpr(current.remoteId, current.cpr, true);
+  });
+
+  $('dExport').addEventListener('click', function(){
+    if(!current) return;
+    var p = new URLSearchParams();
+    p.set('account', account.id);
+    p.set('id', current.remoteId);
+    p.set('cpr', current.cpr);
+    p.set('created', current.createdOn || '');
+    p.set('approved', current.approvedOn || '');
+    p.set('status', current.status || '');
+    location.href = '/api/cpr/export?' + p.toString();
+  });
+
+  function openCpr(remoteId, cprNumber, fresh){
+    current = all.filter(function(c){ return String(c.remoteId) === String(remoteId); })[0] ||
+              { remoteId: remoteId, cpr: cprNumber };
+    page = 0;
+
+    $('dTitle').textContent = current.cpr;
+    $('dNote').textContent = '';
+    $('dBody').innerHTML = '<div class="loading">Reading the receipt…</div>';
+    $('drawer').classList.add('open');
+
+    var p = new URLSearchParams();
+    p.set('account', account.id);
+    p.set('id', remoteId);
+    if(current.createdOn) p.set('created', current.createdOn);
+    if(fresh) p.set('fresh', '1');
+
+    fetch('/api/cpr/detail?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('dBody').innerHTML = '<div class="msg">'+esc(d.error)+'</div>'; return; }
+        detail = d;
+        drawDetail();
+      })
+      .catch(function(e){ $('dBody').innerHTML = '<div class="msg">'+esc(e.message)+'</div>'; });
+  }
+
+  function line(label, value, cls){
+    return '<div'+(cls?' class="'+cls+'"':'')+'><span>'+esc(label)+
+           '</span><span class="num">'+full(value)+'</span></div>';
+  }
+
+  function drawDetail(){
+    var s = detail.summary || {};
+    var orders = detail.orders || [];
+
+    $('dNote').textContent = n0(orders.length) + ' orders · net ' + full(s.netAmount);
+
+    /* ---- the totals, as the portal lays them out ---- */
+
+    var lines = (s.lines || []).map(function(l){
+      return '<tr><td>'+esc(l.label)+'</td><td class="r">'+n0(l.orders)+
+             '</td><td class="r">'+full(l.amount)+
+             '</td><td class="r">'+full(l.invoice)+'</td></tr>';
+    }).join('');
+
+    var totals =
+      line('Grand total', s.grandTotal) +
+      line('COD charges (' + n0(s.codChargesCount) + ')', -s.codCharges) +
+      (s.upfrontChargesCount
+        ? line('Upfront charges (' + n0(s.upfrontChargesCount) + ')', -s.upfrontCharges) : '') +
+      line('Sales tax', -s.salesTax) +
+      line('Income tax', -s.incomeTax) +
+      line('Tax', -s.tax) +
+      (s.miscellaneousCharges ? line('Miscellaneous charges', -s.miscellaneousCharges) : '') +
+      (s.carryForwardAmount ? line('Carried forward', s.carryForwardAmount) : '') +
+      (s.adjustmentAmount ? line('Adjustments', s.adjustmentAmount) : '') +
+      line('Net amount', s.netAmount, 'big');
+
+    var head =
+      '<div class="sum">' +
+        '<div class="box" style="margin:0">' +
+          '<h3>What is in this receipt</h3>' +
+          '<table class="t"><tr><th>Kind</th><th class="r">Orders</th>' +
+          '<th class="r">Amount</th><th class="r">Invoice amount</th></tr>' +
+          (lines || '<tr><td colspan="4" class="empty">Nothing.</td></tr>') + '</table>' +
+        '</div>' +
+        '<div class="box" style="margin:0">' +
+          '<h3>Money</h3><div class="tot">' + totals + '</div>' +
+        '</div>' +
+      '</div>';
+
+    /* ---- by status ---- */
+
+    var byStatus = (detail.counts || []).map(function(c){
+      return '<tr><td>'+esc(c.status)+'</td><td class="r">'+n0(c.orders)+
+             '</td><td class="r">'+full(c.amount)+
+             '</td><td class="r">'+full(c.fee)+'</td><td class="r">'+full(c.tax)+'</td></tr>';
+    }).join('');
+
+    head += '<div class="box"><h3>By status</h3><div class="scroll"><table class="t">' +
+            '<tr><th>Status</th><th class="r">Orders</th><th class="r">Amount</th>' +
+            '<th class="r">Fee</th><th class="r">Tax</th></tr>' + byStatus +
+            '</table></div></div>';
+
+    /* ---- every order ---- */
+
+    head += '<div class="box"><h3>Orders' +
+            '<span class="aside" id="oCount"></span></h3>' +
+            '<div class="bar" style="margin-bottom:10px">' +
+              '<input type="text" id="oq" placeholder="Order ref, tracking, customer, city">' +
+              '<select id="ost"><option value="">Every status</option>' +
+              (detail.counts||[]).map(function(c){
+                return '<option value="'+esc(c.status)+'">'+esc(c.status)+
+                       ' ('+n0(c.orders)+')</option>';
+              }).join('') + '</select>' +
+            '</div>' +
+            '<div class="scroll"><table class="t" id="otab"></table></div>' +
+            '<div class="pager" id="opager"></div></div>';
+
+    $('dBody').innerHTML = head;
+
+    $('oq').addEventListener('input', function(){ page = 0; drawOrders(); });
+    $('ost').addEventListener('change', function(){ page = 0; drawOrders(); });
+    drawOrders();
+  }
+
+  function filtered(){
+    var q = ($('oq') ? $('oq').value : '').trim().toLowerCase();
+    var st = $('ost') ? $('ost').value : '';
+
+    return (detail.orders || []).filter(function(o){
+      if(st && o.status !== st) return false;
+      if(!q) return true;
+      return (o.orderRef + ' ' + o.tracking + ' ' + o.customer + ' ' +
+              o.city + ' ' + o.phone).toLowerCase().indexOf(q) > -1;
+    });
+  }
+
+  function drawOrders(){
+    var list = filtered();
+    var pages = Math.max(1, Math.ceil(list.length / PER));
+    if(page >= pages) page = pages - 1;
+
+    var slice = list.slice(page * PER, page * PER + PER);
+
+    var rows = slice.map(function(o){
+      return '<tr>' +
+        '<td class="mono">'+esc(o.orderRef)+'</td>' +
+        '<td class="mono">'+esc(o.tracking)+'</td>' +
+        '<td>'+esc(o.customer)+'</td>' +
+        '<td>'+esc(o.city)+'</td>' +
+        '<td>'+esc(o.status)+'</td>' +
+        '<td class="r">'+full(o.amount)+'</td>' +
+        '<td class="r">'+full(o.fee)+'</td>' +
+        '<td class="r">'+full(o.tax)+'</td>' +
+        '<td class="mono">'+esc(o.deliveredOn||'')+'</td>' +
+        '<td class="mono">'+esc(o.settledOn||'')+'</td>' +
+      '</tr>';
+    }).join('');
+
+    var sum = list.reduce(function(a,o){
+      a.amount += o.amount; a.fee += o.fee; a.tax += o.tax; return a;
+    }, {amount:0,fee:0,tax:0});
+
+    $('otab').innerHTML =
+      '<tr><th>Order ref</th><th>Tracking</th><th>Customer</th><th>City</th><th>Status</th>' +
+      '<th class="r">Amount</th><th class="r">Fee</th><th class="r">Tax</th>' +
+      '<th>Delivered</th><th>Settled</th></tr>' +
+      (rows || '<tr><td colspan="10" class="empty">Nothing matches.</td></tr>') +
+      (list.length ? '<tr style="font-weight:600;background:#FAFCFE">' +
+        '<td colspan="5">'+n0(list.length)+' orders</td>' +
+        '<td class="r">'+full(sum.amount)+'</td>' +
+        '<td class="r">'+full(sum.fee)+'</td>' +
+        '<td class="r">'+full(sum.tax)+'</td><td colspan="2"></td></tr>' : '');
+
+    $('oCount').textContent = n0(list.length) + ' of ' + n0((detail.orders||[]).length);
+
+    $('opager').innerHTML = pages > 1
+      ? '<button id="pPrev"'+(page===0?' disabled':'')+'>Previous</button>' +
+        '<span>Page '+(page+1)+' of '+pages+'</span>' +
+        '<button id="pNext"'+(page>=pages-1?' disabled':'')+'>Next</button>'
+      : '';
+
+    if($('pPrev')) $('pPrev').addEventListener('click', function(){ page--; drawOrders(); });
+    if($('pNext')) $('pNext').addEventListener('click', function(){ page++; drawOrders(); });
+  }
+})();
+</script>
+</body>
+</html>

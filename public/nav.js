@@ -193,6 +193,11 @@
         out += '<a class="all' + (here.indexOf('scope=all') > -1 ? ' on' : '') +
                '" href="/courier-dash.html?scope=all">All courier companies</a>';
 
+        // the receipts read the courier's portal, not our own table, so they
+        // sit beside the dashboards rather than under one of them
+        out += '<a class="all' + (path === '/receipts.html' ? ' on' : '') +
+               '" href="/receipts.html">Cash payment receipts</a>';
+
         (d.couriers || []).forEach(function(c){
           // only the company whose account is on screen opens itself
           var mine = c.accounts.some(function(a){
