@@ -981,49 +981,69 @@
         '<div id="rMarkOut"></div></div>';
     }
 
-    // Everything wrong with this receipt in one place. Three different
-    // troubles - no invoice, paid by something else, an amount that does not
-    // agree - but one person has to chase all of them, so one list.
+    // One section per kind of trouble, the way the sheet page does it - a
+    // list of twenty things wrong with three different causes is not a list
+    // anyone can work through. Each says what it is, what it is worth, what to
+    // do about it, and downloads on its own.
     var probs = m.problems || [];
 
-    if(probs.length){
-      var kinds = {};
-      probs.forEach(function(o){
-        if(!kinds[o.kind]) kinds[o.kind] = { n:0, amount:0 };
-        kinds[o.kind].n++;
-        kinds[o.kind].amount += (o.impact == null ? o.received : o.impact);
-      });
+    var SECTIONS = [
+      { kind: 'amount differs',
+        title: 'Amount differs — sheet against QuickBooks',
+        note: 'The invoice was raised for a figure that is neither what the ' +
+              'courier collected nor that plus an advance. These are held back ' +
+              'rather than posted — posting one marks it paid and buries the ' +
+              'difference. Put the invoice right, then open this receipt again.' },
+      { kind: 'no invoice',
+        title: 'Not found in QuickBooks',
+        note: 'No invoice exists for these at all. Make them, then open this ' +
+              'receipt again and they will go in with the rest.' },
+      { kind: 'paid elsewhere',
+        title: 'Paid under another payment',
+        note: 'Settled by something other than this receipt, so nothing more ' +
+              'can go in against them. The payment that took each one is in ' +
+              'the Why column.' }
+    ];
 
-      var WHAT = {
-        'no invoice':
-          'No invoice in QuickBooks. Make it, then open this receipt again.',
-        'amount differs':
-          'The invoice was raised for a figure that is neither what the courier ' +
-          'collected nor that plus an advance. Compare the sheet’s COD with ' +
-          'what QuickBooks had the invoice at — the last column is what the ' +
-          'advance cannot account for.'
-      };
+    if(probs.length){
+      var total = probs.reduce(function(a,o){
+        return a + (o.impact == null ? o.received : o.impact);
+      }, 0);
 
       html += '<div class="box"><h3>Invoices with something wrong' +
         '<span class="aside">' + n0(probs.length) + ' parcels · ' +
-        full(probs.reduce(function(a,o){
-          return a + (o.impact == null ? o.received : o.impact);
-        }, 0)) + ' at stake</span>' +
-        '<button class="dl2" id="rDlProb">Download these with their full detail</button></h3>' +
-        '<div class="tally2" style="margin-bottom:12px">' +
-          Object.keys(kinds).map(function(k){
-            return '<div><div class="n">' + n0(kinds[k].n) + '</div>' +
-                   '<div class="l">' + esc(k) + '</div>' +
-                   '<div class="l" style="text-transform:none;letter-spacing:0;color:var(--muted)">' +
-                   full(kinds[k].amount) + '</div></div>';
+        full(total) + ' at stake</span>' +
+        '<button class="dl2" id="rDlProb">Download all of them</button></h3>' +
+        '<div class="tally2" style="margin-bottom:0">' +
+          SECTIONS.map(function(sec){
+            var rows = probs.filter(function(o){ return o.kind === sec.kind; });
+            if(!rows.length) return '';
+            var amt = rows.reduce(function(a,o){
+              return a + (o.impact == null ? o.received : o.impact);
+            }, 0);
+            return '<div class="bad"><div class="n">' + n0(rows.length) + '</div>' +
+                   '<div class="l">' + esc(sec.kind) + '</div>' +
+                   '<div class="l" style="text-transform:none;letter-spacing:0;' +
+                   'color:var(--muted)">' + full(amt) + '</div></div>';
           }).join('') +
-        '</div>' +
-        '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
-          Object.keys(kinds).map(function(k){
-            return '<b>' + esc(k) + '</b> — ' + esc(WHAT[k] || '');
-          }).join('<br>') +
-        '</p>' +
-        detailTable(probs) + '</div>';
+        '</div></div>';
+
+      SECTIONS.forEach(function(sec, i){
+        var rows = probs.filter(function(o){ return o.kind === sec.kind; });
+        if(!rows.length) return;
+
+        var amt = rows.reduce(function(a,o){
+          return a + (o.impact == null ? o.received : o.impact);
+        }, 0);
+
+        html += '<div class="box"><h3>' + esc(sec.title) +
+          '<span class="aside">' + n0(rows.length) + ' invoices · ' +
+          full(amt) + '</span>' +
+          '<button class="dl2" data-dlsec="' + i + '">Download these</button></h3>' +
+          '<p style="font-size:12.5px;color:var(--muted);margin:0 0 12px">' +
+          esc(sec.note) + '</p>' +
+          detailTable(rows) + '</div>';
+      });
     }
 
     // The advance ones are not a problem - the invoice carried COD plus the
@@ -1032,13 +1052,14 @@
     if((m.settled || []).length){
       html += '<div class="box"><h3>Settled, nothing to chase' +
         '<span class="aside">' + n0(m.settled.length) + ' invoices · ' +
-        full(t.settled || 0) + ' of advances</span></h3>' +
+        full(t.settled || 0) + ' of advances</span>' +
+        '<button class="dl2" id="rDlSettled">Download these</button></h3>' +
         '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
         'An advance had already been received on these before delivery. ' +
         'Whether the invoice was raised at the COD or at the COD plus that ' +
         'advance, it adds up either way: the advance and this receipt between ' +
         'them settled it in full, and the open balance in QuickBooks is nil. ' +
-        'Nothing to chase.</p></div>';
+        'Nothing to chase.</p>' + detailTable(m.settled) + '</div>';
     }
 
     // A gap with nothing to show for it is worse than no gap at all - it looks
@@ -1143,7 +1164,20 @@
 
     var dlp = $('rDlProb');
     if(dlp) dlp.addEventListener('click', function(){
-      csvOf(match.problems, match.cpr + ' problems.csv');
+      csvOf(match.problems, match.cpr + ' - every issue.csv');
+    });
+
+    $('dBody').querySelectorAll('[data-dlsec]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var sec = SECTIONS[Number(b.getAttribute('data-dlsec'))];
+        csvOf((match.problems || []).filter(function(o){ return o.kind === sec.kind; }),
+              match.cpr + ' - ' + sec.kind + '.csv');
+      });
+    });
+
+    var dls = $('rDlSettled');
+    if(dls) dls.addEventListener('click', function(){
+      csvOf(match.settled, match.cpr + ' - settled with an advance.csv');
     });
   }
 
