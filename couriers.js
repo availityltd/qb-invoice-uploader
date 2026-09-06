@@ -194,16 +194,26 @@ export async function listPortalCprs(realmId, opts) {
 // went in short is worth seeing without opening it.
 export async function markCprReceived(realmId, accountId, cprNumber, info) {
   const i = info || {};
+
+  // A receipt can be received more than once: the first run takes what it can
+  // match, then the invoices that were missing get made and the rest follow.
+  // `add` puts the second run on top of the first instead of replacing it, so
+  // the total stays honest and the mark can go green.
   await pool.query(
     `UPDATE courier_cprs
-        SET qb_payment_id   = $4,
+        SET qb_payment_id   = COALESCE($4, qb_payment_id),
             received_on     = NOW(),
             expected_amount = COALESCE($5, expected_amount),
-            received_amount = COALESCE($6, received_amount)
+            received_amount = CASE
+              WHEN $6::numeric IS NULL THEN received_amount
+              WHEN $7::boolean THEN COALESCE(received_amount, 0) + $6::numeric
+              ELSE $6::numeric
+            END
       WHERE realm_id = $1 AND account_id = $2 AND cpr_number = $3`,
     [realmId, accountId, cprNumber, i.qbPaymentId || null,
      i.expected == null ? null : Number(i.expected),
-     i.received == null ? null : Number(i.received)]
+     i.received == null ? null : Number(i.received),
+     i.add === true]
   );
 }
 

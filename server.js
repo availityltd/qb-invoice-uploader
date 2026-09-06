@@ -4662,7 +4662,8 @@ app.post('/api/receipts/mark', async (req, res) => {
     await markCprReceived(realmId, id, cpr, {
       qbPaymentId: req.body.qbPaymentId || null,
       expected: req.body.expected,
-      received: req.body.received
+      received: req.body.received,
+      add: req.body.add === true
     });
     res.json({ ok: true });
   } catch (e) {

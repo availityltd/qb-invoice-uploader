@@ -43,6 +43,12 @@
   table.t tr:last-child td{border-bottom:0}
   table.t tr.click{cursor:pointer}
   table.t tr.click:hover td{background:#F5FAFD}
+  /* one meaning per colour: green settled, amber short, plain untouched */
+  table.t tr.done td{background:#F3FAF5}
+  table.t tr.done:hover td{background:#E9F5EE}
+  table.t tr.short td{background:#FFFAEF}
+  table.t tr.short:hover td{background:#FFF4E0}
+  table.t tr.part td{background:#F7F9FB}
   .scroll{overflow-x:auto}
 
   .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;
@@ -83,6 +89,8 @@
     color:var(--neg);font-size:12.5px;margin-bottom:12px}
   .warn{padding:11px 14px;border-radius:8px;background:#FFF8E8;border:1px solid var(--warn);
     color:#7A5200;font-size:12.5px;margin-bottom:12px}
+  .ok2{padding:11px 14px;border-radius:8px;background:#F1FAF4;border:1px solid #9FD3B4;
+    color:#1B7A44;font-size:12.5px;margin-bottom:12px}
   .loading{color:var(--muted);font-size:12.5px;padding:22px 0}
   .empty{color:var(--muted);font-size:12.5px;padding:16px 0}
 
@@ -245,6 +253,20 @@
   // does not, and nothing at all when it has not been done yet.
   var TOLERANCE = 100;
 
+  // how far the money that went in is from the money the courier collected
+  function gapOf(c){
+    if(c.expected == null || c.received == null) return null;
+    return Math.round((c.expected - c.received) * 100) / 100;
+  }
+
+  // green when it is settled, amber when it is short, nothing while untouched
+  function rowClass(c){
+    if(!c.qbPaymentId && !c.dcJournalId) return '';
+    var gap = gapOf(c);
+    if(!c.qbPaymentId) return ' part';
+    return (gap === null || Math.abs(gap) <= TOLERANCE) ? ' done' : ' short';
+  }
+
   function badges(c){
     var out = '';
 
@@ -254,9 +276,7 @@
     }
 
     if(c.qbPaymentId){
-      var gap = (c.expected == null || c.received == null)
-        ? null
-        : Math.round((c.expected - c.received) * 100) / 100;
+      var gap = gapOf(c);
 
       if(gap === null){
         out += '<span class="pill ok" title="Received ' + esc(c.receivedOn || '') +
@@ -496,7 +516,8 @@
               '<td class="r">'+n0(group.length)+'</td><td class="r">'+full(am)+'</td><td></td></tr>';
 
       group.forEach(function(c){
-        rows += '<tr class="click" data-id="'+esc(c.remoteId)+'" data-cpr="'+esc(c.cpr)+'">' +
+        rows += '<tr class="click'+rowClass(c)+'" data-id="'+esc(c.remoteId)+
+                '" data-cpr="'+esc(c.cpr)+'">' +
                 '<td class="mono">'+esc(c.cpr)+'</td>' +
                 '<td class="mono">'+esc(c.createdOn||'')+'</td>' +
                 '<td class="mono">'+esc(c.approvedOn||'')+'</td>' +
@@ -554,7 +575,7 @@
     page = 0;
 
     $('dTitle').textContent = current.cpr;
-    $('dNote').textContent = '';
+    $('dNote').innerHTML = current.qbPaymentId ? badges(current) : '';
     $('dBody').innerHTML = '<div class="loading">Reading the receipt…</div>';
     $('drawer').classList.add('open');
 
@@ -583,7 +604,9 @@
     var s = detail.summary || {};
     var orders = detail.orders || [];
 
-    $('dNote').textContent = n0(orders.length) + ' orders · net ' + full(s.netAmount);
+    $('dNote').innerHTML = esc(n0(orders.length) + ' orders · net ' + full(s.netAmount)) +
+      (current && (current.qbPaymentId || current.dcJournalId)
+        ? ' &nbsp; ' + badges(current) : '');
 
     /* ---- the totals, as the portal lays them out ---- */
 
@@ -789,6 +812,24 @@
     }).join('');
 
     var html = backLink();
+
+    // Coming back to a receipt that has already been through once. Only the
+    // invoices still owing are matched, so pressing the button again picks up
+    // whatever was fixed in the meantime and cannot pay anything twice.
+    var again = current && current.qbPaymentId;
+    if(again){
+      var gap = gapOf(current);
+      html += '<div class="' + (gap === null || Math.abs(gap) <= TOLERANCE ? 'ok2' : 'warn') + '">' +
+        'This receipt has already been received' +
+        (current.receivedOn ? ' on ' + esc(current.receivedOn) : '') + ' — ' +
+        full(current.received || 0) + ' went in against ' +
+        full(current.expected || 0) + ' collected' +
+        (gap !== null && Math.abs(gap) > TOLERANCE
+          ? ', short by ' + full(Math.abs(gap)) + '. Anything fixed since will be ' +
+            'picked up now; invoices already paid are left alone.'
+          : '. Nothing further is outstanding unless an invoice has been added since.') +
+        '</div>';
+    }
 
     html += '<div class="tally2">' +
       '<div class="good"><div class="n">'+n0(m.matched.length)+'</div>' +
@@ -1005,7 +1046,8 @@
             cpr: match.cpr,
             qbPaymentId: String(s.id || 'posted'),
             expected: match.totals.courier,
-            received: s.amount
+            received: s.amount,
+            add: !!(current && current.qbPaymentId)
           })
         })
         .then(function(){ load(); })
