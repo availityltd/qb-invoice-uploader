@@ -4939,6 +4939,28 @@ app.get('/api/receipts/check', async (req, res) => {
   }
 });
 
+// A parcel settled under a different receipt cannot be received again - the
+// invoice has nothing owing. The sheet page answers this by copying the
+// invoice under a "-D" number so the second settlement has something of its
+// own to pay, and this does the same. The copy keeps the original's date,
+// customer and lines, so it ages and reports the same way; only the number
+// differs. There is no sheet here to rename, which is the only part left out.
+app.post('/api/receipts/duplicate', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const invoiceId = String(req.body.invoiceId || '').trim();
+  if (!invoiceId) return res.status(400).json({ error: 'invoiceId required' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const made = await copyInvoice(realmId, token, invoiceId, '-D');
+    res.json({ ok: true, invoice: made });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Stamped once the money is in, so the receipt is never taken twice.
 app.post('/api/receipts/mark', async (req, res) => {
   const realmId = await requireCompany(req, res);

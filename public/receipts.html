@@ -59,6 +59,24 @@
   table.t tr.part td{background:#F7F9FB}
   .scroll{overflow-x:auto}
 
+  /* the trouble, in small boxes across the width rather than one long column */
+  .secs{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px;
+    margin-bottom:14px;align-items:start}
+  .secs .box{margin:0;padding:14px 16px}
+  .secs .box h3{margin:0 0 8px;font-size:12.5px;flex-wrap:wrap;gap:6px}
+  .secs .box h3 .aside{font-size:11px}
+  .secs .box p{font-size:11.5px !important;line-height:1.5;margin:0 0 10px !important}
+  .secs table.t{font-size:12px}
+  .secs table.t th{font-size:9.5px;padding:6px}
+  .secs table.t td{padding:6px}
+  .secs .lst{max-height:250px;overflow:auto}
+  .secs .dl2{font-size:11px;padding:4px 10px}
+  .mkd{border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 9px;
+    font:inherit;font-size:11px;cursor:pointer;color:var(--ink);width:auto;height:auto;
+    white-space:nowrap}
+  .mkd:hover{border-color:var(--qbo);color:var(--qbo)}
+  .mkd[disabled]{opacity:.5;cursor:default}
+
   .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10.5px;
     font-weight:600;letter-spacing:.02em;white-space:nowrap}
   .pill.ok{background:#E7F5EC;color:#1B7A44}
@@ -1016,9 +1034,16 @@
         cols: [ORDER, CPRAMT,
                ['Paid under', function(o){
                   return (o.paidFrom || []).map(function(f){
-                    return f.ref || 'no reference'; }).join(', '); }, '']],
+                    return f.ref || 'no reference'; }).join(', '); }, ''],
+               ['', function(o){
+                  return o.qbId
+                    ? '<button class="mkd" data-dupe="' + esc(o.qbId) +
+                      '" data-ref="' + esc(o.orderRef) + '">Create -D</button>'
+                    : ''; }, 'raw']],
         note: 'Settled by something other than this receipt, so nothing more ' +
-              'can go in against them.' }
+              'can go in against them. A -D copy gives this settlement an ' +
+              'invoice of its own — same date, customer and lines, only the ' +
+              'number differs — and it can then be received here.' }
     ];
 
     if(probs.length){
@@ -1033,6 +1058,8 @@
         '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
         'Each box below downloads just what it shows. The button above carries ' +
         'every one of them in the receipt’s own sixteen columns.</p></div>';
+
+      html += '<div class="secs">';
 
       SECTIONS.forEach(function(sec, i){
         var rows = probs.filter(function(o){ return o.kind === sec.kind; });
@@ -1050,6 +1077,8 @@
           esc(sec.note) + '</p>' +
           shortTable(rows, sec.cols) + '</div>';
       });
+
+      html += '</div>';
     }
 
     // The advance ones are not a problem - the invoice carried COD plus the
@@ -1186,6 +1215,34 @@
       });
     });
 
+    // Making the copy and then looking again is the whole of it - the parcel
+    // moves out of this box and into "ready to receive" on its own.
+    $('dBody').querySelectorAll('[data-dupe]').forEach(function(b){
+      b.addEventListener('click', function(){
+        var was = b.textContent;
+        b.disabled = true; b.textContent = 'Copying…';
+
+        fetch('/api/receipts/duplicate', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ invoiceId: b.getAttribute('data-dupe') })
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d.error){
+            b.disabled = false; b.textContent = was;
+            alert(b.getAttribute('data-ref') + ': ' + d.error);
+            return;
+          }
+          b.textContent = d.invoice && d.invoice.doc ? d.invoice.doc : 'copied';
+          openReceive();          // look again, so it lands where it belongs
+        })
+        .catch(function(e){
+          b.disabled = false; b.textContent = was;
+          alert(e.message);
+        });
+      });
+    });
+
     var dls = $('rDlSettled');
     if(dls) dls.addEventListener('click', function(){
       csvOf(match.settled, match.cpr + ' - settled with an advance.csv',
@@ -1232,14 +1289,17 @@
   // download exactly those. Only the all-in-one download carries the
   // receipt's full sixteen.
   function shortTable(rows, cols){
-    return '<div class="scroll" style="max-height:320px;overflow:auto">' +
+    return '<div class="lst">' +
       '<table class="t"><tr>' +
       cols.map(function(c){
         return '<th'+(c[2]==='r'?' class="r"':'')+'>'+esc(c[0])+'</th>';
       }).join('') + '</tr>' +
       rows.map(function(o){
         return '<tr>' + cols.map(function(c){
-          return '<td'+(c[2]?' class="'+c[2]+'"':'')+'>'+esc(c[1](o))+'</td>';
+          var v = c[1](o);
+          return c[2] === 'raw'
+            ? '<td>' + v + '</td>'
+            : '<td'+(c[2]?' class="'+c[2]+'"':'')+'>'+esc(v)+'</td>';
         }).join('') + '</tr>';
       }).join('') + '</table></div>';
   }
