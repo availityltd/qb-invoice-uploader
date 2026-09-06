@@ -982,10 +982,10 @@
         'no invoice':
           'No invoice in QuickBooks. Make it, then open this receipt again.',
         'amount differs':
-          'What came in under this receipt is not what the courier says it ' +
-          'collected. Compare the sheet’s COD against what QuickBooks had ' +
-          'the invoice at — an advance is already taken off, so it is not the ' +
-          'cause. Something was raised for the wrong figure.'
+          'The invoice was raised for a figure that is neither what the courier ' +
+          'collected nor that plus an advance. Compare the sheet’s COD with ' +
+          'what QuickBooks had the invoice at — the last column is what the ' +
+          'advance cannot account for.'
       };
 
       html += '<div class="box"><h3>Invoices with something wrong' +
@@ -1018,11 +1018,11 @@
         '<span class="aside">' + n0(m.settled.length) + ' invoices · ' +
         full(t.settled || 0) + ' of advances</span></h3>' +
         '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
-        'An advance had already been received on these before delivery, so ' +
-        'QuickBooks carried each invoice at its COD plus that advance and the ' +
-        'balance left was exactly the COD. This receipt paid that balance in ' +
-        'full — they reconcile, and their open balance in QuickBooks is nil.' +
-        '</p></div>';
+        'An advance had already been received on these before delivery. ' +
+        'Whether the invoice was raised at the COD or at the COD plus that ' +
+        'advance, it adds up either way: the advance and this receipt between ' +
+        'them settled it in full, and the open balance in QuickBooks is nil. ' +
+        'Nothing to chase.</p></div>';
     }
 
     // A gap with nothing to show for it is worse than no gap at all - it looks
@@ -1132,14 +1132,12 @@
     ['Customer',         function(o){ return o.customer || ''; }, ''],
     ['Phone',            function(o){ return o.phone || ''; }, 'mono'],
     ['Invoice in QB',    function(o){ return o.qbTotal == null ? '' : full(o.qbTotal); }, 'r'],
+    ['Advance',          function(o){ return o.advance == null ? '' : full(o.advance); }, 'r'],
     ['Paid by this CPR', function(o){
         return o.paidHereAmount == null ? '' : full(o.paidHereAmount);
       }, 'r'],
-    ['Advance already in',function(o){
-        return o.paidElseAmount == null ? '' : full(o.paidElseAmount);
-      }, 'r'],
-    ['Sheet minus CPR',  function(o){
-        return o.shortHere == null ? '' : full(o.shortHere);
+    ['Unaccounted for',  function(o){
+        return o.unexplained == null ? '' : full(o.unexplained);
       }, 'r'],
     ['Problem',          function(o){ return o.kind || ''; }, ''],
     ['Why',              function(o){ return o.why || ''; }, '']

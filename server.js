@@ -4715,13 +4715,17 @@ app.get('/api/receipts/match', async (req, res) => {
           // Money this receipt collected that arrived under someone else's
           // name - the whole invoice, or part of it, as when an advance was
           // taken before the parcel was delivered.
-          // What matters is not that an advance exists - that is normal, and
-          // QuickBooks carried the invoice at COD plus advance so the balance
-          // left was exactly the COD. What matters is whether this receipt
-          // settled what the courier says it collected. If it did, the advance
-          // did its job and there is nothing to chase.
-          const gap = r2(o.received - here);
-          o.shortHere = gap;
+          // An invoice is right if it was raised for what the courier
+          // collected, or for that plus an advance the customer had already
+          // paid. Either way it settles and nothing is owed. Anything the
+          // advance does not account for is an invoice raised for the wrong
+          // figure, and that is the only thing worth chasing.
+          const qbGap = r2((o.qbTotal || 0) - o.received);
+          const unexplained = r2(Math.abs(qbGap) - other);
+
+          o.advance = r2(other);
+          o.qbGap = qbGap;
+          o.unexplained = unexplained > 0 ? unexplained : 0;
 
           const say = from.map(f => {
             const bits = [];
@@ -4733,23 +4737,25 @@ app.get('/api/receipts/match', async (req, res) => {
           });
 
           o.paidFrom = from;
-          o.settledElsewhere = say.join('; ');
 
-          if (Math.abs(gap) > 1) {
+          if (unexplained > 1) {
             offBy.push({
               ...o,
-              why: `the courier collected ${o.received.toFixed(2)} but only ` +
-                   `${r2(here).toFixed(2)} came in under this receipt` +
-                   (o.qbTotal != null
-                      ? `. QuickBooks had the invoice at ${o.qbTotal.toFixed(2)}` : '') +
-                   (say.length ? `, with ${say.join('; ')}` : '')
+              why: `the courier collected ${o.received.toFixed(2)} but the ` +
+                   `invoice was raised at ${(o.qbTotal || 0).toFixed(2)}` +
+                   (other > 0.005
+                      ? `, and only ${other.toFixed(2)} of that is the advance` : '') +
+                   `. ${unexplained.toFixed(2)} is unaccounted for` +
+                   (say.length ? ` (${say.join('; ')})` : '')
             });
           } else if (other > 0.005) {
-            // reconciled, and worth saying so - these were the ones that
-            // looked wrong until the advance was accounted for
-            settled.push({ ...o, why: 'settled in full: ' + r2(here).toFixed(2) +
-                                       ' from this receipt, ' + say.join('; ') });
+            settled.push({
+              ...o,
+              why: 'settled in full: ' + r2(here).toFixed(2) + ' from this receipt' +
+                   (say.length ? ', ' + say.join('; ') : '')
+            });
           }
+
         });
 
         paidBy = [...byRef.values()]
@@ -4775,7 +4781,7 @@ app.get('/api/receipts/match', async (req, res) => {
         // somewhere other than this receipt
         // the receipt did not settle what the courier collected
         offBy.map(o => ({
-          ...o, kind: 'amount differs', impact: r2(Math.abs(o.shortHere || 0))
+          ...o, kind: 'amount differs', impact: o.unexplained || 0
         })),
 
         // the invoice was raised for a different figure than the courier
@@ -4790,7 +4796,7 @@ app.get('/api/receipts/match', async (req, res) => {
         toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
         paidAlready: r2(alreadyPaid.reduce((s, o) => s + o.received, 0)),
         paidHere: r2(alreadyPaid.reduce((s, o) => s + (o.paidHereAmount || 0), 0)),
-        settled: r2(settled.reduce((s, o) => s + (o.paidElseAmount || 0), 0)),
+        settled: r2(settled.reduce((s, o) => s + (o.advance || 0), 0)),
         settledCount: settled.length,
         missing: r2(missing.reduce((s, o) => s + o.received, 0)),
         mismatched: r2(mismatched.reduce((s, o) => s + o.received, 0)),
