@@ -100,6 +100,47 @@
   .pager button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 10px;
     font:inherit;font-size:12px;cursor:pointer;width:auto;height:auto;color:var(--ink)}
   .pager button[disabled]{opacity:.4;cursor:default}
+
+  .bk{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 12px;
+    font:inherit;font-size:12.5px;cursor:pointer;color:var(--ink);width:auto;height:auto}
+  .bk:hover{border-color:var(--qbo)}
+  .go2{background:var(--qbo);border:1px solid var(--qbo);color:#fff;border-radius:7px;
+    padding:10px 18px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+    width:auto;height:auto}
+  .go2[disabled]{opacity:.55;cursor:default}
+  .dl2{margin-left:auto;border:1px solid var(--line);background:#fff;border-radius:7px;
+    padding:5px 12px;font:inherit;font-size:11.5px;cursor:pointer;color:var(--ink);
+    width:auto;height:auto;font-weight:400}
+  .dl2:hover{border-color:var(--qbo);color:var(--qbo)}
+
+  /* taking a receipt into QuickBooks */
+  .drawer .hd button.go{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
+  .drawer .hd button.go:hover{opacity:.9}
+  .drawer .hd button.go[disabled]{opacity:.5;cursor:default}
+
+  .rcv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;
+    margin-bottom:14px}
+  .rcv label{display:block;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:5px}
+  .rcv input,.rcv select{width:100%;border:1px solid var(--line);border-radius:7px;
+    padding:8px 10px;font:inherit;font-size:13px;background:#fff}
+  .rcv .fixed{font-family:var(--mono);font-size:13px;padding:8px 10px;
+    border:1px solid var(--line);border-radius:7px;background:#F7F9FB}
+
+  .tally2{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:11px;
+    margin-bottom:14px}
+  .tally2 > div{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff}
+  .tally2 .n{font-family:var(--mono);font-size:19px;font-weight:500;line-height:1.1}
+  .tally2 .l{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally2 .good .n{color:var(--ok)}
+  .tally2 .bad .n{color:var(--neg)}
+
+  .log{font-family:var(--mono);font-size:11.5px;background:#0F2E24;color:#CFE8DC;
+    border-radius:9px;padding:12px 14px;max-height:260px;overflow:auto;white-space:pre-wrap;
+    line-height:1.55}
+  .barz{height:8px;border-radius:4px;background:#E8EDF3;overflow:hidden;margin:10px 0}
+  .barz i{display:block;height:8px;background:var(--qbo);border-radius:4px;transition:width .3s}
 </style>
 </head>
 <body>
@@ -153,6 +194,7 @@
       <b id="dTitle">Receipt</b>
       <span class="note" id="dNote"></span>
       <div class="acts">
+        <button id="dReceive" class="go">Receive payment in QB</button>
         <button id="dExport">Export to Excel</button>
         <button id="dFresh" title="Ask the courier again">Refresh</button>
         <button class="x" id="dClose">&times;</button>
@@ -637,6 +679,244 @@
 
     if($('pPrev')) $('pPrev').addEventListener('click', function(){ page--; drawOrders(); });
     if($('pNext')) $('pNext').addEventListener('click', function(){ page++; drawOrders(); });
+  }
+
+  /* ==================== taking a receipt into QuickBooks ==================== */
+
+  var match = null;          // what this receipt looks like against QuickBooks
+  var payTimer = null;
+
+  $('dReceive').addEventListener('click', openReceive);
+
+  function openReceive(){
+    if(!current) return;
+
+    $('dBody').innerHTML = '<div class="loading">Looking these invoices up in QuickBooks…</div>';
+
+    var p = new URLSearchParams();
+    p.set('account', account.id);
+    p.set('id', current.remoteId);
+    p.set('cpr', current.cpr);
+    if(current.createdOn) p.set('created', current.createdOn);
+
+    fetch('/api/receipts/match?'+p.toString(), { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ $('dBody').innerHTML = backLink() + '<div class="msg">'+esc(d.error)+'</div>'; return; }
+        match = d;
+        drawReceive();
+      })
+      .catch(function(e){
+        $('dBody').innerHTML = backLink() + '<div class="msg">'+esc(e.message)+'</div>';
+      });
+  }
+
+  function backLink(){
+    return '<div style="margin:6px 0 14px"><button class="bk" id="rBack">' +
+           '← Back to the receipt</button></div>';
+  }
+
+  function wireBack(){
+    var b = $('rBack');
+    if(b) b.addEventListener('click', function(){ drawDetail(); });
+  }
+
+  function drawReceive(){
+    var m = match, t = m.totals;
+
+    var banks = (m.banks || []).map(function(a){
+      var sel = m.chosen && String(m.chosen.accountId) === String(a.id) ? ' selected' : '';
+      return '<option value="'+esc(a.id)+'"'+sel+'>'+esc(a.name)+'</option>';
+    }).join('');
+
+    var methods = '<option value="">None</option>' + (m.methods || []).map(function(x){
+      var sel = m.chosen && String(m.chosen.methodId) === String(x.id) ? ' selected' : '';
+      return '<option value="'+esc(x.id)+'"'+sel+'>'+esc(x.name)+'</option>';
+    }).join('');
+
+    var html = backLink();
+
+    html += '<div class="tally2">' +
+      '<div class="good"><div class="n">'+n0(m.matched.length)+'</div>' +
+        '<div class="l">Ready to receive</div></div>' +
+      '<div class="good"><div class="n">'+full(t.toReceive)+'</div>' +
+        '<div class="l">Will be received</div></div>' +
+      '<div><div class="n">'+n0(m.alreadyPaid.length)+'</div>' +
+        '<div class="l">Already paid</div></div>' +
+      '<div class="'+(m.missing.length?'bad':'')+'"><div class="n">'+n0(m.missing.length)+'</div>' +
+        '<div class="l">Not in QuickBooks</div></div>' +
+      '<div><div class="n">'+full(t.courier)+'</div>' +
+        '<div class="l">Courier collected</div></div>' +
+      '</div>';
+
+    // the courier's own total against what QuickBooks says is owed
+    var gap = Math.round((t.courier - t.toReceive - t.paidAlready) * 100) / 100;
+    if(Math.abs(gap) > 100){
+      html += '<div class="warn">The courier collected ' + full(t.courier) +
+        ' but QuickBooks only has ' + full(t.toReceive + t.paidAlready) +
+        ' against these orders — a difference of ' + full(Math.abs(gap)) +
+        '. Check the parcels below before receiving.</div>';
+    }
+
+    html += '<div class="box"><h3>How this will be posted</h3>' +
+      '<div class="rcv">' +
+        '<div><label>Date on the payment</label>' +
+          '<input type="date" id="rDate" value="'+esc(m.cprDate||'')+'"></div>' +
+        '<div><label>Reference</label>' +
+          '<div class="fixed">'+esc(m.cpr)+'</div></div>' +
+        '<div><label>Bank the money went into</label>' +
+          '<select id="rBank">'+banks+'</select></div>' +
+        '<div><label>Payment method</label>' +
+          '<select id="rMethod">'+methods+'</select></div>' +
+      '</div>' +
+      '<div class="note">The date is the receipt’s own date and the reference is its ' +
+      'number, so a payment can always be traced back. The bank is remembered for ' +
+      esc(m.account) + ' — change it here whenever it needs changing.</div>' +
+      '<div style="margin-top:14px"><button class="go2" id="rGo">' +
+      'Receive ' + n0(m.matched.length) + ' payments · ' + full(t.toReceive) +
+      '</button></div>' +
+      '<div id="rOut"></div></div>';
+
+    /* --- what could not be received, with everything about it --- */
+
+    if(m.missing.length || m.alreadyPaid.length){
+      var rows = m.missing.concat(m.alreadyPaid).map(function(o){
+        return '<tr><td class="mono">'+esc(o.orderRef||'')+'</td>' +
+               '<td class="mono">'+esc(o.tracking)+'</td>' +
+               '<td>'+esc(o.customer||'')+'</td>' +
+               '<td>'+esc(o.city||'')+'</td>' +
+               '<td>'+esc(o.status||'')+'</td>' +
+               '<td class="r">'+full(o.received)+'</td>' +
+               '<td class="r">'+full(o.fee)+'</td>' +
+               '<td class="mono">'+esc(o.deliveredOn||'')+'</td>' +
+               '<td>'+esc(o.why||'')+'</td></tr>';
+      }).join('');
+
+      html += '<div class="box"><h3>Not received' +
+        '<button class="dl2" id="rDl">Download these with their full detail</button></h3>' +
+        '<div class="scroll"><table class="t">' +
+        '<tr><th>Order ref</th><th>Tracking</th><th>Customer</th><th>City</th>' +
+        '<th>Status</th><th class="r">Collected</th><th class="r">Fee</th>' +
+        '<th>Delivered</th><th>Why</th></tr>' + rows + '</table></div>' +
+        '<div class="note">These are left alone. The download carries every column ' +
+        'the receipt has for them, not just the invoice number.</div></div>';
+    }
+
+    $('dBody').innerHTML = html;
+    wireBack();
+
+    $('rGo').addEventListener('click', startReceive);
+
+    var dl = $('rDl');
+    if(dl) dl.addEventListener('click', downloadUnmatched);
+  }
+
+  function downloadUnmatched(){
+    var rows = match.missing.concat(match.alreadyPaid);
+    var head = ['Order ref','Tracking','Customer','Phone','City','Status','Type',
+                'Amount','Collected','Fee','Tax','Net','Booked','Picked up',
+                'Delivered','Settled','Notes','Why not received'];
+
+    var cell = function(v){
+      return '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"';
+    };
+
+    var body = rows.map(function(o){
+      return [o.orderRef,o.tracking,o.customer,o.phone,o.city,o.status,o.type,
+              o.amount,o.received,o.fee,o.tax,o.net,o.bookedOn,o.pickedOn,
+              o.deliveredOn,o.settledOn,o.notes,o.why].map(cell).join(',');
+    });
+
+    var csv = '﻿' + [head.map(cell).join(',')].concat(body).join('\r\n') + '\r\n';
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
+    a.download = match.cpr + ' not received.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  function startReceive(){
+    var bank = $('rBank').value;
+    if(!bank){ $('rOut').innerHTML = '<div class="msg">Pick the bank first.</div>'; return; }
+
+    $('rGo').disabled = true;
+    $('rGo').textContent = 'Receiving…';
+    $('dReceive').disabled = true;
+
+    fetch('/api/receipts/receive', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        id: account.id,
+        cpr: match.cpr,
+        cprDate: $('rDate').value,
+        accountId: bank,
+        methodId: $('rMethod').value || null,
+        matched: match.matched
+      })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.error){
+        $('rOut').innerHTML = '<div class="msg">'+esc(d.error)+'</div>';
+        $('rGo').disabled = false;
+        $('rGo').textContent = 'Try again';
+        $('dReceive').disabled = false;
+        return;
+      }
+      $('rOut').innerHTML = '<div class="barz"><i id="rBarI" style="width:0"></i></div>' +
+                            '<div class="log" id="rLog">Starting…</div>';
+      watchReceive(0);
+    })
+    .catch(function(e){
+      $('rOut').innerHTML = '<div class="msg">'+esc(e.message)+'</div>';
+      $('rGo').disabled = false; $('rGo').textContent = 'Try again';
+      $('dReceive').disabled = false;
+    });
+  }
+
+  // the payment engine is the one payments.html uses, so its progress is read
+  // the same way - poll, append, stop when it says it is done
+  function watchReceive(since){
+    clearTimeout(payTimer);
+
+    fetch('/api/cpr/receive-status?since='+since, { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(s){
+        if(!s || !s.state) return;
+
+        var log = $('rLog');
+        if(log && s.events){
+          s.events.forEach(function(e){
+            if(e.type === 'log') log.textContent += '\n' + e.msg;
+          });
+          log.scrollTop = log.scrollHeight;
+        }
+
+        var bar = $('rBarI');
+        if(bar && s.total) bar.style.width = (100 * s.doneCount / s.total).toFixed(1) + '%';
+
+        if(s.state === 'running'){
+          payTimer = setTimeout(function(){ watchReceive(s.lastEventId || since); }, 2000);
+          return;
+        }
+
+        // done - stamp the receipt so it is never taken twice
+        if(bar) bar.style.width = '100%';
+        if(log) log.textContent += '\n\nFinished. ' + n0(s.posted) + ' payments, ' +
+                                   full(s.amount) + '.';
+
+        fetch('/api/receipts/mark', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id: account.id, cpr: match.cpr, qbPaymentId: 'posted' })
+        }).catch(function(){});
+
+        $('dReceive').disabled = false;
+        $('rGo').textContent = 'Received';
+        load();
+      })
+      .catch(function(){
+        payTimer = setTimeout(function(){ watchReceive(since); }, 4000);
+      });
   }
 })();
 </script>

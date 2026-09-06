@@ -4371,7 +4371,7 @@ import {
   refreshCprs, listCprs as listLiveCprs, cprDetail, forget as forgetCpr
 } from './cprlive.js';
 import { buildWorkbook, fileName as cprFileName } from './cprsheet.js';
-import { setPortalLogin, clearPortalLogin } from './couriers.js';
+import { setPortalLogin, clearPortalLogin, markCprReceived } from './couriers.js';
 import { login as portalLogin } from './postexportal.js';
 import { encrypt as encryptSecret } from './secrets.js';
 
@@ -4492,6 +4492,177 @@ app.get('/api/receipts/detail', async (req, res) => {
     res.json(await cprDetail(realmId, account, remoteId, req.query.created, req.query.fresh === '1'));
   } catch (e) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+/* ---------- receiving a receipt into QuickBooks ---------- */
+
+// Which bank a courier account's receipts are deposited into. Asked once and
+// remembered per account, because two PostEx accounts can settle into two
+// different banks - the older per-courier setting is the fallback so nothing
+// already answered has to be answered again.
+async function bankFor(realmId, accountId, courier) {
+  const perAccount = await getSetting(realmId, `cpr:bank:${accountId}`, null);
+  if (perAccount) return perAccount;
+
+  const prefs = (await getSetting(realmId, 'cpr:prefs', {})) || {};
+  return courier ? (prefs[courier] || null) : null;
+}
+
+app.post('/api/receipts/bank', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const id = Number(req.body.id);
+  const accountId = String(req.body.accountId || '').trim();
+  if (!id || !accountId) return res.status(400).json({ error: 'Account and bank both needed' });
+
+  try {
+    await setSetting(realmId, `cpr:bank:${id}`, {
+      accountId,
+      methodId: req.body.methodId ? String(req.body.methodId) : null
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// What this receipt looks like against QuickBooks: which of its orders have an
+// invoice with something still owing, which have already been paid, and which
+// are not there at all. Nothing is changed - this only reads.
+app.get('/api/receipts/match', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const account = Number(req.query.account);
+  const remoteId = String(req.query.id || '').trim();
+  if (!account || !remoteId) return res.status(400).json({ error: 'account and id both needed' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const acc = await getCourierAccount(realmId, account);
+    if (!acc) return res.status(404).json({ error: 'No such account' });
+
+    const detail = await cprDetail(realmId, account, remoteId, req.query.created, false);
+    const token = await getAccessToken(realmId);
+
+    // A returned parcel is in the receipt but no money came with it, so there
+    // is nothing to receive against its invoice.
+    const paying = (detail.orders || []).filter(o => o.received > 0.005 && o.orderRef);
+
+    const found = await findInvoices(realmId, token, paying.map(o => o.orderRef));
+
+    const matched = [], alreadyPaid = [], missing = [];
+
+    paying.forEach(o => {
+      const inv = found.get(cprDigits(o.orderRef));
+
+      if (!inv) { missing.push({ ...o, why: 'not in QuickBooks' }); return; }
+
+      if (inv.balance <= 0.005) {
+        alreadyPaid.push({ ...o, qbDoc: inv.doc, qbId: inv.id, qbTotal: inv.total,
+                           why: 'already paid' });
+        return;
+      }
+
+      matched.push({
+        invoice: o.orderRef,
+        qbId: inv.id,
+        qbDoc: inv.doc,
+        qbBalance: inv.balance,
+        qbTotal: inv.total,
+        customerId: inv.customerId,
+        customerName: inv.customerName,
+        courierAmount: o.received,
+        tracking: o.tracking,
+        city: o.city
+      });
+    });
+
+    const [accounts, methods] = await Promise.all([
+      listAccounts(realmId, token),
+      listPaymentMethods(realmId, token)
+    ]);
+
+    const r2 = v => Math.round(v * 100) / 100;
+
+    res.json({
+      cpr: req.query.cpr || remoteId,
+      cprDate: (req.query.created || '').slice(0, 10),
+      account: acc.label,
+      matched,
+      alreadyPaid,
+      missing,
+      totals: {
+        courier:  r2(paying.reduce((s, o) => s + o.received, 0)),
+        toReceive: r2(matched.reduce((s, m) => s + m.qbBalance, 0)),
+        paidAlready: r2(alreadyPaid.reduce((s, o) => s + o.received, 0)),
+        missing: r2(missing.reduce((s, o) => s + o.received, 0)),
+        net: detail.summary ? detail.summary.netAmount : 0
+      },
+      banks: accounts,
+      methods,
+      chosen: await bankFor(realmId, account, acc.courier)
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Hand the matched invoices to the payment engine the sheet-based page
+// already uses - one payment per customer, the receipt's own date on it and
+// its number as the reference, halving the batch if QuickBooks baulks.
+app.post('/api/receipts/receive', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { id, cpr, cprDate, accountId, methodId, matched, remember } = req.body;
+
+  if (!accountId) return res.status(400).json({ error: 'Pick the bank the money went into' });
+  if (!Array.isArray(matched) || !matched.length) {
+    return res.status(400).json({ error: 'Nothing to receive' });
+  }
+
+  try {
+    if (remember !== false && id) {
+      await setSetting(realmId, `cpr:bank:${id}`, {
+        accountId: String(accountId),
+        methodId: methodId ? String(methodId) : null
+      });
+    }
+
+    const jobId = startPayJob(realmId, {
+      courier: 'postex',
+      cprNumber: cpr,
+      cprDate,
+      accountId,
+      methodId: methodId || null,
+      matched,
+      writeStatus: false          // there is no sheet to stamp - this came from the portal
+    });
+
+    res.json({ ok: true, id: jobId });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Stamped once the money is in, so the receipt is never taken twice.
+app.post('/api/receipts/mark', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const id = Number(req.body.id);
+  const cpr = String(req.body.cpr || '').trim();
+  if (!id || !cpr) return res.status(400).json({ error: 'account and cpr both needed' });
+
+  try {
+    await markCprReceived(realmId, id, cpr, req.body.qbPaymentId || null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
