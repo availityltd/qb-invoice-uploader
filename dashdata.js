@@ -112,10 +112,16 @@ export async function dashboard(realmId, opts) {
             COUNT(*) AS n,
             COUNT(*) FILTER (WHERE o.status_group = 'delivered') AS delivered,
             COUNT(*) FILTER (WHERE o.status_group = 'returned') AS returned,
-            COALESCE(SUM(o.amount) FILTER (WHERE o.status_group = 'delivered'),0) AS amount
+            COUNT(*) FILTER (WHERE o.status_group IN ('lost','damaged')) AS lost,
+            COUNT(*) FILTER (WHERE o.status_group IN
+              ('unbooked','booked','transit','review','returning')) AS moving,
+            COALESCE(SUM(o.amount),0) AS booked_amount,
+            COALESCE(SUM(o.amount) FILTER (WHERE o.status_group = 'delivered'),0) AS amount,
+            COALESCE(SUM(o.fee)  FILTER (WHERE o.status_group = 'delivered'),0) AS fee,
+            COALESCE(SUM(o.tax)  FILTER (WHERE o.status_group = 'delivered'),0) AS tax
        FROM courier_orders o
       WHERE ${booked} AND o.city IS NOT NULL AND o.city <> ''
-      GROUP BY o.city ORDER BY n DESC LIMIT 20`, args);
+      GROUP BY o.city ORDER BY n DESC LIMIT 200`, args);
 
   /* ---------- one row per account ---------- */
 
@@ -207,16 +213,36 @@ export async function dashboard(realmId, opts) {
       amount: r2(x.amount)
     })),
     days,
-    cities: cities.rows.map(x => ({
-      city: x.city,
-      count: Number(x.n),
-      delivered: Number(x.delivered),
-      returned: Number(x.returned),
-      amount: r2(x.amount),
-      rate: (Number(x.delivered) + Number(x.returned))
-        ? r2(100 * Number(x.delivered) / (Number(x.delivered) + Number(x.returned)))
-        : 0
-    })),
+    // Where the parcels go, and how each city actually behaves. These
+    // percentages decide which courier gets which city's parcels, so every
+    // one of them is worked out from settled orders only - a city with
+    // fifty parcels still in transit should not look like a failure.
+    cities: cities.rows.map(x => {
+      const n         = Number(x.n);
+      const delivered = Number(x.delivered);
+      const returned  = Number(x.returned);
+      const lost      = Number(x.lost);
+      const settled   = delivered + returned;
+      const pct = (part, whole) => whole ? r2(100 * part / whole) : 0;
+
+      return {
+        city:          x.city,
+        count:         n,
+        delivered,
+        returned,
+        lost,
+        moving:        Number(x.moving),
+        settled,
+        bookedAmount:  r2(x.booked_amount),
+        amount:        r2(x.amount),
+        fee:           r2(x.fee),
+        tax:           r2(x.tax),
+        rate:          pct(delivered, settled),   // of what is settled
+        returnRate:    pct(returned, settled),
+        lostRate:      pct(lost, n),
+        movingRate:    pct(Number(x.moving), n)
+      };
+    }),
     accounts: accounts.rows.map(x => ({
       id: x.account_id,
       label: x.label,
