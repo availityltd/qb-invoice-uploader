@@ -962,27 +962,6 @@
         '<div id="rMarkOut"></div></div>';
     }
 
-    html += '<div class="box"><h3>How this will be posted</h3>' +
-      '<div class="rcv">' +
-        '<div><label>Date on the payment</label>' +
-          '<input type="date" id="rDate" value="'+esc(m.cprDate||'')+'"></div>' +
-        '<div><label>Reference</label>' +
-          '<div class="fixed">'+esc(m.cpr)+'</div></div>' +
-        '<div><label>Bank the money went into</label>' +
-          '<select id="rBank">'+banks+'</select></div>' +
-        '<div><label>Payment method</label>' +
-          '<select id="rMethod">'+methods+'</select></div>' +
-      '</div>' +
-      '<div class="note">The date is the receipt’s own date and the reference is its ' +
-      'number, so a payment can always be traced back. The bank is remembered for ' +
-      esc(m.account) + ' — change it here whenever it needs changing.</div>' +
-      '<div style="margin-top:14px"><button class="go2" id="rGo">' +
-      'Receive ' + n0(m.matched.length) + ' payments · ' + full(t.toReceive) +
-      '</button></div>' +
-      '<div id="rOut"></div></div>';
-
-    /* --- what could not be received, with everything about it --- */
-
     // Everything wrong with this receipt in one place. Three different
     // troubles - no invoice, paid by something else, an amount that does not
     // agree - but one person has to chase all of them, so one list.
@@ -1021,6 +1000,46 @@
         '</p>' +
         detailTable(probs) + '</div>';
     }
+
+    // A gap with nothing to show for it is worse than no gap at all - it looks
+    // like the page simply did not look. Say what happened instead.
+    var shortBy = (current && current.qbPaymentId && current.expected != null &&
+                   current.received != null)
+      ? Math.round((current.expected - current.received) * 100) / 100
+      : 0;
+
+    if(!probs.length && Math.abs(shortBy) > TOLERANCE){
+      html += '<div class="box"><h3>Nothing here explains the ' +
+        full(Math.abs(shortBy)) + ' difference</h3>' +
+        '<p style="font-size:12.5px;color:var(--muted);margin:0">' +
+        'Every parcel on this receipt has an invoice, and every one of those ' +
+        'invoices was settled under this receipt’s own number. The gap is ' +
+        'between what the courier says it collected and what those invoices ' +
+        'were worth in QuickBooks — so it is the invoice amounts that ' +
+        'differ, not the parcels. The receipt’s own orders are on the ' +
+        'previous screen with what each was worth.</p></div>';
+    }
+
+    html += '<div class="box"><h3>How this will be posted</h3>' +
+      '<div class="rcv">' +
+        '<div><label>Date on the payment</label>' +
+          '<input type="date" id="rDate" value="'+esc(m.cprDate||'')+'"></div>' +
+        '<div><label>Reference</label>' +
+          '<div class="fixed">'+esc(m.cpr)+'</div></div>' +
+        '<div><label>Bank the money went into</label>' +
+          '<select id="rBank">'+banks+'</select></div>' +
+        '<div><label>Payment method</label>' +
+          '<select id="rMethod">'+methods+'</select></div>' +
+      '</div>' +
+      '<div class="note">The date is the receipt’s own date and the reference is its ' +
+      'number, so a payment can always be traced back. The bank is remembered for ' +
+      esc(m.account) + ' — change it here whenever it needs changing.</div>' +
+      '<div style="margin-top:14px"><button class="go2" id="rGo">' +
+      'Receive ' + n0(m.matched.length) + ' payments · ' + full(t.toReceive) +
+      '</button></div>' +
+      '<div id="rOut"></div></div>';
+
+    /* --- what could not be received, with everything about it --- */
 
     $('dBody').innerHTML = html;
     wireBack();
