@@ -975,18 +975,27 @@
       probs.forEach(function(o){
         if(!kinds[o.kind]) kinds[o.kind] = { n:0, amount:0 };
         kinds[o.kind].n++;
-        kinds[o.kind].amount += o.received;
+        kinds[o.kind].amount += (o.impact == null ? o.received : o.impact);
       });
 
       var WHAT = {
-        'no invoice':     'No invoice in QuickBooks. Make it, then open this receipt again.',
-        'paid elsewhere': 'Settled by another payment, so nothing more can go in against it.',
-        'amount differs': 'It will still be received, at what QuickBooks says is owed.'
+        'no invoice':
+          'No invoice in QuickBooks. Make it, then open this receipt again.',
+        'advance or other payment':
+          'Part of the invoice was already settled — usually an advance taken ' +
+          'before delivery. That part is in QuickBooks under a different payment, ' +
+          'so it can never come in under this receipt. The bank and memo of the ' +
+          'payment that took it are in the Why column.',
+        'amount differs':
+          'The invoice was raised for a different figure than the courier ' +
+          'collected. It will still be received, at what QuickBooks says is owed.'
       };
 
       html += '<div class="box"><h3>Invoices with something wrong' +
         '<span class="aside">' + n0(probs.length) + ' parcels · ' +
-        full(probs.reduce(function(a,o){ return a + o.received; }, 0)) + '</span>' +
+        full(probs.reduce(function(a,o){
+          return a + (o.impact == null ? o.received : o.impact);
+        }, 0)) + ' at stake</span>' +
         '<button class="dl2" id="rDlProb">Download these with their full detail</button></h3>' +
         '<div class="tally2" style="margin-bottom:12px">' +
           Object.keys(kinds).map(function(k){
@@ -1110,6 +1119,16 @@
     ['NET_AMOUNT',       function(o){ return full(o.net); }, 'r'],
     ['Customer',         function(o){ return o.customer || ''; }, ''],
     ['Phone',            function(o){ return o.phone || ''; }, 'mono'],
+    ['In QuickBooks',    function(o){ return o.qbTotal == null ? '' : full(o.qbTotal); }, 'r'],
+    ['Sheet minus QB',   function(o){
+        return o.qbTotal == null ? '' : full(Math.round((o.amount - o.qbTotal)*100)/100);
+      }, 'r'],
+    ['From this receipt',function(o){
+        return o.paidHereAmount == null ? '' : full(o.paidHereAmount);
+      }, 'r'],
+    ['From elsewhere',   function(o){
+        return o.paidElseAmount == null ? '' : full(o.paidElseAmount);
+      }, 'r'],
     ['Problem',          function(o){ return o.kind || ''; }, ''],
     ['Why',              function(o){ return o.why || ''; }, '']
   ];

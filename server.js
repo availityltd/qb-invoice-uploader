@@ -4515,7 +4515,8 @@ async function paymentLines(realmId, token, paymentIds) {
     let q;
     try {
       q = await qbQuery(realmId, token,
-        `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, Line FROM Payment ` +
+        `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, PrivateNote, ` +
+        `DepositToAccountRef, Line FROM Payment ` +
         `WHERE Id IN (${list}) MAXRESULTS 1000`);
     } catch (e) { continue; }
 
@@ -4535,6 +4536,8 @@ async function paymentLines(realmId, token, paymentIds) {
         ref: String(p.PaymentRefNum || '').trim(),
         date: p.TxnDate || '',
         total: Number(p.TotalAmt || 0),
+        memo: String(p.PrivateNote || '').trim(),
+        bank: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : '',
         onInvoice
       });
     });
@@ -4671,7 +4674,7 @@ app.get('/api/receipts/match', async (req, res) => {
 
         alreadyPaid.forEach(o => {
           let here = 0, other = 0;
-          const otherRefs = [];
+          const otherRefs = [], from = [];
 
           (o.paymentIds || []).forEach(id => {
             const p = pays.get(String(id));
@@ -4684,15 +4687,24 @@ app.get('/api/receipts/match', async (req, res) => {
             const mine = sameRef(p.ref, req.query.cpr);
 
             if (!byRef.has(key)) {
-              byRef.set(key, { ref: key, count: 0, amount: 0, dates: [], mine });
+              byRef.set(key, { ref: key, count: 0, amount: 0, dates: [], mine,
+                               banks: [], memos: [] });
             }
             const g = byRef.get(key);
             g.count++;
             g.amount += part;
             if (p.date && g.dates.indexOf(p.date) < 0) g.dates.push(p.date);
+            if (p.bank && g.banks.indexOf(p.bank) < 0) g.banks.push(p.bank);
+            if (p.memo && g.memos.indexOf(p.memo) < 0) g.memos.push(p.memo);
 
-            if (mine) { here += part; }
-            else { other += part; if (otherRefs.indexOf(key) < 0) otherRefs.push(key); }
+            if (mine) {
+              here += part;
+            } else {
+              other += part;
+              if (otherRefs.indexOf(key) < 0) otherRefs.push(key);
+              from.push({ ref: p.ref, amount: r2(part), date: p.date,
+                          bank: p.bank, memo: p.memo });
+            }
           });
 
           o.paidHereAmount = r2(here);
@@ -4703,13 +4715,25 @@ app.get('/api/receipts/match', async (req, res) => {
           // name - the whole invoice, or part of it, as when an advance was
           // taken before the parcel was delivered.
           if (other > 0.005) {
-            const who = otherRefs.length ? otherRefs.join(', ') : 'a payment with no reference';
+            // A payment with no receipt number, into a bank, with a memo -
+            // that is what an advance taken before delivery looks like, and
+            // saying so is more use than calling it "another payment".
+            const say = from.map(f => {
+              const bits = [];
+              if (f.ref) bits.push(f.ref);
+              if (f.bank) bits.push(f.bank);
+              if (f.memo) bits.push('“' + f.memo + '”');
+              if (f.date) bits.push(f.date);
+              return f.amount.toFixed(2) + (bits.length ? ' from ' + bits.join(' · ') : '');
+            });
+
             paidElsewhere.push({
               ...o,
-              why: here > 0.005
-                ? `${r2(other).toFixed(2)} of this came from ${who}; only ` +
-                  `${r2(here).toFixed(2)} under this receipt`
-                : `settled by ${who}`
+              paidFrom: from,
+              why: (here > 0.005
+                     ? `only ${r2(here).toFixed(2)} of this invoice came from this receipt. `
+                     : 'none of this invoice came from this receipt. ') +
+                   'The rest: ' + say.join('; ')
             });
           }
         });
@@ -4730,9 +4754,21 @@ app.get('/api/receipts/match', async (req, res) => {
       missing,
       // everything with something wrong with it, in one list, each saying what
       problems: [].concat(
-        missing.map(o => ({ ...o, kind: 'no invoice' })),
-        paidElsewhere.map(o => ({ ...o, kind: 'paid elsewhere' })),
-        mismatched.map(o => ({ ...o, kind: 'amount differs' }))
+        // nothing in QuickBooks at all - the whole amount is at stake
+        missing.map(o => ({ ...o, kind: 'no invoice', impact: o.received })),
+
+        // an advance, usually - what is at stake is the part that came from
+        // somewhere other than this receipt
+        paidElsewhere.map(o => ({
+          ...o, kind: 'advance or other payment', impact: o.paidElseAmount || 0
+        })),
+
+        // the invoice was raised for a different figure than the courier
+        // collected, so the two sides never could have met
+        mismatched.map(o => ({
+          ...o, kind: 'amount differs',
+          impact: r2(Math.abs(o.received - (o.qbBalance || 0)))
+        }))
       ),
       totals: {
         courier:  r2(paying.reduce((s, o) => s + o.received, 0)),
