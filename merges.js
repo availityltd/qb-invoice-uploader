@@ -7,6 +7,7 @@
 // then holds the groups up against CPR rows pasted straight out of the sheet.
 
 import XLSX from 'xlsx';
+import { StringDecoder } from 'string_decoder';
 import { clean, num, digitsOf, toISO, splitInvoices } from './cpr.js';
 
 /* ==================== what a customer looks like ==================== */
@@ -99,71 +100,136 @@ function findHeaderRow(grid) {
   return best;
 }
 
-const MAX_ROWS = 300000;
+// A month of orders is forty thousand of them and more. Reading such a file
+// into a grid of rows, and then keeping that grid so a column can be changed
+// later, is what runs a small server out of memory - the grid costs several
+// times what the file does. So the file is walked through instead, a line at a
+// time, and only what an order needs is kept. The bytes themselves are held on
+// to, which is cheap, so changing a column reads them again rather than asking
+// for the upload twice.
 
-// A month of Shopify orders is a long file, and building a whole workbook out
-// of it costs several times what the text itself does. A CSV is read straight
-// through instead, quote by quote.
-function readCsv(buffer) {
-  const text = buffer.toString('utf8').replace(/^﻿/, '');
-  const rows = [];
-  let row = [], field = '', quoted = false;
+// A CSV walked through from the buffer, decoded a megabyte at a time so that
+// nothing the size of the file is ever built. Fields are cut out of the text
+// by their delimiters rather than gathered a character at a time - on a
+// hundred thousand rows that is the difference between seconds and minutes.
+function eachCsvRow(buf, cb) {
+  const decoder = new StringDecoder('utf8');
+  const CHUNK = 1 << 20;
 
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  let carry = '';                 // a row the last chunk ended in the middle of
+  let stop = false;
 
-    if (quoted) {
-      if (ch !== '"') { field += ch; continue; }
-      if (text[i + 1] === '"') { field += '"'; i++; continue; }
-      quoted = false;
-      continue;
+  // returns where it stopped: the start of whatever it could not finish
+  const feed = (text, final) => {
+    let i = 0;
+
+    while (i < text.length) {
+      const row = [];
+      const rowStart = i;
+      let done = false;
+
+      while (true) {
+        let field;
+
+        if (text[i] === '"') {
+          // a quoted field: "" stands for one quote, and a newline inside is
+          // part of the address, not the end of the row
+          let j = i + 1, parts = null, out = null;
+          for (;;) {
+            const k = text.indexOf('"', j);
+            if (k < 0) return rowStart;                 // wants the next chunk
+            if (text[k + 1] === '"') {
+              (parts || (parts = [])).push(text.slice(j, k + 1));
+              j = k + 2;
+              continue;
+            }
+            const last = text.slice(j, k);
+            out = parts ? parts.join('') + last : last;
+            i = k + 1;
+            break;
+          }
+          field = out;
+        } else {
+          const comma = text.indexOf(',', i);
+          const line = text.indexOf('\n', i);
+          let at = (comma < 0) ? line : (line < 0 ? comma : Math.min(comma, line));
+          if (at < 0) {
+            if (!final) return rowStart;
+            at = text.length;
+          }
+          field = text.slice(i, at);
+          i = at;
+        }
+
+        if (field.charCodeAt(field.length - 1) === 13) field = field.slice(0, -1);
+        row.push(field);
+
+        if (i >= text.length) {
+          if (!final) return rowStart;
+          done = true;
+          break;
+        }
+        if (text[i] === ',') { i++; continue; }
+        if (text[i] === '\r') i++;
+        if (text[i] === '\n') { i++; done = true; break; }
+        // a stray character after a closing quote - treat it as part of nothing
+        i++;
+      }
+
+      if (done && cb(row) === false) { stop = true; return text.length; }
     }
 
-    if (ch === '"') { quoted = true; continue; }
-    if (ch === ',') { row.push(field); field = ''; continue; }
-    if (ch === '\r') continue;
-    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
-    field += ch;
+    return i;
+  };
+
+  for (let at = 0; at < buf.length && !stop; at += CHUNK) {
+    let text = decoder.write(buf.subarray(at, Math.min(at + CHUNK, buf.length)));
+    if (at === 0) text = text.replace(/^\uFEFF/, '');
+    text = carry + text;
+    const used = feed(text, false);
+    carry = text.slice(used);
   }
 
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-function gridsOf(name, buffer) {
-  if (/\.csv$/i.test(name)) return [readCsv(buffer)];
-
-  const wb = XLSX.read(buffer, { type: 'buffer', raw: false, cellDates: false });
-  return wb.SheetNames.map(sheetName => XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
-    header: 1, raw: false, defval: '', blankrows: false
-  }));
-}
-
-// one uploaded file - its header and its lines, every tab in it stacked up
-export function readFile(name, buffer) {
-  let header = [];
-  const rows = [];
-
-  for (const grid of gridsOf(name, buffer)) {
-    if (!grid.length) continue;
-
-    const hRow = findHeaderRow(grid);
-    const head = (grid[hRow] || []).map(h => clean(h));
-
-    // a second tab only joins in if it carries the same columns
-    if (!header.length) header = head;
-    else if (head.join('|').toLowerCase() !== header.join('|').toLowerCase()) continue;
-
-    for (let r = hRow + 1; r < grid.length; r++) {
-      const raw = grid[r] || [];
-      if (!raw.filter(x => clean(x)).length) continue;
-      rows.push({ sheetRow: r + 1, cells: raw });
-      if (rows.length > MAX_ROWS) throw new Error(name + ' is too big to read in one go');
-    }
+  if (!stop) {
+    carry += decoder.end();
+    if (carry.length) feed(carry, true);
   }
+}
 
-  if (!header.length) throw new Error(name + ' has no readable rows');
-  return { name, header, rows, cols: detectColumns(header) };
+// Excel has to be built into a workbook before anything can be read out of it -
+// there is no line at a time - so a big month is better exported as CSV.
+function eachSheetRow(buf, cb) {
+  const wb = XLSX.read(buf, { type: 'buffer', raw: false, cellDates: false });
+  for (const name of wb.SheetNames) {
+    const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], {
+      header: 1, raw: false, defval: '', blankrows: false
+    });
+    for (const row of grid) if (cb(row) === false) return;
+  }
+}
+
+export function eachRow(file, cb) {
+  if (!file.buffer) throw new Error(file.name + ' has been let go of - upload it again');
+  if (file.kind === 'csv') return eachCsvRow(file.buffer, cb);
+  return eachSheetRow(file.buffer, cb);
+}
+
+// the header and the column guesses, read from the first few lines only
+export function openFile(name, buffer) {
+  const file = { name, buffer, kind: /\.csv$/i.test(name) ? 'csv' : 'xlsx', rowCount: 0 };
+
+  const probe = [];
+  eachRow(file, row => {
+    if (row.filter(x => clean(x)).length) probe.push(row);
+    return probe.length < 12;
+  });
+  if (!probe.length) throw new Error(name + ' has no readable rows');
+
+  const hRow = findHeaderRow(probe);
+  file.header = (probe[hRow] || []).map(h => clean(h));
+  file.headerKey = file.header.join('|').toLowerCase();
+  file.cols = detectColumns(file.header);
+  return file;
 }
 
 /* ==================== files to one order per line ==================== */
@@ -178,21 +244,33 @@ export function buildOrders(files) {
     const c = f.cols || {};
     if (!(c.order >= 0)) return;
 
-    f.rows.forEach(r => {
-      const cell = i => (i >= 0 ? clean(r.cells[i]) : '');
+    let line = 0;
+    let count = 0;
+
+    // a hundred thousand rows go through here, so nothing is built per row
+    // that does not have to be
+    const headOrder = clean(f.header[c.order]).toLowerCase();
+
+    eachRow(f, raw => {
+      line++;
+
+      const cell = i => (i >= 0 ? clean(raw[i]) : '');
       const orderRaw = cell(c.order);
       if (!orderRaw) return;
       if (/^(grand )?total$/i.test(orderRaw)) return;
+      // the header again, at the top of a second tab
+      if (orderRaw.toLowerCase() === headOrder) return;
 
+      count++;
       const key = f.name + ' ' + orderRaw.toUpperCase();
       if (!byOrder.has(key)) {
         byOrder.set(key, {
           file: f.name,
           order: orderRaw,
           digits: digitsOf(orderRaw),
-          sheetRow: r.sheetRow,
+          sheetRow: line,
           customer: '', address: '', phone: '', email: '',
-          total: 0, date: null, lines: 0
+          total: 0, when: '', lines: 0
         });
       }
       const o = byOrder.get(key);
@@ -208,6 +286,8 @@ export function buildOrders(files) {
       if (!o.total)    o.total    = num(cell(c.total));
       if (!o.when)     o.when     = cell(c.date);
     });
+
+    f.rowCount = count;
   });
 
   return Array.from(byOrder.values()).map(o => {

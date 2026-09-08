@@ -498,12 +498,12 @@
     var box = $('grpList');
     box.innerHTML = '';
 
-    var show = S.groups.slice(0, 300);
-    show.forEach(function(g){ box.appendChild(groupCard(g)); });
+    // the server keeps them all; only the first few hundred are sent over
+    S.groups.forEach(function(g){ box.appendChild(groupCard(g)); });
 
-    $('grpMore').textContent = S.groups.length > show.length
-      ? 'Showing the first ' + show.length + ' of ' + nf(S.groups.length) +
-        ' - download the file to see them all.'
+    $('grpMore').textContent = t.groups > S.groups.length
+      ? 'Showing the first ' + S.groups.length + ' of ' + nf(t.groups) +
+        ' - download the file to see them all. Matching uses every one of them.'
       : '';
   }
 

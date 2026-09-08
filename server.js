@@ -59,7 +59,7 @@ import {
   startBackfill, stopBackfill, clearBackfill, backfillSnapshot
 } from './backfill.js';
 import {
-  readFile as readMergeFile, buildOrders, groupOrders, parsePasted, placeGroups
+  openFile as openMergeFile, buildOrders, groupOrders, parsePasted, placeGroups
 } from './merges.js';
 import {
   invoicesWithLines, planGroup, remarkFor, stripShipping
@@ -2273,6 +2273,7 @@ app.get('/api/find/file', async (req, res) => {
 // The uploaded files stay in memory for the company, so changing a column or
 // the matching strength does not mean uploading again.
 const mergeStore = new Map();          // realmId -> { files, orders, groups, at }
+const KEEP_BYTES = 40 * 1024 * 1024;   // beyond this the uploaded bytes are dropped
 
 function mergeState(realmId) {
   const st = mergeStore.get(realmId);
@@ -2281,12 +2282,15 @@ function mergeState(realmId) {
 }
 
 function mergeFilesReport(st) {
+  const per = new Map();
+  st.orders.forEach(o => per.set(o.file, (per.get(o.file) || 0) + 1));
+
   return st.files.map(f => ({
     name: f.name,
     header: f.header,
     cols: f.cols,
-    rows: f.rows.length,
-    orders: st.orders.filter(o => o.file === f.name).length
+    rows: f.rowCount,
+    orders: per.get(f.name) || 0
   }));
 }
 
@@ -2313,8 +2317,15 @@ app.post('/api/merge/upload', takeMergeFiles, async (req, res) => {
   if (!list.length) return res.status(400).json({ error: 'No files uploaded' });
 
   try {
-    const files = list.map(f => readMergeFile(f.originalname, f.buffer));
+    const files = list.map(f => openMergeFile(f.originalname, f.buffer));
     const orders = buildOrders(files);
+
+    // The bytes are kept so a mis-guessed column can be put right without
+    // uploading again - but only while they are small enough to be worth the
+    // room. A month of forty thousand orders is not, and asking for it a
+    // second time is better than falling over.
+    const bytes = files.reduce((n, f) => n + (f.buffer ? f.buffer.length : 0), 0);
+    if (bytes > KEEP_BYTES) files.forEach(f => { f.buffer = null; });
     if (!orders.length) {
       return res.status(400).json({
         error: 'No orders found. Check that the files have an order number column.'
@@ -2384,6 +2395,10 @@ app.post('/api/merge/scan', async (req, res) => {
     st.time = time;
 
     const parcels = st.groups.reduce((n, g) => n + g.orders.length, 0);
+    // thirteen thousand groups is a fine thing to have and a hopeless thing to
+    // send - the page shows the first few hundred and the file holds them all
+    const SHOW = 300;
+
     res.json({
       minFields,
       timeMode: time.mode,
@@ -2396,7 +2411,8 @@ app.post('/api/merge/scan', async (req, res) => {
           groups: st.groups.filter(g => g.agreeCount === t).length
         }))
       },
-      groups: st.groups
+      shown: Math.min(SHOW, st.groups.length),
+      groups: st.groups.slice(0, SHOW)
     });
   } catch (e) {
     res.status(400).json({ error: e.message });
