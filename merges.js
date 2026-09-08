@@ -317,8 +317,9 @@ export function groupOrders(orders, minFields) {
 
 /* ==================== holding the groups up to a CPR ==================== */
 
-// Where each group's orders sit in one courier sheet: already written in a
-// single cell, spread over several rows, or only partly there.
+// The courier books the whole group as one parcel, so only one of its order
+// numbers is written in the sheet, against the COD for all of them. One number
+// found is therefore enough to say the group belongs to that row.
 export async function matchGroupsToSheet(groups, opts) {
   const { sheetId, tab, excel, saved, cpr } = opts;
   const data = await loadSheet(sheetId, tab, excel, saved);
@@ -326,34 +327,40 @@ export async function matchGroupsToSheet(groups, opts) {
   let rows = data.rows;
   if (cpr) rows = rows.filter(r => (r.cprNumber || '(no CPR number)') === cpr);
 
-  return Object.assign(placeGroups(groups, rows, cpr), { headerRow: data.headerRow });
+  return Object.assign(placeGroups(groups, rows, cpr), {
+    headerRow: data.headerRow,
+    header: data.header,
+    cols: data.cols
+  });
 }
 
 export function placeGroups(groups, rows, cpr) {
-  // every order number in the sheet, pointing back at the row it was written on
-  const rowOf = new Map();
+  // every order number in the sheet, pointing back at the rows it was written
+  // on - more than one row for a number is itself something to report
+  const rowsOf = new Map();
   rows.forEach(r => (r.invoices || []).forEach(n => {
     const d = digitsOf(n);
-    if (d && !rowOf.has(d)) rowOf.set(d, r);
+    if (!d) return;
+    if (!rowsOf.has(d)) rowsOf.set(d, []);
+    if (!rowsOf.get(d).includes(r)) rowsOf.get(d).push(r);
   }));
 
-  const merged = [], spread = [], partial = [], absent = [];
+  const matched = [], twice = [], absent = [];
 
   groups.forEach(g => {
-    const hits = g.orders.map(o => ({ order: o.order, row: rowOf.get(o.digits) || null }));
-    const found = hits.filter(h => h.row);
+    const hits = [];
+    g.orders.forEach(o => (rowsOf.get(o.digits) || [])
+      .forEach(row => hits.push({ order: o.order, row })));
 
-    if (!found.length) {
+    if (!hits.length) {
       absent.push({ id: g.id, customer: g.customer, orders: g.orders.map(o => o.order) });
       return;
     }
 
-    const cells = [...new Set(found.map(h => h.row.sheetRow))].sort((a, b) => a - b);
-    const sheetAmount = Math.round(cells
-      .map(n => (found.find(h => h.row.sheetRow === n).row.amount || 0))
-      .reduce((s, a) => s + a, 0) * 100) / 100;
+    const seen = [];
+    hits.forEach(h => { if (!seen.includes(h.row)) seen.push(h.row); });
 
-    const entry = {
+    const base = {
       id: g.id,
       tier: g.tier,
       agree: g.agree,
@@ -361,32 +368,44 @@ export function placeGroups(groups, rows, cpr) {
       phone: g.phone,
       address: g.address,
       shopifyTotal: g.total,
-      sheetAmount,
-      cprNumber: found[0].row.cprNumber || '',
-      cells,
-      found: found.map(h => ({
-        order: h.order, sheetRow: h.row.sheetRow,
-        cell: h.row.invoice, amount: h.row.amount,
-        cprNumber: h.row.cprNumber || '', merged: !!h.row.merged
-      })),
-      missing: hits.filter(h => !h.row).map(h => h.order)
+      orders: g.orders.map(o => ({ order: o.order, digits: o.digits, total: o.total })),
+      found: hits.map(h => ({ order: h.order, sheetRow: h.row.sheetRow, cell: h.row.invoice }))
     };
 
-    if (entry.missing.length) partial.push(entry);
-    else if (cells.length === 1) merged.push(entry);
-    else spread.push(entry);
+    // one parcel, one row - anything else is the sheet saying the same parcel
+    // twice, and that has to be looked at by hand
+    if (seen.length > 1) {
+      twice.push(Object.assign(base, {
+        rows: seen.map(r => ({
+          sheetRow: r.sheetRow, cell: r.invoice, amount: r.amount,
+          cprNumber: r.cprNumber || ''
+        }))
+      }));
+      return;
+    }
+
+    const row = seen[0];
+    matched.push(Object.assign(base, {
+      sheetRow: row.sheetRow,
+      cell: row.invoice,
+      cod: row.amount,
+      cprNumber: row.cprNumber || '',
+      // the sheet already carries the whole group in that one cell
+      whole: g.orders.every(o => (row.invoices || []).some(n => digitsOf(n) === o.digits))
+    }));
   });
+
+  matched.sort((a, b) => a.sheetRow - b.sheetRow);
 
   return {
     cpr: cpr || '',
     sheetRows: rows.length,
     totals: {
       groups: groups.length,
-      merged: merged.length,
-      spread: spread.length,
-      partial: partial.length,
+      matched: matched.length,
+      twice: twice.length,
       absent: absent.length
     },
-    merged, spread, partial, absent
+    matched, twice, absent
   };
 }

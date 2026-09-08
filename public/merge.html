@@ -92,6 +92,17 @@
 
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 
+  .grpbox{margin-bottom:18px}
+  .grpbox h4{margin:0 0 8px;font-size:12.5px;font-weight:600;display:flex;
+    align-items:center;gap:8px}
+  .grpbox .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+  .grpbox .dot.ok{background:var(--ok)}
+  .grpbox .dot.warn{background:var(--warn)}
+  .grpbox .dot.bad{background:var(--bad)}
+  .grpbox .why{padding:8px 13px;font-size:11.5px;color:var(--muted);line-height:1.6}
+  .grp .top .offnum,.grp .body .offnum{color:var(--warn);font-weight:600}
+  .grp .body .why{border-top:1px solid var(--line)}
+
   .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
   .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
     border-bottom:2px solid transparent;margin-bottom:-1px}
@@ -677,8 +688,8 @@
     btn.classList.add('on');
     S.cpr = cpr;
 
-    say('', 'Looking the groups up in the sheet...');
-    post('/api/merge/cpr', {
+    say('', 'Looking the groups up in the sheet and in QuickBooks...');
+    post('/api/merge/plan', {
       sheetId: S.sheetId, tab: S.tab, excel: S.excel,
       courier: S.courier, cpr: cpr
     }).then(function(d){
@@ -689,81 +700,141 @@
 
   /* ---------- the answer ---------- */
 
+  var STATE = {
+    agrees:  ['ok',   'Agrees with the sheet'],
+    fix:     ['warn', 'Shipping to come off'],
+    stuck:   ['bad',  'Does not add up'],
+    paid:    ['',     'Already paid'],
+    missing: ['bad',  'Not in QuickBooks']
+  };
+
   function drawOut(d){
     $('stepOut').classList.remove('hide');
     var t = d.totals;
+    S.plan = d;
 
     $('outHint').innerHTML =
       esc(S.courier) + ' &middot; ' + esc(S.sheetName) + ' &middot; ' +
       (d.cpr ? 'CPR ' + esc(d.cpr) : 'the whole tab') + ' &middot; ' +
-      nf(d.sheetRows) + ' rows read';
+      nf(d.sheetRows) + ' rows read &middot; ' +
+      nf(t.absent) + ' groups not in this CPR';
 
     $('outTally').innerHTML =
-      '<div class="ok"><div class="n">' + nf(t.merged) + '</div>' +
-        '<div class="l">Already in one cell</div></div>' +
-      '<div class="warn"><div class="n">' + nf(t.spread) + '</div>' +
-        '<div class="l">Spread over rows</div></div>' +
-      '<div class="warn"><div class="n">' + nf(t.partial) + '</div>' +
-        '<div class="l">Only partly here</div></div>' +
-      '<div><div class="n">' + nf(t.absent) + '</div>' +
-        '<div class="l">Not in this CPR</div></div>';
+      '<div><div class="n">' + nf(t.matched) + '</div>' +
+        '<div class="l">Groups here</div></div>' +
+      '<div class="ok"><div class="n">' + nf(t.agrees) + '</div>' +
+        '<div class="l">Already agree</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.fix) + '</div>' +
+        '<div class="l">Shipping to remove</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.shipping) + '</div>' +
+        '<div class="l">Shipping lines</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.stuck + t.missing + t.paid) + '</div>' +
+        '<div class="l">Need a look</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.twice) + '</div>' +
+        '<div class="l">In two rows</div></div>';
 
-    var lists = $('outLists');
-    lists.innerHTML = '';
+    var out = $('outLists');
+    out.innerHTML = '';
+    out.style.display = 'block';
 
-    box(lists, 'Spread over separate rows (' + d.spread.length + ')', d.spread,
-      'These went to one customer but the courier billed them row by row. ' +
-      'Nothing to merge in QuickBooks - each row pays on its own.');
+    if(d.twice && d.twice.length) out.appendChild(twiceBox(d.twice));
 
-    box(lists, 'Written in one cell (' + d.merged.length + ')', d.merged,
-      'The courier merged these. Receive payments adds their QuickBooks balances up ' +
-      'and pays them together.');
+    ['fix','agrees','stuck','paid','missing'].forEach(function(state){
+      var rows = d.plans.filter(function(p){ return p.state === state; });
+      if(rows.length) out.appendChild(planBox(state, rows));
+    });
 
-    box(lists, 'Only partly in this CPR (' + d.partial.length + ')', d.partial,
-      'Some of the group is here and some is not - the rest may be in another CPR.');
-
-    if(!d.spread.length && !d.merged.length && !d.partial.length){
-      lists.innerHTML = '<div style="font-size:13px;color:var(--muted)">' +
+    if(!d.plans.length && !(d.twice || []).length){
+      out.innerHTML = '<div style="font-size:13px;color:var(--muted)">' +
         'None of the groups turned up in this CPR.</div>';
     }
   }
 
-  function box(parent, title, rows, hint){
-    if(!rows.length) return;
-
+  function planBox(state, rows){
     var el = document.createElement('div');
-    el.className = 'box';
+    el.className = 'grpbox';
+    el.innerHTML = '<h4><span class="dot ' + STATE[state][0] + '"></span>' +
+      esc(STATE[state][1]) + ' (' + rows.length + ')</h4>';
 
-    var body = rows.map(function(r){
-      var off = r.sheetAmount > 0 &&
-                Math.abs(r.sheetAmount - r.shopifyTotal) > 10;
-      return '<tr>' +
-        '<td>#' + r.id + ' ' + esc(r.customer || '(no name)') +
-          '<br><span style="font-size:11px;color:var(--muted)">' +
-          r.found.map(function(f){ return esc(f.order) + ' (row ' + f.sheetRow + ')'; })
-            .join(', ') +
-          (r.missing.length
-            ? ' &middot; missing: ' + r.missing.map(esc).join(', ') : '') +
-          '</span></td>' +
-        '<td class="num">' + money(r.shopifyTotal) + '</td>' +
-        '<td class="num' + (off ? ' off' : '') + '">' + money(r.sheetAmount) + '</td>' +
-        '</tr>';
-    }).join('');
-
-    el.innerHTML = '<h4>' + esc(title) + '</h4>' +
-      '<div style="padding:8px 13px;font-size:11.5px;color:var(--muted);' +
-        'border-bottom:1px solid var(--line)">' + esc(hint) + '</div>' +
-      '<div class="inner"><table>' +
-      '<tr><td style="font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;' +
-        'color:var(--faint)">Group</td>' +
-      '<td class="num" style="font-size:10.5px;letter-spacing:.07em;' +
-        'text-transform:uppercase;color:var(--faint)">Shopify</td>' +
-      '<td class="num" style="font-size:10.5px;letter-spacing:.07em;' +
-        'text-transform:uppercase;color:var(--faint)">Sheet</td></tr>' +
-      body + '</table></div>';
-
-    parent.appendChild(el);
+    rows.forEach(function(p){ el.appendChild(planCard(p)); });
+    return el;
   }
+
+  function planCard(p){
+    var el = document.createElement('div');
+    el.className = 'grp';
+
+    var top = document.createElement('div');
+    top.className = 'top';
+    top.innerHTML =
+      '<b>#' + p.id + '</b>' +
+      '<span class="who">' + esc(p.customer || '(no name)') +
+        ' &middot; row ' + p.sheetRow + ' &middot; ' + esc(p.cell) + '</span>' +
+      '<span class="tag">' + p.orders.length + ' orders</span>' +
+      '<span class="amt">QB ' + money(p.qbTotal) + '</span>' +
+      '<span class="amt">COD ' + money(p.cod) + '</span>' +
+      '<span class="amt' + (Math.abs(p.diff) > 1 ? ' offnum' : '') + '">' +
+        (p.diff > 0 ? '+' : '') + money(p.diff) + '</span>';
+    top.addEventListener('click', function(){ el.classList.toggle('open'); });
+    el.appendChild(top);
+
+    var strip = {};
+    (p.strip || []).forEach(function(l){ strip[l.lineId] = l.amount; });
+
+    var body = document.createElement('div');
+    body.className = 'body';
+    body.innerHTML =
+      '<div class="why">' + esc(p.note || '') + '</div>' +
+      '<table><tr><th>Order</th><th>Invoice</th><th style="text-align:right">Total</th>' +
+      '<th style="text-align:right">Shipping</th><th>What happens</th></tr>' +
+      p.invoices.map(function(inv){
+        var ship = inv.shipping;
+        var going = ship.filter(function(l){ return strip[l.lineId] !== undefined; });
+        return '<tr><td>' + esc(inv.order) + '</td>' +
+          '<td>' + esc(inv.doc) + '</td>' +
+          '<td class="num">' + money(inv.total) + '</td>' +
+          '<td class="num">' +
+            (ship.length ? ship.map(function(l){ return money(l.amount); }).join(' + ') : '-') +
+          '</td>' +
+          '<td>' + (going.length
+            ? '<span class="offnum">take off ' +
+              going.map(function(l){ return esc(l.item) + ' ' + money(l.amount); }).join(', ') +
+              '</span>'
+            : (ship.length ? 'shipping stays' : 'nothing to take off')) + '</td></tr>';
+      }).join('') +
+      (p.missing.length
+        ? '<tr><td colspan="5" class="offnum">not in QuickBooks: ' +
+          p.missing.map(esc).join(', ') + '</td></tr>'
+        : '') +
+      '</table>' +
+      '<div class="why">Remark for the sheet: ' + esc(p.remark || '') + '</div>';
+    el.appendChild(body);
+
+    return el;
+  }
+
+  function twiceBox(rows){
+    var el = document.createElement('div');
+    el.className = 'grpbox';
+    el.innerHTML = '<h4><span class="dot bad"></span>The same parcel in two rows (' +
+      rows.length + ')</h4>' +
+      '<div class="why">One order number should appear once in a CPR. These are ' +
+      'written twice, so nothing is done with them until the sheet is put right.</div>';
+
+    rows.forEach(function(r){
+      var d = document.createElement('div');
+      d.className = 'grp';
+      d.innerHTML = '<div class="top"><b>#' + r.id + '</b>' +
+        '<span class="who">' + esc(r.customer || '(no name)') + '</span>' +
+        '<span class="tag">' + r.rows.map(function(x){
+          return 'row ' + x.sheetRow + ' (' + esc(x.cell) + ', ' + money(x.amount) + ')';
+        }).join(' &middot; ') + '</span></div>';
+      el.appendChild(d);
+    });
+
+    return el;
+  }
+
 })();
 </script>
 </body>

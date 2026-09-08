@@ -61,6 +61,9 @@ import {
 import {
   readFile as readMergeFile, buildOrders, groupOrders, matchGroupsToSheet
 } from './merges.js';
+import {
+  invoicesWithLines, planGroup, remarkFor, stripShipping
+} from './mergeqb.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
 import {
   dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy, eachOrder
@@ -2421,8 +2424,10 @@ app.get('/api/merge/csv', async (req, res) => {
   res.send('﻿' + rows.join('\r\n') + '\r\n');
 });
 
-// hold the groups up against one courier CPR
-app.post('/api/merge/cpr', async (req, res) => {
+// What it would take to receive these groups: what QuickBooks holds against
+// each one, what the sheet collected, and how many shipping charges stand
+// between the two. Nothing is changed here - the answer is read first.
+app.post('/api/merge/plan', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
@@ -2434,8 +2439,45 @@ app.post('/api/merge/cpr', async (req, res) => {
     if (!st.groups.length) throw new Error('Find the groups first');
 
     const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+    const placed = await matchGroupsToSheet(st.groups, { sheetId, tab, excel, saved, cpr });
+
+    if (!placed.matched.length) {
+      return res.json({ placed, plans: [], totals: placed.totals });
+    }
+
+    // every order of every matched group, asked for in one go
+    const wanted = [];
+    placed.matched.forEach(m => m.orders.forEach(o => wanted.push(o.order)));
+
+    const token = await getAccessToken(realmId);
+    const invoices = await invoicesWithLines(realmId, token, wanted);
+
+    const plans = placed.matched.map(m => planGroup(m, invoices));
+    plans.forEach(p => { p.remark = remarkFor(p); });
+
+    const count = state => plans.filter(p => p.state === state).length;
+
+    st.plan = { at: Date.now(), sheetId, tab, excel, courier, cpr, plans };
+
     res.setHeader('Cache-Control', 'no-store');
-    res.json(await matchGroupsToSheet(st.groups, { sheetId, tab, excel, saved, cpr }));
+    res.json({
+      cpr: placed.cpr,
+      sheetRows: placed.sheetRows,
+      twice: placed.twice,
+      absent: placed.absent.length,
+      totals: {
+        matched: plans.length,
+        agrees: count('agrees'),
+        fix: count('fix'),
+        stuck: count('stuck'),
+        paid: count('paid'),
+        missing: count('missing'),
+        twice: placed.twice.length,
+        absent: placed.absent.length,
+        shipping: plans.reduce((n, p) => n + ((p.strip || []).length), 0)
+      },
+      plans
+    });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
