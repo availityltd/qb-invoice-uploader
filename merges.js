@@ -206,21 +206,60 @@ export function buildOrders(files) {
       if (!o.phone)    o.phone    = cell(c.phone);
       if (!o.email)    o.email    = cell(c.email);
       if (!o.total)    o.total    = num(cell(c.total));
-      if (!o.date)     o.date     = toISO(cell(c.date));
+      if (!o.when)     o.when     = cell(c.date);
     });
   });
 
-  return Array.from(byOrder.values()).map(o => Object.assign(o, {
-    keys: {
-      name:  normName(o.customer),
-      addr:  normAddr(o.address),
-      phone: normPhone(o.phone),
-      email: normEmail(o.email)
-    }
-  }));
+  return Array.from(byOrder.values()).map(o => {
+    const when = whenOf(o.when);
+    return Object.assign(o, {
+      date: when.day,
+      at: when.at,
+      keys: {
+        name:  normName(o.customer),
+        addr:  normAddr(o.address),
+        phone: normPhone(o.phone),
+        email: normEmail(o.email)
+      }
+    });
+  });
+}
+
+// "2026-08-31 08:59:00 +0500" carries both the day the order was placed and
+// the hour. The day is taken as the shop wrote it, so an order does not slide
+// into yesterday on the way through a time zone.
+export function whenOf(raw) {
+  const s = clean(raw);
+  if (!s) return { day: null, at: null };
+
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const day = m ? `${m[1]}-${m[2]}-${m[3]}` : toISO(s);
+
+  // "2026-08-31 08:59:00 +0500" is not a date any browser or Node will parse:
+  // the day and the hour want a T between them, and the offset wants no space
+  const t = Date.parse(s.replace(' ', 'T').replace(/\s+([+-]\d{2}:?\d{2})$/, '$1'));
+  return { day, at: isNaN(t) ? null : t };
 }
 
 /* ==================== grouping ==================== */
+
+// A customer who orders twice in a morning gets one parcel; the same customer
+// three days later gets another one, delivered on its own. So the day an order
+// was placed is part of what has to agree - unless the export carries no dates
+// worth speaking of, in which case there is nothing to go on.
+function timeRule(orders, time) {
+  const asked = (time && time.mode) || 'day';
+  if (asked === 'any') return { mode: 'any' };
+
+  const known = orders.filter(o => o.date).length;
+  if (known < orders.length / 2) return { mode: 'any', unknown: true };
+
+  if (asked === 'window') {
+    const hours = Math.max(1, Math.min(240, Number(time && time.hours) || 24));
+    return { mode: 'window', gap: hours * 3600 * 1000, hours };
+  }
+  return { mode: 'day' };
+}
 
 const FIELDS = ['name', 'addr', 'phone', 'email'];
 const LABEL  = { name: 'name', addr: 'address', phone: 'phone', email: 'email' };
@@ -251,8 +290,9 @@ function finder(n) {
 
 // The strictest reading first: all four details the same. Then any three of
 // them, then any two. `minFields` says how far down to go.
-export function groupOrders(orders, minFields) {
+export function groupOrders(orders, minFields, time) {
   const floor = Math.max(2, Math.min(4, Number(minFields) || 4));
+  const rule = timeRule(orders, time);
   const uf = finder(orders.length);
   const joinTier = new Array(orders.length).fill(0);
 
@@ -261,14 +301,33 @@ export function groupOrders(orders, minFields) {
       const buckets = new Map();
       orders.forEach((o, i) => {
         if (set.some(f => !o.keys[f])) return;       // a blank never matches
-        const key = set.map(f => o.keys[f]).join('');
+        // by day, the day is simply part of the key; by window, the times are
+        // weighed up afterwards
+        if (rule.mode === 'day' && !o.date) return;
+        const day = rule.mode === 'day' ? o.date : '';
+        const key = day + '|' + set.map(f => o.keys[f]).join('|');
         if (!buckets.has(key)) buckets.set(key, []);
         buckets.get(key).push(i);
       });
-      buckets.forEach(idx => {
-        if (idx.length < 2) return;
-        for (let j = 1; j < idx.length; j++) uf.union(idx[0], idx[j]);
-        idx.forEach(i => { joinTier[i] = Math.max(joinTier[i], k); });
+      buckets.forEach(all => {
+        if (all.length < 2) return;
+
+        // an hour window instead: the orders are lined up in time and only
+        // neighbours close enough together are joined
+        if (rule.mode === 'window') {
+          const line = all.filter(i => orders[i].at !== null)
+            .sort((a, b) => orders[a].at - orders[b].at);
+          for (let j = 1; j < line.length; j++) {
+            if (orders[line[j]].at - orders[line[j - 1]].at > rule.gap) continue;
+            uf.union(line[j - 1], line[j]);
+            joinTier[line[j]] = Math.max(joinTier[line[j]], k);
+            joinTier[line[j - 1]] = Math.max(joinTier[line[j - 1]], k);
+          }
+          return;
+        }
+
+        for (let j = 1; j < all.length; j++) uf.union(all[0], all[j]);
+        all.forEach(i => { joinTier[i] = Math.max(joinTier[i], k); });
       });
     });
   }

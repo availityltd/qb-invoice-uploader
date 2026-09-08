@@ -2373,12 +2373,20 @@ app.post('/api/merge/scan', async (req, res) => {
   try {
     const st = mergeState(realmId);
     const minFields = Number(req.body && req.body.minFields) || 4;
-    st.groups = groupOrders(st.orders, minFields);
+    // one parcel is one day's ordering - the same customer next week is a
+    // second parcel, delivered and collected on its own
+    const time = {
+      mode: (req.body && req.body.timeMode) || 'day',
+      hours: req.body && req.body.hours
+    };
+    st.groups = groupOrders(st.orders, minFields, time);
     st.minFields = minFields;
+    st.time = time;
 
     const parcels = st.groups.reduce((n, g) => n + g.orders.length, 0);
     res.json({
       minFields,
+      timeMode: time.mode,
       orders: st.orders.length,
       totals: {
         groups: st.groups.length,

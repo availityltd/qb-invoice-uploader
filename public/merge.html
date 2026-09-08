@@ -163,6 +163,7 @@
           <div class="hint" id="grpHint"></div>
 
           <div class="strength" id="strength"></div>
+          <div class="strength" id="timing"></div>
           <div class="tally" id="grpTally"></div>
           <div class="row" style="margin-bottom:12px">
             <button id="btnCsv">Download the groups</button>
@@ -211,7 +212,7 @@
 
   var S = {
     files: [], orders: 0,
-    minFields: 4, groups: [],
+    minFields: 4, timeMode: 'day', groups: [],
     root: '', courier: '', trail: [],
     sheetId: '', sheetName: '', excel: false,
     tabs: [], tab: '', cprs: [], cpr: ''
@@ -417,7 +418,16 @@
     [2, 'At least two',   'Loosest. Two details agreeing is enough to call it one customer.']
   ];
 
-  $('btnGroups').addEventListener('click', function(){ scan(S.minFields); });
+  var TIMING = [
+    ['day',    'Ordered the same day',
+     'One parcel is one day of ordering. The same customer next week is a second parcel.'],
+    ['window', 'Within 24 hours',
+     'Orders close together in time, even side of midnight.'],
+    ['any',    'Any date',
+     'Date ignored - every order that customer ever placed lands in one group.']
+  ];
+
+  $('btnGroups').addEventListener('click', function(){ scan(); });
 
   function drawStrength(){
     var box = $('strength');
@@ -426,17 +436,29 @@
       var b = document.createElement('button');
       if(s[0] === S.minFields) b.className = 'on';
       b.innerHTML = '<b>' + esc(s[1]) + '</b><small>' + esc(s[2]) + '</small>';
-      b.addEventListener('click', function(){ scan(s[0]); });
+      b.addEventListener('click', function(){ S.minFields = s[0]; scan(); });
       box.appendChild(b);
+    });
+
+    var tbox = $('timing');
+    tbox.innerHTML = '';
+    TIMING.forEach(function(t){
+      var b = document.createElement('button');
+      if(t[0] === S.timeMode) b.className = 'on';
+      b.innerHTML = '<b>' + esc(t[1]) + '</b><small>' + esc(t[2]) + '</small>';
+      b.addEventListener('click', function(){ S.timeMode = t[0]; scan(); });
+      tbox.appendChild(b);
     });
   }
 
-  function scan(minFields){
-    S.minFields = minFields;
+  function scan(){
     say('', 'Reading ' + nf(S.orders) + ' orders...');
     $('btnGroups').disabled = true;
 
-    post('/api/merge/scan', { minFields: minFields }).then(function(d){
+    post('/api/merge/scan', {
+      minFields: S.minFields,
+      timeMode: S.timeMode
+    }).then(function(d){
       $('btnGroups').disabled = false;
       clearSay();
       S.groups = d.groups;
@@ -488,7 +510,8 @@
       '<b>#' + g.id + '</b>' +
       '<span class="who">' + esc(g.customer || '(no name)') +
         (g.phone ? ' &middot; ' + esc(g.phone) : '') + '</span>' +
-      '<span class="tag">' + g.orders.length + ' orders &middot; ' +
+      '<span class="tag">' + g.orders.length + ' orders' +
+        (g.orders[0].date ? ' &middot; ' + esc(g.orders[0].date) : '') + ' &middot; ' +
         esc(g.agree.join(' + ') || 'nothing') + '</span>' +
       '<span class="amt">' + money(g.total) + '</span>';
     top.addEventListener('click', function(){ el.classList.toggle('open'); });
