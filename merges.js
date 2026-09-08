@@ -4,10 +4,10 @@
 // what tells us which ones to expect there.
 //
 // Nothing here touches QuickBooks. It reads uploaded files, groups them, and
-// then holds the groups up against one CPR sheet.
+// then holds the groups up against CPR rows pasted straight out of the sheet.
 
 import XLSX from 'xlsx';
-import { clean, num, digitsOf, toISO, loadSheet } from './cpr.js';
+import { clean, num, digitsOf, toISO, splitInvoices } from './cpr.js';
 
 /* ==================== what a customer looks like ==================== */
 
@@ -379,18 +379,89 @@ export function groupOrders(orders, minFields, time) {
 // The courier books the whole group as one parcel, so only one of its order
 // numbers is written in the sheet, against the COD for all of them. One number
 // found is therefore enough to say the group belongs to that row.
-export async function matchGroupsToSheet(groups, opts) {
-  const { sheetId, tab, excel, saved, cpr } = opts;
-  const data = await loadSheet(sheetId, tab, excel, saved);
+//
+// The rows themselves are pasted in, straight out of the CPR sheet, so nothing
+// has to be found on Drive or lined up column by column first.
 
-  let rows = data.rows;
-  if (cpr) rows = rows.filter(r => (r.cprNumber || '(no CPR number)') === cpr);
+// a header word as the sheet writes it: ORDER_REF_NUMBER, COD_AMOUNT
+const headerWord = h => clean(h).toLowerCase().replace(/[_\s]+/g, ' ').trim();
 
-  return Object.assign(placeGroups(groups, rows, cpr), {
-    headerRow: data.headerRow,
-    header: data.header,
-    cols: data.cols
+function pasteColumns(header) {
+  const low = header.map(headerWord);
+  const pick = (exact, like) => {
+    for (const w of exact) { const i = low.indexOf(w); if (i >= 0) return i; }
+    for (const w of like) { const i = low.findIndex(h => h && h.includes(w)); if (i >= 0) return i; }
+    return -1;
+  };
+  return {
+    invoice: pick(['order ref number', 'order ref', 'order number', 'order id', 'invoice no'],
+                  ['order ref', 'order no', 'order id', 'reference']),
+    cpr:     pick(['cpr number', 'cpr no', 'cpr'], ['cpr n']),
+    cprDate: pick(['cpr date', 'cpr d'], ['cpr date']),
+    amount:  pick(['cod amount', 'amount cod', 'cod', 'collection amount'], ['cod']),
+    status:  pick(['status', 'delivery status', 'order status'], ['status'])
+  };
+}
+
+// Rows copied out of a sheet arrive tab by tab. The header comes with them -
+// without it there is no telling the COD from the tracking number.
+export function parsePasted(text) {
+  const lines = String(text || '').split(/\r?\n/).filter(l => l.trim().length);
+  if (!lines.length) throw new Error('Nothing was pasted');
+
+  const split = l => (l.indexOf('\t') >= 0 ? l.split('\t') : l.split(/ {2,}/));
+  const grid = lines.map(split);
+
+  // the header is whichever of the first few lines knows the most column names
+  let hRow = -1, best = -1;
+  for (let r = 0; r < Math.min(grid.length, 5); r++) {
+    const cols = pasteColumns(grid[r]);
+    const score = [cols.invoice, cols.cpr, cols.amount].filter(i => i >= 0).length;
+    if (score > best) { best = score; hRow = r; }
+  }
+
+  const header = grid[hRow].map(h => clean(h));
+  const cols = pasteColumns(header);
+
+  if (cols.invoice < 0 || cols.amount < 0) {
+    throw new Error('Paste the header row as well - the one with ORDER_REF_NUMBER ' +
+      'and COD_AMOUNT - so the columns can be told apart');
+  }
+
+  const rows = [];
+  for (let r = hRow + 1; r < grid.length; r++) {
+    const raw = grid[r];
+    const invoice = clean(raw[cols.invoice]);
+    if (!invoice) continue;
+    if (/^(grand )?total/i.test(invoice)) continue;
+
+    const invoices = splitInvoices(invoice);
+    if (!invoices.length) continue;
+
+    rows.push({
+      sheetRow: r + 1,                       // the line as pasted, for pointing at
+      invoice,
+      invoices,
+      merged: invoices.length > 1,
+      amount: num(raw[cols.amount]),
+      status: cols.status >= 0 ? clean(raw[cols.status]) : '',
+      cprNumber: cols.cpr >= 0 ? clean(raw[cols.cpr]) : '',
+      cprDate: cols.cprDate >= 0 ? toISO(raw[cols.cprDate]) : null
+    });
+  }
+
+  if (!rows.length) throw new Error('No order numbers found in what was pasted');
+
+  const cprs = [];
+  rows.forEach(r => {
+    const key = r.cprNumber || '(no CPR number)';
+    let c = cprs.find(x => x.cprNumber === key);
+    if (!c) { c = { cprNumber: key, cprDate: r.cprDate, rows: 0, amount: 0 }; cprs.push(c); }
+    c.rows++;
+    c.amount = Math.round((c.amount + (r.amount || 0)) * 100) / 100;
   });
+
+  return { header, cols, rows, cprs, headerLine: hRow + 1 };
 }
 
 export function placeGroups(groups, rows, cpr) {
@@ -427,7 +498,11 @@ export function placeGroups(groups, rows, cpr) {
       phone: g.phone,
       address: g.address,
       shopifyTotal: g.total,
-      orders: g.orders.map(o => ({ order: o.order, digits: o.digits, total: o.total })),
+      orders: g.orders.map(o => ({
+        order: o.order, digits: o.digits, total: o.total,
+        date: o.date, at: o.at, customer: o.customer, phone: o.phone,
+        email: o.email, address: o.address
+      })),
       found: hits.map(h => ({ order: h.order, sheetRow: h.row.sheetRow, cell: h.row.invoice }))
     };
 

@@ -92,6 +92,14 @@
 
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 
+  textarea{width:100%;min-height:150px;font-family:var(--mono);font-size:11.5px;
+    line-height:1.5;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
+    background:#fff;resize:vertical;white-space:pre;overflow-x:auto}
+
+  .cprhead{font-size:13px;font-weight:600;margin:22px 0 10px;padding-bottom:6px;
+    border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
+  .cprhead small{font-weight:400;font-size:11.5px;color:var(--muted)}
+
   .grpbox{margin-bottom:18px}
   .grpbox h4{margin:0 0 8px;font-size:12.5px;font-weight:600;display:flex;
     align-items:center;gap:8px}
@@ -167,32 +175,26 @@
           <div class="tally" id="grpTally"></div>
           <div class="row" style="margin-bottom:12px">
             <button id="btnCsv">Download the groups</button>
-            <button id="btnNext" class="solid">Match against a CPR sheet</button>
+            <button id="btnNext" class="solid">Match against pasted CPR rows</button>
           </div>
           <div id="grpList"></div>
           <div id="grpMore" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
         </div>
 
-        <div class="step hide" id="stepBrowse">
-          <h2>Pick the courier sheet</h2>
-          <div class="crumb" id="crumb"></div>
-          <div class="picks" id="browse"></div>
-        </div>
-
-        <div class="step hide" id="stepTabs">
-          <h2>Tab</h2>
-          <div class="hint" id="tabHint"></div>
-          <div class="picks" id="tabList"></div>
-        </div>
-
-        <div class="step hide" id="stepCpr">
-          <h2>CPRs in this sheet</h2>
-          <div class="hint" id="cprHint"></div>
-          <div class="picks" id="cprList"></div>
+        <div class="step hide" id="stepPaste">
+          <h2>Paste the CPR rows</h2>
+          <div class="hint">Copy the rows out of the CPR sheet - header row and all -
+            and paste them here. As many CPRs at a time as you like.</div>
+          <textarea id="pasteIn" spellcheck="false"
+            placeholder="CPR Date	CPR Number	ORDER_REF_NUMBER	TRACKING	...	COD_AMOUNT&#10;8/4/2026	CPR-6L4DB532992	#91328057	24652550	...	1197"></textarea>
+          <div class="row" style="margin-top:12px">
+            <button class="solid" id="btnPaste">Match these against Shopify</button>
+            <span id="pasteNote" style="font-size:12px;color:var(--muted)"></span>
+          </div>
         </div>
 
         <div class="step hide" id="stepOut">
-          <h2>What the sheet says</h2>
+          <h2>What these CPRs come to</h2>
           <div class="hint" id="outHint"></div>
           <div class="tally" id="outTally"></div>
           <div class="lists" id="outLists"></div>
@@ -213,9 +215,7 @@
   var S = {
     files: [], orders: 0,
     minFields: 4, timeMode: 'day', groups: [],
-    root: '', courier: '', trail: [],
-    sheetId: '', sheetName: '', excel: false,
-    tabs: [], tab: '', cprs: [], cpr: ''
+    plan: null
   };
 
   var FIELDS = [
@@ -236,6 +236,15 @@
     return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
   }
   function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function clock(ms){
+    if(!ms) return '';
+    var d = new Date(ms);
+    var h = d.getHours(), m = d.getMinutes();
+    var ap = h < 12 ? 'am' : 'pm';
+    h = h % 12; if(h === 0) h = 12;
+    return d.getDate() + '/' + (d.getMonth() + 1) + ' ' + h + ':' +
+           (m < 10 ? '0' : '') + m + ap;
+  }
   function esc(s){
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -278,7 +287,7 @@
   }
 
   function hideFrom(step){
-    var order = ['stepGroups','stepBrowse','stepTabs','stepCpr','stepOut'];
+    var order = ['stepGroups','stepPaste','stepOut'];
     var i = order.indexOf(step);
     if(i < 0) return;
     order.slice(i).forEach(function(id){ $(id).classList.add('hide'); });
@@ -297,8 +306,6 @@
       S.orders = d.orders;
       drawFiles();
     }).catch(function(){});
-
-    get('/api/cpr/root').then(function(d){ S.root = d.folderId || ''; }).catch(function(){});
   });
 
   /* ---------- the files ---------- */
@@ -463,7 +470,7 @@
       clearSay();
       S.groups = d.groups;
       $('stepGroups').classList.remove('hide');
-      hideFrom('stepBrowse');
+      hideFrom('stepPaste');
       drawStrength();
       drawGroups(d);
     }).catch(function(e){
@@ -537,198 +544,39 @@
 
   $('btnNext').addEventListener('click', function(){
     if(!S.groups.length) return say('bad', '<b>No groups to match yet.</b>');
-    if(!S.root) return say('bad',
-      '<b>No Drive folder set.</b> Set it once on the Receive payments page.');
-    openCouriers();
+    $('stepPaste').classList.remove('hide');
+    $('pasteIn').focus();
   });
 
-  /* ---------- browsing the courier folders ---------- */
+  /* ---------- the pasted CPR rows ---------- */
 
-  function drawCrumb(){
-    var bits = ['Root'];
-    S.trail.forEach(function(t){ bits.push(t.name); });
-    $('crumb').innerHTML = bits.map(function(b, i){
-      return i === bits.length - 1 ? '<b>' + esc(b) + '</b>' : esc(b);
-    }).join(' / ');
-  }
+  $('btnPaste').addEventListener('click', function(){
+    var text = $('pasteIn').value;
+    if(!text.trim()) return say('bad', '<b>Paste the rows first.</b>');
 
-  function openCouriers(){
-    hideFrom('stepBrowse');
-    S.trail = [];
-    $('stepBrowse').classList.remove('hide');
-    drawCrumb();
-    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading Drive...</span>';
+    $('btnPaste').disabled = true;
+    say('', 'Reading the rows and asking QuickBooks...');
 
-    get('/api/cpr/couriers').then(function(d){
-      paint(d.folders || [], [], function(f){ S.courier = f.name; openFolder(f); });
-    }).catch(function(e){
-      $('browse').innerHTML = '';
-      say('bad', '<b>' + esc(e.message) + '</b>');
-    });
-  }
-
-  function openFolder(folder){
-    hideFrom('stepTabs');
-    S.trail.push(folder);
-    drawCrumb();
-    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading...</span>';
-
-    get('/api/cpr/folder?id=' + encodeURIComponent(folder.id)).then(function(d){
-      paint(d.folders || [], d.sheets || [], openFolder, openSheet);
-    }).catch(function(e){
-      $('browse').innerHTML = '';
-      say('bad', '<b>' + esc(e.message) + '</b>');
-    });
-  }
-
-  function goBack(){
-    S.trail.pop();
-    if(!S.trail.length){ openCouriers(); return; }
-    var last = S.trail.pop();
-    openFolder(last);
-  }
-
-  function paint(folders, sheets, onFolder, onSheet){
-    var box = $('browse');
-    box.innerHTML = '';
-
-    if(S.trail.length){
-      var b = document.createElement('button');
-      b.className = 'pick';
-      b.textContent = '← Back';
-      b.addEventListener('click', goBack);
-      box.appendChild(b);
-    }
-
-    if(!folders.length && !sheets.length){
-      var none = document.createElement('span');
-      none.style.cssText = 'font-size:13px;color:var(--muted)';
-      none.textContent = 'Nothing in there.';
-      box.appendChild(none);
-    }
-
-    folders.forEach(function(f){
-      var e = document.createElement('button');
-      e.className = 'pick';
-      e.textContent = '\u{1F4C1} ' + f.name;
-      e.addEventListener('click', function(){ onFolder(f); });
-      box.appendChild(e);
-    });
-
-    sheets.forEach(function(f){
-      var e = document.createElement('button');
-      e.className = 'pick';
-      e.innerHTML = '\u{1F4C4} ' + esc(f.name) +
-        (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
-      e.addEventListener('click', function(){
-        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
-        e.classList.add('on');
-        onSheet(f);
-      });
-      box.appendChild(e);
-    });
-  }
-
-  /* ---------- the sheet, its tabs, its CPRs ---------- */
-
-  function openSheet(file, tab){
-    hideFrom('stepTabs');
-    S.sheetId = file.id;
-    S.sheetName = file.name;
-    S.excel = !!file.excel;
-    say('', 'Reading the sheet...');
-
-    var u = '/api/cpr/open?sheetId=' + encodeURIComponent(file.id) +
-            '&courier=' + encodeURIComponent(S.courier) +
-            (tab ? '&tab=' + encodeURIComponent(tab) : '') +
-            (S.excel ? '&excel=1&inspect=0' : '');
-
-    get(u).then(function(d){
+    post('/api/merge/paste', { text: text }).then(function(d){
+      $('btnPaste').disabled = false;
       clearSay();
-      S.tabs = d.tabs || [];
-      S.tab = d.tab;
-      S.cprs = d.groups || [];
-
-      if(d.cols.invoice < 0){
-        say('bad', '<b>No order number column found in "' + esc(d.tab) + '".</b> ' +
-          'Open Receive payments once for ' + esc(S.courier) +
-          ' and set the columns there - they are remembered.');
-        return;
-      }
-
-      drawTabs();
-      drawCprs();
-    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
-  }
-
-  function drawTabs(){
-    if(S.tabs.length < 2){ $('stepTabs').classList.add('hide'); return; }
-
-    $('stepTabs').classList.remove('hide');
-    $('tabHint').textContent = 'This file has ' + S.tabs.length + ' tabs.';
-
-    var box = $('tabList');
-    box.innerHTML = '';
-    S.tabs.forEach(function(t){
-      var b = document.createElement('button');
-      b.className = 'pick' + (t.title === S.tab ? ' on' : '');
-      b.textContent = t.title;
-      b.addEventListener('click', function(){
-        openSheet({ id: S.sheetId, name: S.sheetName, excel: S.excel }, t.title);
-      });
-      box.appendChild(b);
-    });
-  }
-
-  function drawCprs(){
-    $('stepCpr').classList.remove('hide');
-    $('stepOut').classList.add('hide');
-    $('cprHint').textContent = S.cprs.length + ' CPR' + (S.cprs.length === 1 ? '' : 's') +
-      ' in "' + S.tab + '". Pick the one to check the groups against.';
-
-    var box = $('cprList');
-    box.innerHTML = '';
-
-    var all = document.createElement('button');
-    all.className = 'pick';
-    all.innerHTML = 'Whole tab<small>every CPR at once</small>';
-    all.addEventListener('click', function(){ pickCpr(all, ''); });
-    box.appendChild(all);
-
-    S.cprs.forEach(function(g){
-      var b = document.createElement('button');
-      b.className = 'pick';
-      b.innerHTML = esc(g.cprNumber || '(no CPR number)') +
-        '<small>' + (g.cprDate ? esc(g.cprDate) + ' &middot; ' : '') +
-        g.rows + ' rows &middot; ' + money(g.amount) + '</small>';
-      b.addEventListener('click', function(){ pickCpr(b, g.cprNumber || '(no CPR number)'); });
-      box.appendChild(b);
-    });
-  }
-
-  function pickCpr(btn, cpr){
-    Array.prototype.forEach.call($('cprList').children, function(c){ c.classList.remove('on'); });
-    btn.classList.add('on');
-    S.cpr = cpr;
-
-    say('', 'Looking the groups up in the sheet and in QuickBooks...');
-    post('/api/merge/plan', {
-      sheetId: S.sheetId, tab: S.tab, excel: S.excel,
-      courier: S.courier, cpr: cpr
-    }).then(function(d){
-      clearSay();
+      $('pasteNote').textContent = nf(d.pastedRows) + ' rows read, ' +
+        d.cprs.length + ' CPR' + (d.cprs.length === 1 ? '' : 's');
       drawOut(d);
-    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
-  }
+    }).catch(function(e){
+      $('btnPaste').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
 
   /* ---------- the answer ---------- */
 
   var STATE = {
     agrees:  ['ok',   'Agrees with the sheet'],
     fix:     ['warn', 'Shipping to come off'],
-    stuck:   ['bad',  'Does not add up'],
-    paid:    ['',     'Already paid'],
-    missing: ['bad',  'Not in QuickBooks']
+    stuck:   ['bad',  'Manual check - the difference is not shipping'],
+    paid:    ['bad',  'Manual check - an invoice is already paid'],
+    missing: ['bad',  'Manual check - an invoice is not in QuickBooks']
   };
 
   function drawOut(d){
@@ -737,22 +585,27 @@
     S.plan = d;
 
     $('outHint').innerHTML =
-      esc(S.courier) + ' &middot; ' + esc(S.sheetName) + ' &middot; ' +
-      (d.cpr ? 'CPR ' + esc(d.cpr) : 'the whole tab') + ' &middot; ' +
-      nf(d.sheetRows) + ' rows read &middot; ' +
-      nf(t.absent) + ' groups not in this CPR';
+      nf(d.pastedRows) + ' rows pasted &middot; ' + d.cprs.length + ' CPR' +
+      (d.cprs.length === 1 ? '' : 's') + ' &middot; ' +
+      nf(t.groups) + ' of those rows carry a group' +
+      (d.strangers && d.strangers.count
+        ? ' &middot; <span style="color:var(--warn)">' + nf(d.strangers.count) +
+          ' rows are in none of the uploaded files (' +
+          d.strangers.rows.slice(0, 6).map(function(r){ return esc(r.invoice); }).join(', ') +
+          (d.strangers.count > 6 ? ', ...' : '') + ')</span>'
+        : '');
 
     $('outTally').innerHTML =
-      '<div><div class="n">' + nf(t.matched) + '</div>' +
-        '<div class="l">Groups here</div></div>' +
+      '<div><div class="n">' + nf(t.groups) + '</div>' +
+        '<div class="l">Groups found</div></div>' +
       '<div class="ok"><div class="n">' + nf(t.agrees) + '</div>' +
         '<div class="l">Already agree</div></div>' +
       '<div class="warn"><div class="n">' + nf(t.fix) + '</div>' +
         '<div class="l">Shipping to remove</div></div>' +
       '<div class="warn"><div class="n">' + nf(t.shipping) + '</div>' +
         '<div class="l">Shipping lines</div></div>' +
-      '<div class="warn"><div class="n">' + nf(t.stuck + t.missing + t.paid) + '</div>' +
-        '<div class="l">Need a look</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.manual) + '</div>' +
+        '<div class="l">Manual check</div></div>' +
       '<div class="warn"><div class="n">' + nf(t.twice) + '</div>' +
         '<div class="l">In two rows</div></div>';
 
@@ -760,17 +613,29 @@
     out.innerHTML = '';
     out.style.display = 'block';
 
-    if(d.twice && d.twice.length) out.appendChild(twiceBox(d.twice));
-
-    ['fix','agrees','stuck','paid','missing'].forEach(function(state){
-      var rows = d.plans.filter(function(p){ return p.state === state; });
-      if(rows.length) out.appendChild(planBox(state, rows));
-    });
-
-    if(!d.plans.length && !(d.twice || []).length){
+    if(!d.byCpr.length){
       out.innerHTML = '<div style="font-size:13px;color:var(--muted)">' +
-        'None of the groups turned up in this CPR.</div>';
+        'None of the pasted rows belong to a customer who ordered more than once ' +
+        'that day. Nothing here needs merging.</div>';
+      return;
     }
+
+    d.byCpr.forEach(function(c){
+      var head = document.createElement('div');
+      head.className = 'cprhead';
+      head.innerHTML = esc(c.cprNumber) +
+        '<small>' + nf(c.rows) + ' rows pasted &middot; ' + c.plans.length + ' group' +
+        (c.plans.length === 1 ? '' : 's') +
+        (c.twice.length ? ' &middot; ' + c.twice.length + ' written twice' : '') + '</small>';
+      out.appendChild(head);
+
+      if(c.twice.length) out.appendChild(twiceBox(c.twice));
+
+      ['fix','agrees','stuck','paid','missing'].forEach(function(state){
+        var rows = c.plans.filter(function(p){ return p.state === state; });
+        if(rows.length) out.appendChild(planBox(state, rows));
+      });
+    });
   }
 
   function planBox(state, rows){
@@ -793,7 +658,8 @@
       '<b>#' + p.id + '</b>' +
       '<span class="who">' + esc(p.customer || '(no name)') +
         ' &middot; row ' + p.sheetRow + ' &middot; ' + esc(p.cell) + '</span>' +
-      '<span class="tag">' + p.orders.length + ' orders</span>' +
+      '<span class="tag">' + p.orders.length + ' orders' +
+        (p.day ? ' &middot; ' + esc(p.day) : '') + '</span>' +
       '<span class="amt">QB ' + money(p.qbTotal) + '</span>' +
       '<span class="amt">COD ' + money(p.cod) + '</span>' +
       '<span class="amt' + (Math.abs(p.diff) > 1 ? ' offnum' : '') + '">' +
@@ -807,13 +673,18 @@
     var body = document.createElement('div');
     body.className = 'body';
     body.innerHTML =
-      '<div class="why">' + esc(p.note || '') + '</div>' +
-      '<table><tr><th>Order</th><th>Invoice</th><th style="text-align:right">Total</th>' +
+      '<div class="why">Grouped because ' +
+        esc(p.agree.join(' + ') || 'nothing') + ' matched' +
+        (p.day ? ', all ordered on ' + esc(p.day) : '') +
+        '. ' + esc(p.note || '') + '</div>' +
+      '<table><tr><th>Order</th><th>Placed</th><th>Invoice</th>' +
+      '<th style="text-align:right">Total</th>' +
       '<th style="text-align:right">Shipping</th><th>What happens</th></tr>' +
       p.invoices.map(function(inv){
         var ship = inv.shipping;
         var going = ship.filter(function(l){ return strip[l.lineId] !== undefined; });
         return '<tr><td>' + esc(inv.order) + '</td>' +
+          '<td>' + esc(clock(inv.placed)) + '</td>' +
           '<td>' + esc(inv.doc) + '</td>' +
           '<td class="num">' + money(inv.total) + '</td>' +
           '<td class="num">' +
@@ -826,7 +697,7 @@
             : (ship.length ? 'shipping stays' : 'nothing to take off')) + '</td></tr>';
       }).join('') +
       (p.missing.length
-        ? '<tr><td colspan="5" class="offnum">not in QuickBooks: ' +
+        ? '<tr><td colspan="6" class="offnum">not in QuickBooks: ' +
           p.missing.map(esc).join(', ') + '</td></tr>'
         : '') +
       '</table>' +

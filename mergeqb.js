@@ -107,6 +107,8 @@ export function planStrip(diff, shippingLines) {
 export function planGroup(entry, invoices) {
   const parts = entry.orders.map(o => ({
     order: o.order,
+    placed: o.at || null,                 // when the shop took the order
+    customer: o.customer || '',
     inv: invoices.get(o.digits) || null
   }));
 
@@ -133,9 +135,16 @@ export function planGroup(entry, invoices) {
     cell: entry.cell,
     cprNumber: entry.cprNumber,
     whole: !!entry.whole,
+    // what tied these orders together, so the grouping can be seen and not
+    // just taken on trust
+    agree: entry.agree || [],
+    day: (entry.orders[0] || {}).date || null,
     orders: entry.orders.map(o => o.order),
     invoices: here.map(p => ({
       order: p.order, doc: p.inv.doc, qbId: p.inv.id,
+      date: p.inv.date,
+      placed: p.placed,
+      customer: p.customer,
       total: p.inv.total, balance: p.inv.balance,
       shipping: p.inv.shipping.map(l => ({ lineId: l.id, item: l.item, amount: l.amount }))
     })),

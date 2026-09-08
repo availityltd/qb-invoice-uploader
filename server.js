@@ -59,7 +59,7 @@ import {
   startBackfill, stopBackfill, clearBackfill, backfillSnapshot
 } from './backfill.js';
 import {
-  readFile as readMergeFile, buildOrders, groupOrders, matchGroupsToSheet
+  readFile as readMergeFile, buildOrders, groupOrders, parsePasted, placeGroups
 } from './merges.js';
 import {
   invoicesWithLines, planGroup, remarkFor, stripShipping
@@ -2432,59 +2432,79 @@ app.get('/api/merge/csv', async (req, res) => {
   res.send('﻿' + rows.join('\r\n') + '\r\n');
 });
 
-// What it would take to receive these groups: what QuickBooks holds against
-// each one, what the sheet collected, and how many shipping charges stand
-// between the two. Nothing is changed here - the answer is read first.
-app.post('/api/merge/plan', async (req, res) => {
+// The CPR rows are pasted in as they sit in the sheet. Each one is looked up
+// among the Shopify orders, and where its customer ordered more than once that
+// day the whole group comes with it - one parcel, one COD. What QuickBooks
+// holds against that group is then set beside what the courier collected, and
+// the difference explained if it can be.
+app.post('/api/merge/paste', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-
-  const { sheetId, tab, courier, cpr, excel = false } = req.body || {};
-  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
 
   try {
     const st = mergeState(realmId);
     if (!st.groups.length) throw new Error('Find the groups first');
 
-    const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
-    const placed = await matchGroupsToSheet(st.groups, { sheetId, tab, excel, saved, cpr });
+    const parsed = parsePasted(req.body && req.body.text);
+    const placed = placeGroups(st.groups, parsed.rows);
 
-    if (!placed.matched.length) {
-      return res.json({ placed, plans: [], totals: placed.totals });
-    }
+    // a pasted row whose order is in none of the uploaded files cannot be
+    // spoken for either way, so it is counted and named rather than passed over
+    const known = new Set(st.orders.map(o => o.digits));
+    const strangers = parsed.rows.filter(r =>
+      !(r.invoices || []).some(n => known.has(cprDigits(n))));
 
-    // every order of every matched group, asked for in one go
+    // every order of every group that turned up, asked for in one go
     const wanted = [];
     placed.matched.forEach(m => m.orders.forEach(o => wanted.push(o.order)));
 
-    const token = await getAccessToken(realmId);
-    const invoices = await invoicesWithLines(realmId, token, wanted);
+    let invoices = new Map();
+    if (wanted.length) {
+      const token = await getAccessToken(realmId);
+      invoices = await invoicesWithLines(realmId, token, wanted);
+    }
 
-    const plans = placed.matched.map(m => planGroup(m, invoices));
-    plans.forEach(p => { p.remark = remarkFor(p); });
+    const plans = placed.matched.map(m => {
+      const plan = planGroup(m, invoices);
+      plan.remark = remarkFor(plan);
+      plan.manual = plan.state !== 'agrees' && plan.state !== 'fix';
+      return plan;
+    });
+
+    // pasted CPR by pasted CPR, the way the sheet is worked through
+    const byCpr = new Map();
+    const bucket = name => {
+      const key = name || '(no CPR number)';
+      if (!byCpr.has(key)) byCpr.set(key, { cprNumber: key, plans: [], twice: [], rows: 0 });
+      return byCpr.get(key);
+    };
+    parsed.cprs.forEach(c => { bucket(c.cprNumber).rows = c.rows; });
+    plans.forEach(p => bucket(p.cprNumber).plans.push(p));
+    placed.twice.forEach(t => bucket((t.rows[0] || {}).cprNumber).twice.push(t));
 
     const count = state => plans.filter(p => p.state === state).length;
 
-    st.plan = { at: Date.now(), sheetId, tab, excel, courier, cpr, plans };
+    st.plan = { at: Date.now(), plans, pasted: parsed.rows.length };
 
     res.setHeader('Cache-Control', 'no-store');
     res.json({
-      cpr: placed.cpr,
-      sheetRows: placed.sheetRows,
-      twice: placed.twice,
-      absent: placed.absent.length,
+      pastedRows: parsed.rows.length,
+      cprs: parsed.cprs,
+      strangers: {
+        count: strangers.length,
+        rows: strangers.slice(0, 40).map(r => ({ sheetRow: r.sheetRow, invoice: r.invoice }))
+      },
       totals: {
-        matched: plans.length,
+        groups: plans.length,
         agrees: count('agrees'),
         fix: count('fix'),
-        stuck: count('stuck'),
-        paid: count('paid'),
-        missing: count('missing'),
+        manual: plans.filter(p => p.manual).length,
         twice: placed.twice.length,
-        absent: placed.absent.length,
         shipping: plans.reduce((n, p) => n + ((p.strip || []).length), 0)
       },
-      plans
+      byCpr: Array.from(byCpr.values())
+        .filter(c => c.plans.length || c.twice.length)
+        .sort((a, b) => a.cprNumber.localeCompare(b.cprNumber))
     });
   } catch (e) {
     res.status(400).json({ error: e.message });
