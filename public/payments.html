@@ -140,6 +140,12 @@
   .paidbox table{width:100%;border-collapse:collapse;font-size:12px}
   .paidbox td{padding:5px 13px;border-bottom:1px solid var(--line)}
   .paidbox td.num{text-align:right;font-family:var(--mono)}
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs a:hover{color:var(--ink)}
+  .tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
 </style>
 </head>
 <body>
@@ -165,6 +171,11 @@
       </div>
 
       <div id="body" class="hide">
+
+        <div class="tabs">
+          <a class="on" href="/payments.html">Receive payments</a>
+          <a href="/merge.html">Merge payments</a>
+        </div>
 
         <div class="step" id="stepRoot">
           <h2>Drive folder</h2>

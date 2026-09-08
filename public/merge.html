@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merge payments</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .step.done{border-color:var(--qbo)}
+
+  .drop{border:1.5px dashed var(--line);border-radius:9px;padding:26px;text-align:center;
+    cursor:pointer;background:#fff;transition:.13s}
+  .drop:hover,.drop.over{border-color:var(--qbo);background:#F2FAF0}
+  .drop b{display:block;font-size:13.5px;margin-bottom:4px}
+  .drop small{font-size:12px;color:var(--muted)}
+
+  .files{margin-top:14px;display:grid;gap:10px}
+  .fcard{border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}
+  .fcard h4{margin:0;padding:9px 13px;font-size:12.5px;font-weight:600;
+    background:var(--tint);border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .fcard h4 span{font-weight:400;color:var(--muted);font-size:11.5px}
+  .fcard .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+    gap:10px;padding:12px 13px}
+  .fcard .cols label{display:block;font-size:10.5px;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+  .fcard .cols select{font-size:12px;padding:5px 7px}
+
+  .picks{display:flex;flex-wrap:wrap;gap:8px}
+  .pick{border:1px solid var(--line);background:#fff;border-radius:7px;padding:9px 14px;
+    cursor:pointer;font-size:13px;font-family:inherit;transition:.13s;text-align:left}
+  .pick:hover{border-color:var(--qbo)}
+  .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+
+  .crumb{font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--mono)}
+  .crumb b{color:var(--text)}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+  .tally > div{flex:1;min-width:118px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+
+  .strength{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
+  .strength button{border:1px solid var(--line);background:#fff;border-radius:7px;
+    padding:9px 14px;cursor:pointer;font-size:13px;font-family:inherit;text-align:left}
+  .strength button.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .strength button small{display:block;font-size:11px;color:var(--muted);font-weight:400;
+    margin-top:2px}
+
+  .grp{border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:9px;
+    overflow:hidden}
+  .grp .top{padding:9px 13px;display:flex;gap:12px;align-items:baseline;cursor:pointer;
+    font-size:12.5px}
+  .grp .top:hover{background:var(--tint)}
+  .grp .top b{font-weight:600}
+  .grp .top .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .grp .top .tag{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint)}
+  .grp .top .amt{font-family:var(--mono)}
+  .grp .body{border-top:1px solid var(--line);display:none}
+  .grp.open .body{display:block}
+  .grp table{width:100%;border-collapse:collapse;font-size:12px}
+  .grp th{text-align:left;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;padding:6px 13px;border-bottom:1px solid var(--line)}
+  .grp td{padding:5px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  .grp td.num{text-align:right;font-family:var(--mono)}
+
+  .lists{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+  .lists .box{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}
+  .lists .box h4{margin:0;padding:9px 13px;font-size:12px;font-weight:600;
+    background:var(--tint);border-bottom:1px solid var(--line)}
+  .lists .box .inner{max-height:280px;overflow:auto}
+  .lists table{width:100%;border-collapse:collapse;font-size:12px}
+  .lists td{padding:5px 13px;border-bottom:1px solid var(--line)}
+  .lists td.num{text-align:right;font-family:var(--mono)}
+  .lists .off{color:var(--warn);font-weight:600}
+
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs a:hover{color:var(--ink)}
+  .tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Merge payments</h1>
+        <div class="sub">Find the orders that went to one customer, then see how the courier wrote them in a CPR.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Everything on this page comes straight from your company file.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="tabs">
+          <a href="/payments.html">Receive payments</a>
+          <a class="on" href="/merge.html">Merge payments</a>
+        </div>
+
+        <div class="step" id="stepFiles">
+          <h2>Shopify orders</h2>
+          <div class="hint">The month's exports from your own computer - CSV or Excel, as many
+            files as you like. Nothing is saved to Drive or to QuickBooks.</div>
+
+          <div class="drop" id="drop">
+            <b>Drop the files here</b>
+            <small>or click to choose them</small>
+          </div>
+          <input type="file" id="fileIn" multiple accept=".csv,.xlsx,.xls,.xlsm"
+                 style="display:none">
+
+          <div class="files" id="fileList"></div>
+          <div class="row" id="fileActs" style="margin-top:12px;display:none">
+            <button class="solid" id="btnGroups">Find the groups</button>
+            <button id="btnClear">Start again</button>
+          </div>
+        </div>
+
+        <div class="step hide" id="stepGroups">
+          <h2>Same customer, more than one order</h2>
+          <div class="hint" id="grpHint"></div>
+
+          <div class="strength" id="strength"></div>
+          <div class="tally" id="grpTally"></div>
+          <div class="row" style="margin-bottom:12px">
+            <button id="btnCsv">Download the groups</button>
+            <button id="btnNext" class="solid">Match against a CPR sheet</button>
+          </div>
+          <div id="grpList"></div>
+          <div id="grpMore" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+        </div>
+
+        <div class="step hide" id="stepBrowse">
+          <h2>Pick the courier sheet</h2>
+          <div class="crumb" id="crumb"></div>
+          <div class="picks" id="browse"></div>
+        </div>
+
+        <div class="step hide" id="stepTabs">
+          <h2>Tab</h2>
+          <div class="hint" id="tabHint"></div>
+          <div class="picks" id="tabList"></div>
+        </div>
+
+        <div class="step hide" id="stepCpr">
+          <h2>CPRs in this sheet</h2>
+          <div class="hint" id="cprHint"></div>
+          <div class="picks" id="cprList"></div>
+        </div>
+
+        <div class="step hide" id="stepOut">
+          <h2>What the sheet says</h2>
+          <div class="hint" id="outHint"></div>
+          <div class="tally" id="outTally"></div>
+          <div class="lists" id="outLists"></div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    files: [], orders: 0,
+    minFields: 4, groups: [],
+    root: '', courier: '', trail: [],
+    sheetId: '', sheetName: '', excel: false,
+    tabs: [], tab: '', cprs: [], cpr: ''
+  };
+
+  var FIELDS = [
+    ['order',    'Order number'],
+    ['customer', 'Customer name'],
+    ['phone',    'Phone'],
+    ['email',    'Email'],
+    ['address',  'Address'],
+    ['address2', 'Address line 2'],
+    ['city',     'City'],
+    ['total',    'Order total'],
+    ['date',     'Order date']
+  ];
+
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
+
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+
+  function hideFrom(step){
+    var order = ['stepGroups','stepBrowse','stepTabs','stepCpr','stepOut'];
+    var i = order.indexOf(step);
+    if(i < 0) return;
+    order.slice(i).forEach(function(id){ $(id).classList.add('hide'); });
+  }
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    // an upload from earlier is still in the server's hands
+    get('/api/merge/state').then(function(d){
+      if(!d.loaded) return;
+      S.files = d.files;
+      S.orders = d.orders;
+      drawFiles();
+    }).catch(function(){});
+
+    get('/api/cpr/root').then(function(d){ S.root = d.folderId || ''; }).catch(function(){});
+  });
+
+  /* ---------- the files ---------- */
+
+  $('drop').addEventListener('click', function(){ $('fileIn').click(); });
+  $('fileIn').addEventListener('change', function(){
+    if(this.files && this.files.length) send(this.files);
+    this.value = '';
+  });
+  ['dragenter','dragover'].forEach(function(ev){
+    $('drop').addEventListener(ev, function(e){
+      e.preventDefault(); $('drop').classList.add('over');
+    });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    $('drop').addEventListener(ev, function(e){
+      e.preventDefault(); $('drop').classList.remove('over');
+    });
+  });
+  $('drop').addEventListener('drop', function(e){
+    if(e.dataTransfer && e.dataTransfer.files.length) send(e.dataTransfer.files);
+  });
+
+  function send(fileList){
+    var fd = new FormData();
+    Array.prototype.forEach.call(fileList, function(f){ fd.append('files', f); });
+
+    say('', 'Reading ' + fileList.length + ' file' + (fileList.length === 1 ? '' : 's') + '...');
+    fetch('/api/merge/upload', { method: 'POST', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error) throw new Error(d.error);
+        clearSay();
+        S.files = d.files;
+        S.orders = d.orders;
+        S.groups = [];
+        hideFrom('stepGroups');
+        drawFiles();
+      })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  function drawFiles(){
+    var box = $('fileList');
+    box.innerHTML = '';
+
+    S.files.forEach(function(f){
+      var card = document.createElement('div');
+      card.className = 'fcard';
+
+      var head = document.createElement('h4');
+      head.innerHTML = esc(f.name) +
+        '<span>' + nf(f.rows) + ' rows &middot; ' + nf(f.orders) + ' orders</span>';
+      card.appendChild(head);
+
+      var cols = document.createElement('div');
+      cols.className = 'cols';
+
+      FIELDS.forEach(function(fd){
+        var wrap = document.createElement('div');
+        var lab = document.createElement('label');
+        lab.textContent = fd[1];
+
+        var sel = document.createElement('select');
+        var none = document.createElement('option');
+        none.value = '-1'; none.textContent = '- none -';
+        sel.appendChild(none);
+
+        f.header.forEach(function(h, i){
+          var o = document.createElement('option');
+          o.value = String(i);
+          o.textContent = h || ('(column ' + (i + 1) + ')');
+          sel.appendChild(o);
+        });
+
+        sel.value = String(f.cols[fd[0]] === undefined ? -1 : f.cols[fd[0]]);
+        sel.addEventListener('change', function(){
+          var cols = {};
+          cols[fd[0]] = Number(sel.value);
+          post('/api/merge/columns', { file: f.name, cols: cols }).then(function(d){
+            S.files = d.files;
+            S.orders = d.orders;
+            S.groups = [];
+            hideFrom('stepGroups');
+            drawFiles();
+          }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+        });
+
+        wrap.appendChild(lab);
+        wrap.appendChild(sel);
+        cols.appendChild(wrap);
+      });
+
+      card.appendChild(cols);
+      box.appendChild(card);
+    });
+
+    $('fileActs').style.display = S.files.length ? 'flex' : 'none';
+    $('stepFiles').classList.toggle('done', !!S.files.length);
+  }
+
+  $('btnClear').addEventListener('click', function(){
+    post('/api/merge/clear').then(function(){
+      S.files = []; S.orders = 0; S.groups = [];
+      $('fileList').innerHTML = '';
+      $('fileActs').style.display = 'none';
+      $('stepFiles').classList.remove('done');
+      hideFrom('stepGroups');
+      clearSay();
+    });
+  });
+
+  /* ---------- grouping ---------- */
+
+  var STRENGTH = [
+    [4, 'All four match', 'Name, address, phone and email - the same on every order.'],
+    [3, 'At least three', 'One detail may differ - a typo in the address, say.'],
+    [2, 'At least two',   'Loosest. Two details agreeing is enough to call it one customer.']
+  ];
+
+  $('btnGroups').addEventListener('click', function(){ scan(S.minFields); });
+
+  function drawStrength(){
+    var box = $('strength');
+    box.innerHTML = '';
+    STRENGTH.forEach(function(s){
+      var b = document.createElement('button');
+      if(s[0] === S.minFields) b.className = 'on';
+      b.innerHTML = '<b>' + esc(s[1]) + '</b><small>' + esc(s[2]) + '</small>';
+      b.addEventListener('click', function(){ scan(s[0]); });
+      box.appendChild(b);
+    });
+  }
+
+  function scan(minFields){
+    S.minFields = minFields;
+    say('', 'Reading ' + nf(S.orders) + ' orders...');
+    $('btnGroups').disabled = true;
+
+    post('/api/merge/scan', { minFields: minFields }).then(function(d){
+      $('btnGroups').disabled = false;
+      clearSay();
+      S.groups = d.groups;
+      $('stepGroups').classList.remove('hide');
+      hideFrom('stepBrowse');
+      drawStrength();
+      drawGroups(d);
+    }).catch(function(e){
+      $('btnGroups').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function drawGroups(d){
+    var t = d.totals;
+    $('grpHint').innerHTML = nf(d.orders) + ' orders read &middot; ' +
+      nf(t.groups) + ' customer' + (t.groups === 1 ? '' : 's') +
+      ' with more than one order &middot; ' + nf(t.orders) + ' orders inside them';
+
+    $('grpTally').innerHTML =
+      '<div class="ok"><div class="n">' + nf(t.groups) + '</div>' +
+        '<div class="l">Groups</div></div>' +
+      '<div><div class="n">' + nf(t.orders) + '</div>' +
+        '<div class="l">Orders in groups</div></div>' +
+      t.byTier.map(function(x){
+        return '<div><div class="n">' + nf(x.groups) + '</div>' +
+               '<div class="l">' + x.fields + ' details agree</div></div>';
+      }).join('');
+
+    var box = $('grpList');
+    box.innerHTML = '';
+
+    var show = S.groups.slice(0, 300);
+    show.forEach(function(g){ box.appendChild(groupCard(g)); });
+
+    $('grpMore').textContent = S.groups.length > show.length
+      ? 'Showing the first ' + show.length + ' of ' + nf(S.groups.length) +
+        ' - download the file to see them all.'
+      : '';
+  }
+
+  function groupCard(g){
+    var el = document.createElement('div');
+    el.className = 'grp';
+
+    var top = document.createElement('div');
+    top.className = 'top';
+    top.innerHTML =
+      '<b>#' + g.id + '</b>' +
+      '<span class="who">' + esc(g.customer || '(no name)') +
+        (g.phone ? ' &middot; ' + esc(g.phone) : '') + '</span>' +
+      '<span class="tag">' + g.orders.length + ' orders &middot; ' +
+        esc(g.agree.join(' + ') || 'nothing') + '</span>' +
+      '<span class="amt">' + money(g.total) + '</span>';
+    top.addEventListener('click', function(){ el.classList.toggle('open'); });
+    el.appendChild(top);
+
+    var body = document.createElement('div');
+    body.className = 'body';
+    body.innerHTML =
+      '<table><tr><th>Order</th><th>Customer</th><th>Phone</th><th>Address</th>' +
+      '<th style="text-align:right">Total</th><th>Date</th></tr>' +
+      g.orders.map(function(o){
+        return '<tr><td>' + esc(o.order) + '</td><td>' + esc(o.customer) + '</td>' +
+               '<td>' + esc(o.phone) + '</td><td>' + esc(o.address) + '</td>' +
+               '<td class="num">' + money(o.total) + '</td>' +
+               '<td>' + esc(o.date || '') + '</td></tr>';
+      }).join('') + '</table>';
+    el.appendChild(body);
+
+    return el;
+  }
+
+  $('btnCsv').addEventListener('click', function(){ location.href = '/api/merge/csv'; });
+
+  $('btnNext').addEventListener('click', function(){
+    if(!S.groups.length) return say('bad', '<b>No groups to match yet.</b>');
+    if(!S.root) return say('bad',
+      '<b>No Drive folder set.</b> Set it once on the Receive payments page.');
+    openCouriers();
+  });
+
+  /* ---------- browsing the courier folders ---------- */
+
+  function drawCrumb(){
+    var bits = ['Root'];
+    S.trail.forEach(function(t){ bits.push(t.name); });
+    $('crumb').innerHTML = bits.map(function(b, i){
+      return i === bits.length - 1 ? '<b>' + esc(b) + '</b>' : esc(b);
+    }).join(' / ');
+  }
+
+  function openCouriers(){
+    hideFrom('stepBrowse');
+    S.trail = [];
+    $('stepBrowse').classList.remove('hide');
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading Drive...</span>';
+
+    get('/api/cpr/couriers').then(function(d){
+      paint(d.folders || [], [], function(f){ S.courier = f.name; openFolder(f); });
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function openFolder(folder){
+    hideFrom('stepTabs');
+    S.trail.push(folder);
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading...</span>';
+
+    get('/api/cpr/folder?id=' + encodeURIComponent(folder.id)).then(function(d){
+      paint(d.folders || [], d.sheets || [], openFolder, openSheet);
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function goBack(){
+    S.trail.pop();
+    if(!S.trail.length){ openCouriers(); return; }
+    var last = S.trail.pop();
+    openFolder(last);
+  }
+
+  function paint(folders, sheets, onFolder, onSheet){
+    var box = $('browse');
+    box.innerHTML = '';
+
+    if(S.trail.length){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      b.textContent = '← Back';
+      b.addEventListener('click', goBack);
+      box.appendChild(b);
+    }
+
+    if(!folders.length && !sheets.length){
+      var none = document.createElement('span');
+      none.style.cssText = 'font-size:13px;color:var(--muted)';
+      none.textContent = 'Nothing in there.';
+      box.appendChild(none);
+    }
+
+    folders.forEach(function(f){
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.textContent = '\u{1F4C1} ' + f.name;
+      e.addEventListener('click', function(){ onFolder(f); });
+      box.appendChild(e);
+    });
+
+    sheets.forEach(function(f){
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+        (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
+      e.addEventListener('click', function(){
+        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+        e.classList.add('on');
+        onSheet(f);
+      });
+      box.appendChild(e);
+    });
+  }
+
+  /* ---------- the sheet, its tabs, its CPRs ---------- */
+
+  function openSheet(file, tab){
+    hideFrom('stepTabs');
+    S.sheetId = file.id;
+    S.sheetName = file.name;
+    S.excel = !!file.excel;
+    say('', 'Reading the sheet...');
+
+    var u = '/api/cpr/open?sheetId=' + encodeURIComponent(file.id) +
+            '&courier=' + encodeURIComponent(S.courier) +
+            (tab ? '&tab=' + encodeURIComponent(tab) : '') +
+            (S.excel ? '&excel=1&inspect=0' : '');
+
+    get(u).then(function(d){
+      clearSay();
+      S.tabs = d.tabs || [];
+      S.tab = d.tab;
+      S.cprs = d.groups || [];
+
+      if(d.cols.invoice < 0){
+        say('bad', '<b>No order number column found in "' + esc(d.tab) + '".</b> ' +
+          'Open Receive payments once for ' + esc(S.courier) +
+          ' and set the columns there - they are remembered.');
+        return;
+      }
+
+      drawTabs();
+      drawCprs();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  function drawTabs(){
+    if(S.tabs.length < 2){ $('stepTabs').classList.add('hide'); return; }
+
+    $('stepTabs').classList.remove('hide');
+    $('tabHint').textContent = 'This file has ' + S.tabs.length + ' tabs.';
+
+    var box = $('tabList');
+    box.innerHTML = '';
+    S.tabs.forEach(function(t){
+      var b = document.createElement('button');
+      b.className = 'pick' + (t.title === S.tab ? ' on' : '');
+      b.textContent = t.title;
+      b.addEventListener('click', function(){
+        openSheet({ id: S.sheetId, name: S.sheetName, excel: S.excel }, t.title);
+      });
+      box.appendChild(b);
+    });
+  }
+
+  function drawCprs(){
+    $('stepCpr').classList.remove('hide');
+    $('stepOut').classList.add('hide');
+    $('cprHint').textContent = S.cprs.length + ' CPR' + (S.cprs.length === 1 ? '' : 's') +
+      ' in "' + S.tab + '". Pick the one to check the groups against.';
+
+    var box = $('cprList');
+    box.innerHTML = '';
+
+    var all = document.createElement('button');
+    all.className = 'pick';
+    all.innerHTML = 'Whole tab<small>every CPR at once</small>';
+    all.addEventListener('click', function(){ pickCpr(all, ''); });
+    box.appendChild(all);
+
+    S.cprs.forEach(function(g){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      b.innerHTML = esc(g.cprNumber || '(no CPR number)') +
+        '<small>' + (g.cprDate ? esc(g.cprDate) + ' &middot; ' : '') +
+        g.rows + ' rows &middot; ' + money(g.amount) + '</small>';
+      b.addEventListener('click', function(){ pickCpr(b, g.cprNumber || '(no CPR number)'); });
+      box.appendChild(b);
+    });
+  }
+
+  function pickCpr(btn, cpr){
+    Array.prototype.forEach.call($('cprList').children, function(c){ c.classList.remove('on'); });
+    btn.classList.add('on');
+    S.cpr = cpr;
+
+    say('', 'Looking the groups up in the sheet...');
+    post('/api/merge/cpr', {
+      sheetId: S.sheetId, tab: S.tab, excel: S.excel,
+      courier: S.courier, cpr: cpr
+    }).then(function(d){
+      clearSay();
+      drawOut(d);
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  /* ---------- the answer ---------- */
+
+  function drawOut(d){
+    $('stepOut').classList.remove('hide');
+    var t = d.totals;
+
+    $('outHint').innerHTML =
+      esc(S.courier) + ' &middot; ' + esc(S.sheetName) + ' &middot; ' +
+      (d.cpr ? 'CPR ' + esc(d.cpr) : 'the whole tab') + ' &middot; ' +
+      nf(d.sheetRows) + ' rows read';
+
+    $('outTally').innerHTML =
+      '<div class="ok"><div class="n">' + nf(t.merged) + '</div>' +
+        '<div class="l">Already in one cell</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.spread) + '</div>' +
+        '<div class="l">Spread over rows</div></div>' +
+      '<div class="warn"><div class="n">' + nf(t.partial) + '</div>' +
+        '<div class="l">Only partly here</div></div>' +
+      '<div><div class="n">' + nf(t.absent) + '</div>' +
+        '<div class="l">Not in this CPR</div></div>';
+
+    var lists = $('outLists');
+    lists.innerHTML = '';
+
+    box(lists, 'Spread over separate rows (' + d.spread.length + ')', d.spread,
+      'These went to one customer but the courier billed them row by row. ' +
+      'Nothing to merge in QuickBooks - each row pays on its own.');
+
+    box(lists, 'Written in one cell (' + d.merged.length + ')', d.merged,
+      'The courier merged these. Receive payments adds their QuickBooks balances up ' +
+      'and pays them together.');
+
+    box(lists, 'Only partly in this CPR (' + d.partial.length + ')', d.partial,
+      'Some of the group is here and some is not - the rest may be in another CPR.');
+
+    if(!d.spread.length && !d.merged.length && !d.partial.length){
+      lists.innerHTML = '<div style="font-size:13px;color:var(--muted)">' +
+        'None of the groups turned up in this CPR.</div>';
+    }
+  }
+
+  function box(parent, title, rows, hint){
+    if(!rows.length) return;
+
+    var el = document.createElement('div');
+    el.className = 'box';
+
+    var body = rows.map(function(r){
+      var off = r.sheetAmount > 0 &&
+                Math.abs(r.sheetAmount - r.shopifyTotal) > 10;
+      return '<tr>' +
+        '<td>#' + r.id + ' ' + esc(r.customer || '(no name)') +
+          '<br><span style="font-size:11px;color:var(--muted)">' +
+          r.found.map(function(f){ return esc(f.order) + ' (row ' + f.sheetRow + ')'; })
+            .join(', ') +
+          (r.missing.length
+            ? ' &middot; missing: ' + r.missing.map(esc).join(', ') : '') +
+          '</span></td>' +
+        '<td class="num">' + money(r.shopifyTotal) + '</td>' +
+        '<td class="num' + (off ? ' off' : '') + '">' + money(r.sheetAmount) + '</td>' +
+        '</tr>';
+    }).join('');
+
+    el.innerHTML = '<h4>' + esc(title) + '</h4>' +
+      '<div style="padding:8px 13px;font-size:11.5px;color:var(--muted);' +
+        'border-bottom:1px solid var(--line)">' + esc(hint) + '</div>' +
+      '<div class="inner"><table>' +
+      '<tr><td style="font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;' +
+        'color:var(--faint)">Group</td>' +
+      '<td class="num" style="font-size:10.5px;letter-spacing:.07em;' +
+        'text-transform:uppercase;color:var(--faint)">Shopify</td>' +
+      '<td class="num" style="font-size:10.5px;letter-spacing:.07em;' +
+        'text-transform:uppercase;color:var(--faint)">Sheet</td></tr>' +
+      body + '</table></div>';
+
+    parent.appendChild(el);
+  }
+})();
+</script>
+</body>
+</html>

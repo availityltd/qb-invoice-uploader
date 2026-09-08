@@ -58,12 +58,20 @@ import {
 import {
   startBackfill, stopBackfill, clearBackfill, backfillSnapshot
 } from './backfill.js';
+import {
+  readFile as readMergeFile, buildOrders, groupOrders, matchGroupsToSheet
+} from './merges.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
 import {
   dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy, eachOrder
 } from './dashdata.js';
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+// a whole month of Shopify orders, several files at once, runs bigger than that
+const bulkUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 80 * 1024 * 1024, files: 15 }
+});
 
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
@@ -2252,6 +2260,177 @@ app.get('/api/find/file', async (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${name}.csv"`);
   res.send('\uFEFF' + rows.join('\r\n') + '\r\n');
+});
+
+// ==================== Merged parcels ====================
+// A month of Shopify exports, read together to find the orders that went to the
+// same person. The courier ships those as one parcel, so their numbers land in
+// one cell of the CPR sheet - and this is where that expectation is checked.
+//
+// The uploaded files stay in memory for the company, so changing a column or
+// the matching strength does not mean uploading again.
+const mergeStore = new Map();          // realmId -> { files, orders, groups, at }
+
+function mergeState(realmId) {
+  const st = mergeStore.get(realmId);
+  if (!st) throw new Error('Upload the Shopify files first');
+  return st;
+}
+
+function mergeFilesReport(st) {
+  return st.files.map(f => ({
+    name: f.name,
+    header: f.header,
+    cols: f.cols,
+    rows: f.rows.length,
+    orders: st.orders.filter(o => o.file === f.name).length
+  }));
+}
+
+app.post('/api/merge/upload', bulkUpload.array('files', 15), async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const list = req.files || [];
+  if (!list.length) return res.status(400).json({ error: 'No files uploaded' });
+
+  try {
+    const files = list.map(f => readMergeFile(f.originalname, f.buffer));
+    const orders = buildOrders(files);
+    if (!orders.length) {
+      return res.status(400).json({
+        error: 'No orders found. Check that the files have an order number column.'
+      });
+    }
+    mergeStore.set(realmId, { files, orders, groups: [], at: Date.now() });
+    res.json({ files: mergeFilesReport(mergeStore.get(realmId)), orders: orders.length });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// what is still in memory, so a page reload does not lose the upload
+app.get('/api/merge/state', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  res.setHeader('Cache-Control', 'no-store');
+  const st = mergeStore.get(realmId);
+  if (!st) return res.json({ loaded: false });
+  res.json({
+    loaded: true,
+    files: mergeFilesReport(st),
+    orders: st.orders.length,
+    groups: st.groups.length,
+    minFields: st.minFields || 0
+  });
+});
+
+// the reader guessed a column wrong - put it right and fold the rows again
+app.post('/api/merge/columns', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { file, cols } = req.body || {};
+  try {
+    const st = mergeState(realmId);
+    const f = st.files.find(x => x.name === file);
+    if (!f) return res.status(400).json({ error: 'No such file' });
+
+    Object.keys(f.cols).forEach(k => {
+      if (cols && cols[k] !== undefined) f.cols[k] = Number(cols[k]);
+    });
+    st.orders = buildOrders(st.files);
+    st.groups = [];
+    res.json({ files: mergeFilesReport(st), orders: st.orders.length });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/merge/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = mergeState(realmId);
+    const minFields = Number(req.body && req.body.minFields) || 4;
+    st.groups = groupOrders(st.orders, minFields);
+    st.minFields = minFields;
+
+    const parcels = st.groups.reduce((n, g) => n + g.orders.length, 0);
+    res.json({
+      minFields,
+      orders: st.orders.length,
+      totals: {
+        groups: st.groups.length,
+        orders: parcels,
+        byTier: [4, 3, 2].map(t => ({
+          fields: t,
+          groups: st.groups.filter(g => g.agreeCount === t).length
+        }))
+      },
+      groups: st.groups
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// the groups as a file, one line per order
+app.get('/api/merge/csv', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  let st;
+  try { st = mergeState(realmId); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const cell = v => {
+    const s = String(v === null || v === undefined ? '' : v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const line = a => a.map(cell).join(',');
+
+  const rows = [line(['Group', 'Fields agreed', 'Matched on', 'Orders in group',
+                      'Order', 'Customer', 'Phone', 'Email', 'Address', 'Total', 'Date', 'File'])];
+  st.groups.forEach(g => {
+    g.orders.forEach(o => {
+      rows.push(line([g.id, g.agreeCount, g.agree.join(' + '), g.orders.length,
+                      o.order, o.customer, o.phone, o.email, o.address, o.total, o.date, o.file]));
+    });
+  });
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="merged-parcels.csv"');
+  res.send('﻿' + rows.join('\r\n') + '\r\n');
+});
+
+// hold the groups up against one courier CPR
+app.post('/api/merge/cpr', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { sheetId, tab, courier, cpr, excel = false } = req.body || {};
+  if (!sheetId || !tab) return res.status(400).json({ error: 'sheetId and tab required' });
+
+  try {
+    const st = mergeState(realmId);
+    if (!st.groups.length) throw new Error('Find the groups first');
+
+    const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await matchGroupsToSheet(st.groups, { sheetId, tab, excel, saved, cpr }));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/merge/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  mergeStore.delete(realmId);
+  res.json({ ok: true });
 });
 
 // Only asks Google what it has. Nothing is changed.
