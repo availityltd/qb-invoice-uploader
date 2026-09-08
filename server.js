@@ -2287,7 +2287,22 @@ function mergeFilesReport(st) {
   }));
 }
 
-app.post('/api/merge/upload', bulkUpload.array('files', 15), async (req, res) => {
+// multer throws before the handler is reached - a file over the limit, too many
+// files - and express would answer that with a page of HTML the browser cannot
+// read. This says it in the same shape as every other answer here.
+function takeMergeFiles(req, res, next) {
+  bulkUpload.array('files', 15)(req, res, err => {
+    if (!err) return next();
+    const msg = err.code === 'LIMIT_FILE_SIZE'
+      ? 'That file is over 80 MB. Export the month in smaller pieces and drop them together.'
+      : err.code === 'LIMIT_FILE_COUNT'
+        ? 'Fifteen files at a time is the most it will take.'
+        : err.message;
+    res.status(400).json({ error: msg });
+  });
+}
+
+app.post('/api/merge/upload', takeMergeFiles, async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 

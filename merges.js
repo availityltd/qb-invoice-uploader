@@ -101,16 +101,50 @@ function findHeaderRow(grid) {
 
 const MAX_ROWS = 300000;
 
+// A month of Shopify orders is a long file, and building a whole workbook out
+// of it costs several times what the text itself does. A CSV is read straight
+// through instead, quote by quote.
+function readCsv(buffer) {
+  const text = buffer.toString('utf8').replace(/^﻿/, '');
+  const rows = [];
+  let row = [], field = '', quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (quoted) {
+      if (ch !== '"') { field += ch; continue; }
+      if (text[i + 1] === '"') { field += '"'; i++; continue; }
+      quoted = false;
+      continue;
+    }
+
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    field += ch;
+  }
+
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function gridsOf(name, buffer) {
+  if (/\.csv$/i.test(name)) return [readCsv(buffer)];
+
+  const wb = XLSX.read(buffer, { type: 'buffer', raw: false, cellDates: false });
+  return wb.SheetNames.map(sheetName => XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
+    header: 1, raw: false, defval: '', blankrows: false
+  }));
+}
+
 // one uploaded file - its header and its lines, every tab in it stacked up
 export function readFile(name, buffer) {
-  const wb = XLSX.read(buffer, { type: 'buffer', raw: false, cellDates: false });
   let header = [];
   const rows = [];
 
-  for (const sheetName of wb.SheetNames) {
-    const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
-      header: 1, raw: false, defval: '', blankrows: false
-    });
+  for (const grid of gridsOf(name, buffer)) {
     if (!grid.length) continue;
 
     const hRow = findHeaderRow(grid);

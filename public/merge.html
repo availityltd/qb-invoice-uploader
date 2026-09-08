@@ -234,17 +234,35 @@
   }
   function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
 
-  function get(url){
-    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); })
-      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  // an upload that is refused on the way in comes back with no body at all, so
+  // the reply is read as text first and the status is what gets reported
+  function body(r){
+    return r.text().then(function(t){
+      if(!t){
+        if(r.status === 413) throw new Error('The files were too big for the server to accept. ' +
+          'Split the month into smaller exports and drop them again.');
+        throw new Error('The server sent nothing back (' + r.status + ').');
+      }
+      var d;
+      try { d = JSON.parse(t); }
+      catch(e){
+        throw new Error('The server did not answer with data (' + r.status + '): ' +
+          t.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140));
+      }
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
   }
-  function post(url, body){
+
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(body);
+  }
+  function post(url, data){
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    }).then(function(r){ return r.json(); })
-      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+      body: JSON.stringify(data || {})
+    }).then(body);
   }
 
   function hideFrom(step){
@@ -298,9 +316,8 @@
 
     say('', 'Reading ' + fileList.length + ' file' + (fileList.length === 1 ? '' : 's') + '...');
     fetch('/api/merge/upload', { method: 'POST', body: fd })
-      .then(function(r){ return r.json(); })
+      .then(body)
       .then(function(d){
-        if(d.error) throw new Error(d.error);
         clearSay();
         S.files = d.files;
         S.orders = d.orders;

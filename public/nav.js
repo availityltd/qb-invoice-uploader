@@ -11,7 +11,6 @@
     ]},
     { group: 'Payments', items: [
       { href:'/payments.html', label:'Receive payments', icon:'cash' },
-      { href:'/merge.html',    label:'Merge payments',   icon:'merge' },
       { href:'/advance.html',  label:'Advance payments', icon:'wallet' },
       { href:'/charges.html',  label:'Delivery charges', icon:'receipt' },
             { href:'/find.html',     label:'Find orders',      icon:'search' },
@@ -33,9 +32,7 @@
     ban:    '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14h2"/>',
     receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>',
-        search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
-    merge:  '<path d="M6 3v6a6 6 0 006 6h6"/><path d="M18 3v6a6 6 0 01-6 6"/>' +
-            '<path d="M15 18l3 3-3 3" transform="translate(0,-6)"/>'
+        search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>'
   };
 
   function svg(name){
@@ -61,7 +58,9 @@
   ITEMS.forEach(function(sec){
     if(sec.group) html += '<div class="group">' + sec.group + '</div>';
     sec.items.forEach(function(it){
-      var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0);
+      // Merge payments is a tab of Receive payments, so that is what lights up
+      var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0) ||
+               (it.href === '/payments.html' && path === '/merge.html');
       html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') +
               (it.tree ? ' id="couriersLink"' : '') + '>' +
               svg(it.icon) + it.label +
