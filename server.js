@@ -2500,12 +2500,13 @@ app.post('/api/merge/paste', async (req, res) => {
 
     const count = state => plans.filter(p => p.state === state).length;
 
-    st.plan = { at: Date.now(), plans, pasted: parsed.rows.length };
+    st.plan = { at: Date.now(), plans, rows: parsed.rows };
 
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       pastedRows: parsed.rows.length,
       cprs: parsed.cprs,
+      canWrite: true,
       strangers: {
         count: strangers.length,
         rows: strangers.slice(0, 40).map(r => ({ sheetRow: r.sheetRow, invoice: r.invoice }))
@@ -2525,6 +2526,148 @@ app.post('/api/merge/paste', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// The two columns to paste back: the order cell with the whole group written
+// into it, and the remark saying why. They come out in the order the rows were
+// pasted in, one line each, so the block drops straight back over the column
+// it came from.
+function mergeColumns(st) {
+  if (!st.plan || !st.plan.rows) throw new Error('Match the pasted rows first');
+
+  const byRow = new Map();
+  st.plan.plans.forEach(p => byRow.set(p.sheetRow, p));
+
+  return st.plan.rows.map(r => {
+    const p = byRow.get(r.sheetRow);
+    // only a group that adds up is worth writing - the rest stay as they are
+    const merge = p && (p.state === 'fix' || p.state === 'agrees') && p.orders.length > 1;
+    return {
+      sheetRow: r.sheetRow,
+      cell: merge ? p.orders.join(', ') : r.invoice,
+      was: r.invoice,
+      changed: !!merge,
+      remark: p ? (p.remark || p.note || '') : ''
+    };
+  });
+}
+
+app.get('/api/merge/columns-back', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const lines = mergeColumns(mergeState(realmId));
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      changed: lines.filter(l => l.changed).length,
+      rows: lines.length,
+      orders: lines.map(l => l.cell).join('\n'),
+      remarks: lines.map(l => l.remark).join('\n'),
+      lines
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Taking the shipping charges off in QuickBooks. One invoice at a time, in the
+// background, because a hundred of them is a hundred round trips - and the
+// plan it works from is the one already on screen.
+async function runStrip(realmId, job) {
+  const token = await getAccessToken(realmId);
+
+  for (const p of job.plans) {
+    if (job.stop) break;
+
+    // every line to come off this group, gathered per invoice
+    const perInvoice = new Map();
+    (p.strip || []).forEach(l => {
+      if (!perInvoice.has(l.invoiceId)) perInvoice.set(l.invoiceId, { doc: l.doc, lines: [] });
+      perInvoice.get(l.invoiceId).lines.push(l.lineId);
+    });
+
+    for (const [invoiceId, what] of perInvoice) {
+      if (job.stop) break;
+      try {
+        const out = await stripShipping(realmId, token, invoiceId, what.lines);
+        job.done++;
+        job.log.push({ ok: true, doc: out.doc || what.doc, total: out.total });
+      } catch (e) {
+        job.done++;
+        job.failed++;
+        job.log.push({ ok: false, doc: what.doc, msg: e.message });
+      }
+    }
+
+    if (!job.failed) p.stripped = true;
+  }
+
+  job.running = false;
+  job.finished = Date.now();
+}
+
+app.post('/api/merge/strip', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = mergeState(realmId);
+    if (!st.plan || !st.plan.plans.length) throw new Error('Match the pasted rows first');
+    if (st.strip && st.strip.running) throw new Error('That is already running');
+
+    const only = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(Number) : null;
+    const plans = st.plan.plans.filter(p =>
+      p.state === 'fix' && !p.stripped && (!only || only.includes(p.id)));
+
+    if (!plans.length) throw new Error('Nothing is waiting to have shipping taken off');
+
+    const job = {
+      running: true, stop: false, done: 0, failed: 0,
+      total: plans.reduce((n, p) => n + new Set((p.strip || [])
+        .map(l => l.invoiceId)).size, 0),
+      groups: plans.length,
+      log: [], started: Date.now(), plans
+    };
+    st.strip = job;
+
+    runStrip(realmId, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+    });
+
+    res.json({ ok: true, groups: job.groups, invoices: job.total });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/merge/strip-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const st = mergeStore.get(realmId);
+  const job = st && st.strip;
+  res.setHeader('Cache-Control', 'no-store');
+  if (!job) return res.json({ running: false, done: 0, total: 0, log: [] });
+
+  res.json({
+    running: job.running,
+    done: job.done,
+    failed: job.failed,
+    total: job.total,
+    groups: job.groups,
+    error: job.error || null,
+    log: job.log.slice(-60)
+  });
+});
+
+app.post('/api/merge/strip-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = mergeStore.get(realmId);
+  if (st && st.strip) st.strip.stop = true;
+  res.json({ ok: true });
 });
 
 app.post('/api/merge/clear', async (req, res) => {

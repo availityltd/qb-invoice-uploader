@@ -100,6 +100,23 @@
     border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
   .cprhead small{font-weight:400;font-size:11.5px;color:var(--muted)}
 
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cols2 label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+  .cols2 label span{text-transform:none;letter-spacing:0;color:var(--muted)}
+  .cols2 textarea{min-height:190px}
+  .cols2 button{margin-top:8px;font-size:12px;padding:6px 13px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
+  .cols2 button:hover{border-color:var(--qbo)}
+  @media (max-width:800px){ .cols2{grid-template-columns:1fr} }
+
+  .prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:14px 0 8px}
+  .prog i{display:block;height:100%;width:0;background:var(--qbo);transition:width .3s}
+  .paylog{background:#0F2E24;color:#CFE8D8;border-radius:8px;padding:12px 15px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.7;max-height:200px;
+    overflow:auto}
+  .paylog .fail{color:#FF9C9C}
+
   .grpbox{margin-bottom:18px}
   .grpbox h4{margin:0 0 8px;font-size:12.5px;font-weight:600;display:flex;
     align-items:center;gap:8px}
@@ -200,6 +217,41 @@
           <div class="lists" id="outLists"></div>
         </div>
 
+        <div class="step hide" id="stepDo">
+          <h2>Put it right</h2>
+          <div class="hint" id="doHint"></div>
+
+          <div class="row">
+            <button class="solid" id="btnStrip">Take the shipping off in QuickBooks</button>
+            <button id="btnStripStop" style="display:none;background:var(--neg);color:#fff">Stop</button>
+            <span id="stripNote" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+          <div id="stripRun" class="hide">
+            <div class="prog"><i id="stripBar"></i></div>
+            <div class="paylog" id="stripLog"></div>
+          </div>
+
+          <div id="backBox" style="margin-top:18px">
+            <div style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-bottom:10px">
+              Copy each block and paste it back into the sheet, over the rows you copied
+              from. The first goes into the ORDER_REF_NUMBER column, the second into a new
+              Remarks column beside it. Then Receive payments pays each cell as one parcel.
+            </div>
+            <div class="cols2">
+              <div>
+                <label>ORDER_REF_NUMBER <span id="backCount"></span></label>
+                <textarea id="backOrders" readonly spellcheck="false"></textarea>
+                <button id="btnCopyOrders">Copy this column</button>
+              </div>
+              <div>
+                <label>Remarks</label>
+                <textarea id="backRemarks" readonly spellcheck="false"></textarea>
+                <button id="btnCopyRemarks">Copy this column</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="stat" id="statBox"></div>
       </div>
     </div>
@@ -287,7 +339,7 @@
   }
 
   function hideFrom(step){
-    var order = ['stepGroups','stepPaste','stepOut'];
+    var order = ['stepGroups','stepPaste','stepOut','stepDo'];
     var i = order.indexOf(step);
     if(i < 0) return;
     order.slice(i).forEach(function(id){ $(id).classList.add('hide'); });
@@ -569,6 +621,99 @@
     });
   });
 
+  /* ---------- putting it right ---------- */
+
+  function drawDo(d){
+    var t = d.totals;
+    $('stepDo').classList.remove('hide');
+
+    $('doHint').innerHTML =
+      (t.fix
+        ? nf(t.shipping) + ' shipping charge' + (t.shipping === 1 ? '' : 's') +
+          ' to come off, across ' + nf(t.fix) + ' group' + (t.fix === 1 ? '' : 's') + '. '
+        : 'No shipping charges need to come off. ') +
+      (t.manual ? nf(t.manual) + ' group' + (t.manual === 1 ? '' : 's') +
+        ' need a manual check and are left alone. ' : '') +
+      'Nothing has been changed yet.';
+
+    $('btnStrip').disabled = !t.fix;
+    loadBack();
+  }
+
+  function loadBack(){
+    get('/api/merge/columns-back').then(function(d){
+      $('backOrders').value = d.orders;
+      $('backRemarks').value = d.remarks;
+      $('backCount').textContent = '- ' + nf(d.changed) + ' of ' + nf(d.rows) +
+        ' rows get a group written in';
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  function copyBox(id, btn){
+    var box = $(id);
+    box.select();
+    box.setSelectionRange(0, box.value.length);
+    try { document.execCommand('copy'); } catch(e){}
+    var was = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(function(){ btn.textContent = was; }, 1400);
+  }
+
+  $('btnCopyOrders').addEventListener('click', function(){
+    copyBox('backOrders', $('btnCopyOrders'));
+  });
+  $('btnCopyRemarks').addEventListener('click', function(){
+    copyBox('backRemarks', $('btnCopyRemarks'));
+  });
+
+  $('btnStrip').addEventListener('click', function(){
+    $('btnStrip').disabled = true;
+    post('/api/merge/strip', {}).then(function(d){
+      $('stripRun').classList.remove('hide');
+      $('btnStripStop').style.display = '';
+      $('stripNote').textContent = d.invoices + ' invoices in ' + d.groups + ' groups...';
+      pollStrip();
+    }).catch(function(e){
+      $('btnStrip').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  $('btnStripStop').addEventListener('click', function(){
+    post('/api/merge/strip-stop', {}).catch(function(){});
+  });
+
+  function pollStrip(){
+    get('/api/merge/strip-status').then(function(j){
+      $('stripBar').style.width = j.total ? (100 * j.done / j.total) + '%' : '0';
+      $('stripNote').textContent = j.done + ' of ' + j.total + ' invoices' +
+        (j.failed ? ' - ' + j.failed + ' would not go through' : '');
+
+      $('stripLog').innerHTML = j.log.map(function(l){
+        return l.ok
+          ? esc(l.doc) + ' - shipping off, now ' + money(l.total)
+          : '<span class="fail">' + esc(l.doc) + ' - ' + esc(l.msg) + '</span>';
+      }).join('<br>');
+      $('stripLog').scrollTop = $('stripLog').scrollHeight;
+
+      if(j.running){ setTimeout(pollStrip, 1200); return; }
+
+      $('btnStripStop').style.display = 'none';
+      $('btnStrip').disabled = false;
+      if(j.error) say('bad', '<b>' + esc(j.error) + '</b>');
+      else if(!j.failed && j.total){
+        say('ok', '<b>Done.</b> The shipping is off ' + j.done +
+          ' invoices, so those groups now come to what the CPR collected. ' +
+          'Paste the columns back into the sheet, then receive them on the ' +
+          '<a href="/payments.html">Receive payments</a> page - a cell with several ' +
+          'numbers in it is paid as one parcel.');
+      }
+    }).catch(function(e){
+      $('btnStrip').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
   /* ---------- the answer ---------- */
 
   var STATE = {
@@ -612,6 +757,8 @@
     var out = $('outLists');
     out.innerHTML = '';
     out.style.display = 'block';
+
+    if(d.canWrite) drawDo(d);
 
     if(!d.byCpr.length){
       out.innerHTML = '<div style="font-size:13px;color:var(--muted)">' +

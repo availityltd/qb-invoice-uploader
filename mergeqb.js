@@ -223,6 +223,11 @@ export async function stripShipping(realmId, token, invoiceId, lineIds) {
   if (!keep.length) throw new Error('That would leave ' + (inv.DocNumber || invoiceId) + ' empty');
 
   const payload = Object.assign({}, inv, { Line: keep, sparse: false });
+  // the totals are what the lines add up to - sending the old ones back is how
+  // an update comes out at the amount it started with, or is refused outright
+  delete payload.TotalAmt;
+  delete payload.HomeTotalAmt;
+  delete payload.Balance;
 
   const r = await fetch(`${API}/v3/company/${realmId}/invoice?minorversion=70`, {
     method: 'POST',
