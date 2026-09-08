@@ -78,11 +78,20 @@ async function run(realmId, job) {
   const ref = String(cprNumber || '').trim().slice(0, 21);
   const paidRows = [];
 
+  // a merged cell holds several invoice numbers, and the row is only paid when
+  // their balances add up to the sheet amount - so every one of them gets its
+  // own line, not just the first
+  const openParts = m => (Array.isArray(m.lines) && m.lines.length)
+    ? m.lines
+    : [{ qbId: m.qbId, qbDoc: m.qbDoc, amount: m.qbBalance }];
+
   // sends one payment; if QB chokes on the size, halves it and tries again
   async function sendPart(custId, lines, label, depth) {
     if (job.stop) return;
 
-    const amount = lines.reduce((s, m) => s + m.qbBalance, 0);
+    // add up the lines as QuickBooks will see them, so the total agrees to the cent
+    const amount = lines.reduce(
+      (s, m) => s + openParts(m).reduce((t, p) => t + Math.round(p.amount * 100) / 100, 0), 0);
     const who = lines[0].customerName || custId;
     const tag = label ? ` (${label})` : '';
 
@@ -92,10 +101,10 @@ async function run(realmId, job) {
       CustomerRef: { value: String(custId) },
       TotalAmt: Math.round(amount * 100) / 100,
       DepositToAccountRef: { value: String(accountId) },
-      Line: lines.map(m => ({
-        Amount: Math.round(m.qbBalance * 100) / 100,
-        LinkedTxn: [{ TxnId: String(m.qbId), TxnType: 'Invoice' }]
-      }))
+      Line: lines.flatMap(m => openParts(m).map(p => ({
+        Amount: Math.round(p.amount * 100) / 100,
+        LinkedTxn: [{ TxnId: String(p.qbId), TxnType: 'Invoice' }]
+      })))
     };
     if (cprDate) payload.TxnDate = cprDate;
     if (methodId) payload.PaymentMethodRef = { value: String(methodId) };
