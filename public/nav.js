@@ -18,6 +18,7 @@
     ]},
     { group: 'Maintenance', items: [
       { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
+      { href:'/swap.html',     label:'Change product',   icon:'swap' },
       { href:'/void.html',     label:'Void invoices',    icon:'ban' }
     ]}
   ];
@@ -32,7 +33,8 @@
     ban:    '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14h2"/>',
     receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>',
-        search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>'
+        search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
+    swap:   '<path d="M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3"/>'
   };
 
   function svg(name){

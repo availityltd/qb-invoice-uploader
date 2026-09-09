@@ -64,6 +64,9 @@ import {
 import {
   invoicesWithLines, planGroup, remarkFor, stripShipping
 } from './mergeqb.js';
+import {
+  parseNumbers as parseSwapNumbers, buildPlan as buildSwapPlan, swapOnInvoice
+} from './swapitem.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
 import {
   dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy, eachOrder
@@ -2674,6 +2677,194 @@ app.post('/api/merge/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   mergeStore.delete(realmId);
+  res.json({ ok: true });
+});
+
+// ==================== Change product ====================
+// Put a different product on invoices that were written against the wrong one,
+// leaving the quantity, the price and the description where they are. The plan
+// is read first and shown; nothing goes back to QuickBooks until it is asked
+// for, and then one invoice at a time.
+
+const swapStore = new Map();           // realmId -> { from, to, rows, job, at }
+
+function swapProduct(list, id) {
+  const p = (list || []).find(it => String(it.id) === String(id));
+  if (!p) throw new Error('That product is not in this QuickBooks company');
+  return { id: String(p.id), name: p.name, sku: p.sku || '' };
+}
+
+async function loadProducts(realmId, token) {
+  const products = [];
+  let start = 1;
+  while (true) {
+    const q = await qbQuery(realmId, token,
+      `SELECT * FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
+    const arr = q.Item || [];
+    arr.forEach(it => products.push({
+      id: String(it.Id), name: it.Name, sku: it.Sku || '',
+      type: it.Type || '', active: it.Active !== false
+    }));
+    if (arr.length < 1000) break;
+    start += 1000;
+    if (start > 9000) break;
+  }
+  return products;
+}
+
+app.get('/api/swap/products', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const token = await getAccessToken(realmId);
+    const products = await loadProducts(realmId, token);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ count: products.length, products });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/swap/plan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const { from, to, numbers } = req.body || {};
+    if (!from || !to) throw new Error('Pick the product to change and the one to change it to');
+    if (String(from) === String(to)) throw new Error('Those are the same product');
+
+    const list = parseSwapNumbers(numbers);
+    if (!list.length) throw new Error('Paste the invoice numbers first');
+    if (list.length > 2000) throw new Error('That is more than 2,000 invoices in one go');
+
+    const token = await getAccessToken(realmId);
+    const products = await loadProducts(realmId, token);
+    const fromP = swapProduct(products, from);
+    const toP = swapProduct(products, to);
+
+    const rows = await buildSwapPlan(realmId, token, list, fromP.id);
+
+    const old = swapStore.get(realmId);
+    if (old && old.job && old.job.running) throw new Error('A change is still running');
+
+    swapStore.set(realmId, { from: fromP, to: toP, rows, job: null, at: Date.now() });
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      from: fromP, to: toP,
+      pasted: list.length,
+      ready: rows.filter(r => r.state === 'ready').length,
+      lines: rows.reduce((n, r) => n + r.hits.length, 0),
+      nomatch: rows.filter(r => r.state === 'nomatch').length,
+      missing: rows.filter(r => r.state === 'missing').length,
+      rows
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// One invoice per request. The batch API times out under inventory locks, and
+// a slow run that finishes beats a fast one that does not.
+async function runSwap(realmId, st, job) {
+  const token = await getAccessToken(realmId);
+
+  for (const row of job.rows) {
+    if (job.stop) break;
+    try {
+      const out = await swapOnInvoice(realmId, token, row.qbId, st.from.id, st.to,
+        { rewriteDescription: job.rewriteDescription });
+      row.state = 'changed';
+      row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' now on ' + st.to.name;
+      job.done++;
+      job.changedLines += out.lines;
+      job.log.push({
+        ok: true, doc: out.doc, lines: out.lines,
+        // the total is the proof that nothing but the name moved
+        moved: Math.round((out.total - out.before) * 100) / 100
+      });
+    } catch (e) {
+      row.state = 'failed';
+      row.note = e.message;
+      job.done++;
+      job.failed++;
+      job.log.push({ ok: false, doc: row.doc, msg: e.message });
+    }
+  }
+
+  job.running = false;
+  job.finished = Date.now();
+}
+
+app.post('/api/swap/run', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = swapStore.get(realmId);
+    if (!st) throw new Error('Check the invoices first');
+    if (st.job && st.job.running) throw new Error('That is already running');
+
+    const only = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : null;
+    const rows = st.rows.filter(r =>
+      r.state === 'ready' && r.qbId && (!only || only.includes(String(r.qbId))));
+    if (!rows.length) throw new Error('None of these invoices are waiting to be changed');
+
+    const job = {
+      running: true, stop: false, done: 0, failed: 0, changedLines: 0,
+      total: rows.length, log: [], started: Date.now(), rows,
+      rewriteDescription: !!(req.body && req.body.rewriteDescription)
+    };
+    st.job = job;
+
+    runSwap(realmId, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+    });
+
+    res.json({ ok: true, invoices: job.total });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/swap/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const st = swapStore.get(realmId);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!st) return res.json({ has: false });
+
+  const job = st.job;
+  res.json({
+    has: true,
+    from: st.from, to: st.to,
+    rows: st.rows,
+    job: job ? {
+      running: job.running, done: job.done, failed: job.failed,
+      changedLines: job.changedLines, total: job.total,
+      error: job.error || null, log: job.log.slice(-80)
+    } : null
+  });
+});
+
+app.post('/api/swap/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = swapStore.get(realmId);
+  if (st && st.job) st.job.stop = true;
+  res.json({ ok: true });
+});
+
+app.post('/api/swap/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = swapStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
+  swapStore.delete(realmId);
   res.json({ ok: true });
 });
 

@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change product</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .picker{border:1px solid var(--line-2);border-radius:7px;background:#fff;overflow:hidden}
+  .picker .find{border:0;border-bottom:1px solid var(--line);border-radius:0;
+    font-family:var(--sans);font-size:13.5px}
+  .picker .find:focus-visible{outline-offset:-2px}
+  .picker .list{max-height:210px;overflow:auto}
+  .picker .list button{display:block;width:100%;text-align:left;border:0;background:none;
+    font:inherit;font-size:13px;padding:8px 12px;cursor:pointer;
+    border-bottom:1px solid #EFF1F3;color:var(--text)}
+  .picker .list button:last-child{border-bottom:0}
+  .picker .list button:hover{background:var(--accent-soft)}
+  .picker .list button.on{background:#F2FAF0;font-weight:600}
+  .picker .list button small{display:block;font-family:var(--mono);font-size:11px;
+    color:var(--muted);font-weight:400;margin-top:2px}
+  .picker .none{padding:12px;font-size:12.5px;color:var(--faint)}
+
+  .chosen{border:1px solid var(--qbo);background:#F2FAF0;border-radius:7px;
+    padding:11px 14px;margin-bottom:10px;font-size:13.5px;font-weight:600;
+    display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .chosen small{font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:400}
+  .chosen .swapto{margin-left:auto;font-weight:400}
+
+  .arrowrow{display:flex;align-items:center;justify-content:center;color:var(--faint);
+    font-size:18px;padding:2px 0 10px}
+
+  textarea#nums{width:100%;min-height:150px;font-family:var(--mono);font-size:12.5px;
+    line-height:1.7;resize:vertical;padding:10px;border:1px solid var(--line-2);
+    border-radius:6px;background:#fff;color:var(--text)}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px}
+  .tally > div{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+  .tally .bad .n{color:var(--neg)}
+
+  td.lines{white-space:normal;font-size:11.5px;color:var(--muted);max-width:360px}
+  td.lines b{font-family:var(--mono);font-weight:500;color:var(--text)}
+  tr.off{opacity:.42}
+  td.tick{width:34px}
+  td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Change product</h1>
+        <div class="sub">Put a different product on invoices already written &mdash; the quantity, the price and the description stay as they are.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Nothing is changed until you have seen the list and pressed the button.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="sheet">
+          <div class="sec">
+            <h2><span class="no">01</span> The product that is on them now
+              <span class="aside" id="fromCount"></span></h2>
+            <div id="fromChosen"></div>
+            <div class="picker">
+              <input type="text" class="find" id="fromFind" placeholder="Search by name or SKU">
+              <div class="list" id="fromList"></div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <h2><span class="no">02</span> The product to put on them instead</h2>
+            <div id="toChosen"></div>
+            <div class="picker">
+              <input type="text" class="find" id="toFind" placeholder="Search by name or SKU">
+              <div class="list" id="toList"></div>
+            </div>
+            <label class="chk">
+              <input type="checkbox" id="rewrite">
+              Rewrite the description with the new product's name as well
+            </label>
+            <p class="hint">Left unticked, the description on each line is the one that is
+              already there.</p>
+          </div>
+
+          <div class="sec">
+            <h2><span class="no">03</span> The invoices</h2>
+            <p class="hint" style="margin:0 0 10px">One invoice number a line, or pasted
+              straight out of a column. <code>WH1132</code>, <code>SR1341</code>,
+              <code>#91306999</code> &mdash; whatever is written on the invoice.</p>
+            <textarea id="nums" spellcheck="false" placeholder="WH1132&#10;WH1133&#10;WH1134"></textarea>
+            <div class="acts" style="margin-top:14px">
+              <button class="solid" id="btnCheck">Check these invoices</button>
+              <button class="ghost" id="btnReset">Start again</button>
+            </div>
+            <div class="stat" id="statBox"></div>
+          </div>
+        </div>
+
+        <!-- ============ what was found ============ -->
+        <div class="sheet hide" id="planSheet">
+          <div class="sec">
+            <h2><span class="no">04</span> What is there
+              <span class="aside" id="planWhen"></span></h2>
+
+            <div class="tally">
+              <div class="ok"><div class="n" id="tReady">0</div><div class="l">Ready to change</div></div>
+              <div><div class="n" id="tLines">0</div><div class="l">Lines on them</div></div>
+              <div class="warn"><div class="n" id="tNomatch">0</div><div class="l">Product not on it</div></div>
+              <div class="bad"><div class="n" id="tMissing">0</div><div class="l">Not in QuickBooks</div></div>
+            </div>
+
+            <div class="acts">
+              <button class="mini" id="btnAll">Tick all ready</button>
+              <button class="mini" id="btnNone">Untick all</button>
+              <button class="mini" id="btnCsv">Download this list</button>
+            </div>
+
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Invoice</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Lines carrying the product</th>
+                    <th class="num">Invoice total</th>
+                    <th>State</th>
+                  </tr>
+                </thead>
+                <tbody id="rows"></tbody>
+              </table>
+            </div>
+
+            <div class="note info" style="margin-top:16px" id="promise"></div>
+
+            <button class="run" id="btnRun" style="margin-top:14px">Change the product</button>
+            <p class="runhint" id="runHint"></p>
+          </div>
+        </div>
+
+        <!-- ============ the run ============ -->
+        <div class="sheet hide" id="runSheet">
+          <div class="sec">
+            <h2><span class="no">05</span> Changing
+              <span class="aside" id="runCount"></span></h2>
+            <div class="prog"><i id="bar"></i></div>
+            <div class="keys" style="margin-bottom:12px">
+              <div><em style="background:var(--ok)"></em>Done <b id="kDone">0</b></div>
+              <div><em style="background:var(--neg)"></em>Failed <b id="kFailed">0</b></div>
+              <div><em style="background:var(--line-2)"></em>Lines changed <b id="kLines">0</b></div>
+            </div>
+            <div class="log" id="log"></div>
+            <div class="acts" style="margin-top:14px">
+              <button class="ghost hide" id="btnStop">Stop</button>
+            </div>
+          </div>
+        </div>
+
+        <footer>
+          <p><b>What this changes.</b> Only the product on the lines that carry the old one.
+            The quantity, the rate, the amount, the tax code, the service date and the
+            description are written back exactly as QuickBooks handed them over, so the
+            invoice total comes out at what it was before.</p>
+          <p>Invoices are changed one at a time. Closing this page does not stop the run.</p>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    products: [], from: null, to: null,
+    rows: [], picked: {}, poller: null, logged: 0
+  };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function num(n){
+    if(n === null || n === undefined || n === '') return '';
+    return String(n).replace(/\.00$/, '');
+  }
+
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+
+  function get(url){
+    return fetch(url, { cache:'no-store' }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+
+  /* ---------- picking the two products ---------- */
+
+  function drawPicker(which){
+    var find = $(which + 'Find').value.trim().toLowerCase();
+    var chosen = S[which];
+    var box = $(which + 'List');
+
+    var hits = S.products.filter(function(p){
+      if(!find) return true;
+      return (p.name || '').toLowerCase().indexOf(find) > -1 ||
+             (p.sku || '').toLowerCase().indexOf(find) > -1;
+    }).slice(0, 200);
+
+    if(!hits.length){
+      box.innerHTML = '<div class="none">Nothing here by that name or SKU.</div>';
+      return;
+    }
+
+    box.innerHTML = hits.map(function(p){
+      var on = chosen && chosen.id === p.id;
+      return '<button type="button" data-id="' + esc(p.id) + '"' + (on ? ' class="on"' : '') + '>' +
+             esc(p.name) + (p.active ? '' : ' <small style="display:inline">(inactive)</small>') +
+             '<small>' + (p.sku ? 'SKU ' + esc(p.sku) : 'no SKU') + '</small></button>';
+    }).join('');
+
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){
+        var id = b.getAttribute('data-id');
+        S[which] = S.products.filter(function(p){ return p.id === id; })[0] || null;
+        drawChosen(which);
+        drawPicker(which);
+      });
+    });
+  }
+
+  function drawChosen(which){
+    var p = S[which];
+    var box = $(which + 'Chosen');
+    if(!p){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="chosen">' + esc(p.name) +
+      '<small>' + (p.sku ? 'SKU ' + esc(p.sku) : 'no SKU') + '</small>' +
+      '<span class="swapto"><small>' +
+      (which === 'from' ? 'is on the invoices now' : 'goes on instead') +
+      '</small></span></div>';
+  }
+
+  function loadProducts(){
+    say('busy', 'Reading the product list from QuickBooks…');
+    return get('/api/swap/products').then(function(d){
+      S.products = d.products || [];
+      $('fromCount').textContent = d.count + ' products';
+      drawPicker('from'); drawPicker('to');
+      say('', '');
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  /* ---------- checking ---------- */
+
+  function check(){
+    if(!S.from || !S.to) return say('bad', '<b>Pick both products first</b>');
+    if(S.from.id === S.to.id) return say('bad', '<b>Those are the same product</b>');
+    var numbers = $('nums').value;
+    if(!numbers.trim()) return say('bad', '<b>Paste the invoice numbers first</b>');
+
+    $('btnCheck').disabled = true;
+    say('busy', 'Reading those invoices out of QuickBooks…');
+
+    post('/api/swap/plan', { from: S.from.id, to: S.to.id, numbers: numbers })
+      .then(function(d){
+        S.rows = d.rows || [];
+        S.picked = {};
+        S.rows.forEach(function(r){ if(r.state === 'ready') S.picked[r.qbId] = true; });
+        drawPlan(d);
+        say('ok', '<b>' + d.pasted + ' numbers read</b>');
+      })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); })
+      .then(function(){ $('btnCheck').disabled = false; });
+  }
+
+  function counts(){
+    var c = { ready:0, lines:0, nomatch:0, missing:0, picked:0, pickedLines:0 };
+    S.rows.forEach(function(r){
+      if(r.state === 'ready'){
+        c.ready++;
+        c.lines += r.hits.length;
+        if(S.picked[r.qbId]){ c.picked++; c.pickedLines += r.hits.length; }
+      }
+      else if(r.state === 'nomatch') c.nomatch++;
+      else if(r.state === 'missing') c.missing++;
+    });
+    return c;
+  }
+
+  function stateLabel(r){
+    if(r.state === 'ready')   return '<span class="pill open">ready</span>';
+    if(r.state === 'changed') return '<span class="pill good">changed</span>';
+    if(r.state === 'failed')  return '<span class="pill paid">failed</span>';
+    if(r.state === 'nomatch') return '<span class="pill miss">not on it</span>';
+    return '<span class="pill paid">not found</span>';
+  }
+
+  function drawPlan(d){
+    $('planSheet').classList.remove('hide');
+    if(d) $('planWhen').textContent = d.pasted + ' pasted';
+
+    var c = counts();
+    $('tReady').textContent = c.ready;
+    $('tLines').textContent = c.lines;
+    $('tNomatch').textContent = c.nomatch;
+    $('tMissing').textContent = c.missing;
+
+    $('rows').innerHTML = S.rows.map(function(r, i){
+      var on = r.state === 'ready' && S.picked[r.qbId];
+      var lines = r.hits.length
+        ? r.hits.map(function(l){
+            return '<b>' + num(l.qty) + ' &times; ' + money(l.rate) + '</b> = ' +
+                   money(l.amount) +
+                   (l.description ? ' &nbsp;<span>' + esc(l.description) + '</span>' : '');
+          }).join('<br>')
+        : '<span>' + esc(r.note || '') + '</span>';
+
+      return '<tr class="' + (r.state === 'ready' && !on ? 'off' : '') + '">' +
+        '<td class="tick">' + (r.state === 'ready'
+          ? '<input type="checkbox" data-i="' + i + '"' + (on ? ' checked' : '') + '>' : '') + '</td>' +
+        '<td class="mono">' + esc(r.doc) + '</td>' +
+        '<td class="mono">' + esc(r.date || '') + '</td>' +
+        '<td class="memo">' + esc(r.customer || '') + '</td>' +
+        '<td class="lines">' + lines + '</td>' +
+        '<td class="num">' + (r.qbId ? money(r.total) : '') + '</td>' +
+        '<td>' + stateLabel(r) +
+          (r.state === 'failed' || r.state === 'changed'
+            ? '<div style="font-size:11px;color:var(--muted)">' + esc(r.note || '') + '</div>' : '') +
+        '</td></tr>';
+    }).join('');
+
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[type=checkbox]'), function(b){
+      b.addEventListener('change', function(){
+        var r = S.rows[Number(b.getAttribute('data-i'))];
+        S.picked[r.qbId] = b.checked;
+        drawPlan();
+      });
+    });
+
+    $('promise').innerHTML = S.from && S.to
+      ? 'Every ticked line moves from <b>' + esc(S.from.name) + '</b> to <b>' +
+        esc(S.to.name) + '</b>. Its quantity, rate, amount and tax are written back ' +
+        'unchanged' + ($('rewrite').checked ? ', and the description is rewritten with the new name.' : ', and so is its description.')
+      : '';
+
+    $('btnRun').disabled = !c.picked;
+    $('btnRun').textContent = c.picked
+      ? 'Change the product on ' + c.picked + (c.picked === 1 ? ' invoice' : ' invoices')
+      : 'Change the product';
+    $('runHint').textContent = c.picked
+      ? c.pickedLines + (c.pickedLines === 1 ? ' line' : ' lines') + ' in all'
+      : 'Tick the invoices to change';
+  }
+
+  function tickAll(on){
+    S.rows.forEach(function(r){ if(r.state === 'ready') S.picked[r.qbId] = on; });
+    drawPlan();
+  }
+
+  function csv(){
+    var rows = [['Invoice','Date','Customer','State','Lines','Qty','Rate','Amount','Invoice total']];
+    S.rows.forEach(function(r){
+      if(!r.hits.length){
+        rows.push([r.doc, r.date, r.customer, r.state, 0, '', '', '', r.qbId ? r.total : '']);
+        return;
+      }
+      r.hits.forEach(function(l){
+        rows.push([r.doc, r.date, r.customer, r.state, r.hits.length,
+                   l.qty, l.rate, l.amount, r.total]);
+      });
+    });
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'change-product.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- running ---------- */
+
+  function run(){
+    var ids = S.rows.filter(function(r){ return r.state === 'ready' && S.picked[r.qbId]; })
+                    .map(function(r){ return r.qbId; });
+    if(!ids.length) return;
+
+    $('btnRun').disabled = true;
+    $('log').innerHTML = '';
+    S.logged = 0;
+
+    post('/api/swap/run', { ids: ids, rewriteDescription: $('rewrite').checked })
+      .then(function(d){
+        $('runSheet').classList.remove('hide');
+        $('btnStop').classList.remove('hide');
+        $('runSheet').scrollIntoView({ behavior:'smooth', block:'start' });
+        poll();
+      })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        $('btnRun').disabled = false;
+      });
+  }
+
+  function drawJob(job){
+    $('runSheet').classList.remove('hide');
+    var pct = job.total ? Math.round(100 * job.done / job.total) : 0;
+    $('bar').style.width = pct + '%';
+    $('runCount').textContent = job.done + ' of ' + job.total;
+    $('kDone').textContent = job.done - job.failed;
+    $('kFailed').textContent = job.failed;
+    $('kLines').textContent = job.changedLines;
+
+    var box = $('log');
+    var atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
+    (job.log || []).slice(S.logged).forEach(function(l){
+      var div = document.createElement('div');
+      if(l.ok){
+        div.className = 'ok';
+        div.textContent = l.doc + ' — ' + l.lines + ' line' + (l.lines === 1 ? '' : 's') +
+          ' changed' + (l.moved ? '  (total moved by ' + l.moved + ')' : '');
+      } else {
+        div.className = 'err';
+        div.textContent = l.doc + ' — ' + l.msg;
+      }
+      box.appendChild(div);
+    });
+    S.logged = (job.log || []).length;
+    if(atEnd) box.scrollTop = box.scrollHeight;
+
+    if(!job.running){
+      clearInterval(S.poller); S.poller = null;
+      $('btnStop').classList.add('hide');
+      $('btnRun').disabled = false;
+      if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');
+      else say('ok', '<b>' + (job.done - job.failed) + ' invoices changed' +
+        (job.failed ? ', ' + job.failed + ' failed' : '') + '</b>');
+    }
+  }
+
+  function poll(){
+    clearInterval(S.poller);
+    var tick = function(){
+      get('/api/swap/status').then(function(d){
+        if(!d.has) return;
+        S.rows = d.rows || S.rows;
+        drawPlan();
+        if(d.job) drawJob(d.job);
+      }).catch(function(){ /* keep trying */ });
+    };
+    tick();
+    S.poller = setInterval(tick, 2000);
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('fromFind').addEventListener('input', function(){ drawPicker('from'); });
+  $('toFind').addEventListener('input', function(){ drawPicker('to'); });
+  $('rewrite').addEventListener('change', function(){ if(S.rows.length) drawPlan(); });
+  $('btnCheck').addEventListener('click', check);
+  $('btnAll').addEventListener('click', function(){ tickAll(true); });
+  $('btnNone').addEventListener('click', function(){ tickAll(false); });
+  $('btnCsv').addEventListener('click', csv);
+  $('btnRun').addEventListener('click', run);
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    post('/api/swap/stop').then(function(){ $('btnStop').disabled = false; });
+  });
+  $('btnReset').addEventListener('click', function(){
+    post('/api/swap/clear').then(function(){
+      S.rows = []; S.picked = {};
+      $('nums').value = '';
+      $('planSheet').classList.add('hide');
+      $('runSheet').classList.add('hide');
+      say('', '');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    loadProducts().then(function(){
+      // a run left going from another tab, or before a reload, is picked back up
+      return get('/api/swap/status');
+    }).then(function(d){
+      if(!d || !d.has) return;
+      S.from = d.from; S.to = d.to;
+      drawChosen('from'); drawChosen('to');
+      drawPicker('from'); drawPicker('to');
+      S.rows = d.rows || [];
+      S.rows.forEach(function(r){ if(r.state === 'ready') S.picked[r.qbId] = true; });
+      drawPlan({ pasted: S.rows.length });
+      if(d.job){
+        S.logged = 0;
+        drawJob(d.job);
+        if(d.job.running) poll();
+      }
+    }).catch(function(){ /* nothing to pick up */ });
+  });
+})();
+</script>
+</body>
+</html>
