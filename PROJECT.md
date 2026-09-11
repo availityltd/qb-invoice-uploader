@@ -43,6 +43,7 @@ understand what is happening underneath.
 | Courier dashboard | `courierlive.js`, `dashdata.js`, `postex.js` | Live courier data |
 | Fix duplicates | `fix.html` | Bulk rename / delete of duplicate invoices |
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |
+| Change category | `recat.html`, `recat.js`, `recatstore.js` | Moves transactions from one P&L heading to another, nothing else touched; every move is recorded |
 
 ---
 

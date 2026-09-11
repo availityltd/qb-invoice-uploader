@@ -19,6 +19,7 @@
     { group: 'Maintenance', items: [
       { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
       { href:'/swap.html',     label:'Change product',   icon:'swap' },
+      { href:'/recat.html',    label:'Change category',  icon:'tag' },
       { href:'/void.html',     label:'Void invoices',    icon:'ban' }
     ]}
   ];
@@ -34,7 +35,8 @@
     wallet: '<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 14h2"/>',
     receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>',
         search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
-    swap:   '<path d="M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3"/>'
+    swap:   '<path d="M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3"/>',
+    tag:    '<path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0l-7-7A2 2 0 013 12.2V5a2 2 0 012-2h7.2a2 2 0 011.4.6l7 7a2 2 0 010 2.8z"/><circle cx="7.5" cy="7.5" r="1.2"/>'
   };
 
   function svg(name){

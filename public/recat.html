@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change category</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .picker{border:1px solid var(--line-2);border-radius:7px;background:#fff;overflow:hidden}
+  .picker .find{border:0;border-bottom:1px solid var(--line);border-radius:0;
+    font-family:var(--sans);font-size:13.5px}
+  .picker .find:focus-visible{outline-offset:-2px}
+  .picker .list{max-height:210px;overflow:auto}
+  .picker .list button{display:block;width:100%;text-align:left;border:0;background:none;
+    font:inherit;font-size:13px;padding:8px 12px;cursor:pointer;
+    border-bottom:1px solid #EFF1F3;color:var(--text)}
+  .picker .list button:last-child{border-bottom:0}
+  .picker .list button:hover{background:var(--accent-soft)}
+  .picker .list button.on{background:#F2FAF0;font-weight:600}
+  .picker .list button small{display:block;font-family:var(--mono);font-size:11px;
+    color:var(--muted);font-weight:400;margin-top:2px}
+  .picker .none{padding:12px;font-size:12.5px;color:var(--faint)}
+
+  .chosen{border:1px solid var(--qbo);background:#F2FAF0;border-radius:7px;
+    padding:11px 14px;margin-bottom:10px;font-size:13.5px;font-weight:600;
+    display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .chosen small{font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:400}
+  .chosen .swapto{margin-left:auto;font-weight:400}
+
+  .dates{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .dates label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);display:block;margin-bottom:4px}
+  .dates input[type=date]{font-family:var(--mono);font-size:13px;padding:8px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+  .kinds{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}
+  .kinds label{font-size:12.5px;display:flex;align-items:center;gap:6px;cursor:pointer}
+  .kinds input{accent-color:var(--qbo);width:14px;height:14px;margin:0}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px}
+  .tally > div{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+  .tally .bad .n{color:var(--neg)}
+
+  td.lines{white-space:normal;font-size:11.5px;color:var(--muted);max-width:330px}
+  td.lines b{font-family:var(--mono);font-weight:500;color:var(--text)}
+  tr.off{opacity:.42}
+  td.tick{width:34px}
+  td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
+  .rowfind{width:100%;max-width:280px;font-size:13px;padding:7px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Change category</h1>
+        <div class="sub">Move transactions from one Profit &amp; Loss heading to another &mdash; the date, the payee, the bank account, the amount and the VAT stay as they are.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Nothing is changed until you have seen the list and pressed the button.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="sheet">
+          <div class="sec">
+            <h2><span class="no">01</span> The category they are under now
+              <span class="aside" id="fromCount"></span></h2>
+            <div id="fromChosen"></div>
+            <div class="picker">
+              <input type="text" class="find" id="fromFind" placeholder="Search by name or type">
+              <div class="list" id="fromList"></div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <h2><span class="no">02</span> The category to put them under instead</h2>
+            <div id="toChosen"></div>
+            <div class="picker">
+              <input type="text" class="find" id="toFind" placeholder="Search by name or type">
+              <div class="list" id="toList"></div>
+            </div>
+          </div>
+
+          <div class="sec">
+            <h2><span class="no">03</span> The dates to look between</h2>
+            <p class="hint" style="margin:0 0 10px">QuickBooks will not search inside a
+              transaction's lines, so the books are read date by date and the ones under
+              that category are kept. A tighter range is a faster read.</p>
+            <div class="dates">
+              <div><label for="dFrom">From</label><input type="date" id="dFrom"></div>
+              <div><label for="dTo">To</label><input type="date" id="dTo"></div>
+            </div>
+            <div class="quick">
+              <button class="mini" data-span="ytd">This year to date</button>
+              <button class="mini" data-span="last90">Last 90 days</button>
+              <button class="mini" data-span="thismonth">This month</button>
+              <button class="mini" data-span="lastyear">Last year</button>
+            </div>
+
+            <div class="kinds" id="kinds"></div>
+            <p class="hint">Untick what cannot be the problem and the read is shorter.</p>
+
+            <div class="acts" style="margin-top:14px">
+              <button class="solid" id="btnScan">Find these transactions</button>
+              <button class="ghost" id="btnReset">Start again</button>
+            </div>
+            <div class="stat" id="statBox"></div>
+          </div>
+        </div>
+
+        <!-- ============ what was found ============ -->
+        <div class="sheet hide" id="planSheet">
+          <div class="sec">
+            <h2><span class="no">04</span> What is under it
+              <span class="aside" id="planWhen"></span></h2>
+
+            <div class="tally">
+              <div class="ok"><div class="n" id="tReady">0</div><div class="l">Found</div></div>
+              <div><div class="n" id="tLines">0</div><div class="l">Lines on them</div></div>
+              <div><div class="n" id="tAmount">0.00</div><div class="l">Under this category</div></div>
+              <div class="warn"><div class="n" id="tPicked">0</div><div class="l">Ticked to move</div></div>
+            </div>
+
+            <div class="acts">
+              <input type="text" class="rowfind" id="rowFind" placeholder="Filter by payee, description or number">
+              <button class="mini" id="btnAll">Tick all shown</button>
+              <button class="mini" id="btnNone">Untick all</button>
+              <button class="mini" id="btnCsv">Download this list</button>
+            </div>
+
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Number</th>
+                    <th>Name</th>
+                    <th>Lines under this category</th>
+                    <th>Paid from</th>
+                    <th class="num">Amount</th>
+                    <th>State</th>
+                  </tr>
+                </thead>
+                <tbody id="rows"></tbody>
+              </table>
+            </div>
+
+            <div class="note info" style="margin-top:16px" id="promise"></div>
+
+            <button class="run" id="btnRun" style="margin-top:14px">Change the category</button>
+            <p class="runhint" id="runHint"></p>
+          </div>
+        </div>
+
+        <!-- ============ the run ============ -->
+        <div class="sheet hide" id="runSheet">
+          <div class="sec">
+            <h2><span class="no">05</span> Moving
+              <span class="aside" id="runCount"></span></h2>
+            <div class="prog"><i id="bar"></i></div>
+            <div class="keys" style="margin-bottom:12px">
+              <div><em style="background:var(--ok)"></em>Done <b id="kDone">0</b></div>
+              <div><em style="background:var(--neg)"></em>Failed <b id="kFailed">0</b></div>
+              <div><em style="background:var(--line-2)"></em>Lines changed <b id="kLines">0</b></div>
+              <div><em style="background:var(--line-2)"></em>Moved <b id="kMoved">0.00</b></div>
+            </div>
+            <div class="log" id="log"></div>
+            <div class="acts" style="margin-top:14px">
+              <button class="ghost hide" id="btnStop">Stop</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ the record ============ -->
+        <div class="sheet" id="histSheet">
+          <div class="sec">
+            <h2><span class="no">06</span> What has been moved
+              <span class="aside" id="histWhen"></span></h2>
+            <p class="hint" style="margin:0 0 10px">QuickBooks' own audit log only says a
+              transaction was edited. This is the record of which heading it came from and
+              which one it went to.</p>
+            <div class="acts">
+              <button class="mini" id="btnHist">Refresh</button>
+              <button class="mini" id="btnHistCsv">Download the record</button>
+            </div>
+            <div class="tbl" style="max-height:300px">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Moved on</th>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Number</th>
+                    <th>Name</th>
+                    <th>Out of</th>
+                    <th>Into</th>
+                    <th class="num">Amount</th>
+                    <th>State</th>
+                  </tr>
+                </thead>
+                <tbody id="histRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <footer>
+          <p><b>What this changes.</b> Only the category on the lines that carry the old one.
+            The date, the payee, the payment account, the amount, the VAT code, the memo,
+            the class, the customer and the attachments are written back exactly as
+            QuickBooks handed them over, so the transaction total comes out at what it was
+            before and only the Profit &amp; Loss heading moves.</p>
+          <p>Transactions are changed one at a time. Closing this page does not stop the run.</p>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    accounts: [], kinds: [], from: null, to: null,
+    rows: [], picked: {}, poller: null, logged: 0, filter: '', history: []
+  };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function key(r){ return r.kind + '|' + r.qbId; }
+
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+
+  function get(url){
+    return fetch(url, { cache:'no-store' }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+
+  /* ---------- the dates ---------- */
+
+  function iso(d){ return d.toISOString().slice(0, 10); }
+
+  function setSpan(which){
+    var now = new Date();
+    var y = now.getUTCFullYear(), m = now.getUTCMonth();
+    var a, b = new Date(Date.UTC(y, m, now.getUTCDate()));
+
+    if(which === 'ytd')            a = new Date(Date.UTC(y, 0, 1));
+    else if(which === 'thismonth') a = new Date(Date.UTC(y, m, 1));
+    else if(which === 'lastyear'){ a = new Date(Date.UTC(y - 1, 0, 1));
+                                   b = new Date(Date.UTC(y - 1, 11, 31)); }
+    else { a = new Date(Date.UTC(y, m, now.getUTCDate() - 89)); }
+
+    $('dFrom').value = iso(a);
+    $('dTo').value = iso(b);
+  }
+
+  /* ---------- picking the two categories ---------- */
+
+  function drawPicker(which){
+    var find = $(which + 'Find').value.trim().toLowerCase();
+    var chosen = S[which];
+    var box = $(which + 'List');
+
+    var hits = S.accounts.filter(function(a){
+      if(!find) return true;
+      return (a.name || '').toLowerCase().indexOf(find) > -1 ||
+             (a.type || '').toLowerCase().indexOf(find) > -1 ||
+             (a.sub || '').toLowerCase().indexOf(find) > -1;
+    }).slice(0, 300);
+
+    if(!hits.length){
+      box.innerHTML = '<div class="none">Nothing here by that name or type.</div>';
+      return;
+    }
+
+    box.innerHTML = hits.map(function(a){
+      var on = chosen && chosen.id === a.id;
+      return '<button type="button" data-id="' + esc(a.id) + '"' + (on ? ' class="on"' : '') + '>' +
+             esc(a.name) + (a.active ? '' : ' <small style="display:inline">(inactive)</small>') +
+             '<small>' + esc(a.type || '') + (a.sub ? ' &middot; ' + esc(a.sub) : '') +
+             '</small></button>';
+    }).join('');
+
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){
+        var id = b.getAttribute('data-id');
+        S[which] = S.accounts.filter(function(a){ return a.id === id; })[0] || null;
+        drawChosen(which);
+        drawPicker(which);
+      });
+    });
+  }
+
+  function drawChosen(which){
+    var a = S[which];
+    var box = $(which + 'Chosen');
+    if(!a){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="chosen">' + esc(a.name) +
+      '<small>' + esc(a.type || '') + '</small>' +
+      '<span class="swapto"><small>' +
+      (which === 'from' ? 'they are under this now' : 'they go under this instead') +
+      '</small></span></div>';
+  }
+
+  function drawKinds(){
+    $('kinds').innerHTML = S.kinds.map(function(k){
+      return '<label><input type="checkbox" value="' + esc(k.key) + '" checked> ' +
+             esc(k.label) + '</label>';
+    }).join('');
+  }
+
+  function pickedKinds(){
+    return Array.prototype.filter
+      .call($('kinds').querySelectorAll('input'), function(b){ return b.checked; })
+      .map(function(b){ return b.value; });
+  }
+
+  function loadAccounts(){
+    say('busy', 'Reading the chart of accounts from QuickBooks…');
+    return get('/api/recat/accounts').then(function(d){
+      S.accounts = d.accounts || [];
+      S.kinds = d.kinds || [];
+      $('fromCount').textContent = d.count + ' accounts';
+      drawKinds();
+      drawPicker('from'); drawPicker('to');
+      say('', '');
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  /* ---------- finding them ---------- */
+
+  function scan(){
+    if(!S.from || !S.to) return say('bad', '<b>Pick both categories first</b>');
+    if(S.from.id === S.to.id) return say('bad', '<b>Those are the same category</b>');
+    if(!$('dFrom').value || !$('dTo').value) return say('bad', '<b>Give both dates</b>');
+    var kinds = pickedKinds();
+    if(!kinds.length) return say('bad', '<b>Leave at least one kind of transaction ticked</b>');
+
+    $('btnScan').disabled = true;
+    say('busy', 'Reading the books…');
+
+    post('/api/recat/scan', {
+      from: S.from.id, to: S.to.id,
+      dateFrom: $('dFrom').value, dateTo: $('dTo').value,
+      kinds: kinds
+    })
+      .then(function(){ poll(); })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        $('btnScan').disabled = false;
+      });
+  }
+
+  function shown(){
+    var f = S.filter;
+    if(!f) return S.rows;
+    return S.rows.filter(function(r){
+      return (r.name || '').toLowerCase().indexOf(f) > -1 ||
+             (r.doc || '').toLowerCase().indexOf(f) > -1 ||
+             (r.memo || '').toLowerCase().indexOf(f) > -1 ||
+             r.hits.some(function(l){
+               return (l.description || '').toLowerCase().indexOf(f) > -1;
+             });
+    });
+  }
+
+  function counts(){
+    var c = { found:0, lines:0, amount:0, picked:0, pickedLines:0, pickedAmount:0 };
+    S.rows.forEach(function(r){
+      c.found++;
+      c.lines += r.hits.length;
+      c.amount += r.hitTotal;
+      if(r.state === 'ready' && S.picked[key(r)]){
+        c.picked++;
+        c.pickedLines += r.hits.length;
+        c.pickedAmount += r.hitTotal;
+      }
+    });
+    return c;
+  }
+
+  function stateLabel(r){
+    if(r.state === 'ready')   return '<span class="pill open">ready</span>';
+    if(r.state === 'changed') return '<span class="pill good">moved</span>';
+    if(r.state === 'failed')  return '<span class="pill paid">failed</span>';
+    return '<span class="pill miss">' + esc(r.state) + '</span>';
+  }
+
+  function drawPlan(){
+    if(!S.rows.length && !$('planSheet').classList.contains('hide')) { /* keep it open */ }
+    $('planSheet').classList.remove('hide');
+
+    var c = counts();
+    $('tReady').textContent = c.found;
+    $('tLines').textContent = c.lines;
+    $('tAmount').textContent = money(c.amount);
+    $('tPicked').textContent = c.picked;
+
+    var list = shown();
+
+    $('rows').innerHTML = list.length ? list.map(function(r){
+      var on = r.state === 'ready' && S.picked[key(r)];
+      var lines = r.hits.map(function(l){
+        return '<b>' + money(l.amount) + '</b>' +
+               (l.posting ? ' ' + esc(l.posting) : '') +
+               (l.description ? ' &nbsp;<span>' + esc(l.description) + '</span>' : '');
+      }).join('<br>');
+
+      return '<tr class="' + (r.state === 'ready' && !on ? 'off' : '') + '">' +
+        '<td class="tick">' + (r.state === 'ready'
+          ? '<input type="checkbox" data-k="' + esc(key(r)) + '"' + (on ? ' checked' : '') + '>' : '') + '</td>' +
+        '<td class="mono">' + esc(r.date || '') + '</td>' +
+        '<td>' + esc(r.kindLabel || r.kind) + '</td>' +
+        '<td class="mono">' + esc(r.doc || '') + '</td>' +
+        '<td class="memo">' + esc(r.name || '') + '</td>' +
+        '<td class="lines">' + lines + '</td>' +
+        '<td class="memo">' + esc(r.payFrom || '') + '</td>' +
+        '<td class="num">' + money(r.hitTotal) + '</td>' +
+        '<td>' + stateLabel(r) +
+          (r.state === 'failed' || r.state === 'changed'
+            ? '<div style="font-size:11px;color:var(--muted)">' + esc(r.note || '') + '</div>' : '') +
+        '</td></tr>';
+    }).join('')
+      : '<tr><td colspan="9" style="color:var(--faint);padding:14px">' +
+        (S.rows.length ? 'Nothing matches that filter.'
+                       : 'Nothing is sitting under that category between those dates.') +
+        '</td></tr>';
+
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[type=checkbox]'), function(b){
+      b.addEventListener('change', function(){
+        S.picked[b.getAttribute('data-k')] = b.checked;
+        drawPlan();
+      });
+    });
+
+    $('promise').innerHTML = S.from && S.to
+      ? 'Every ticked line moves from <b>' + esc(S.from.name) + '</b> to <b>' +
+        esc(S.to.name) + '</b>. The date, the payee, the payment account, the amount, ' +
+        'the VAT code and the description are written back unchanged &mdash; only the ' +
+        'Profit &amp; Loss heading moves.'
+      : '';
+
+    $('btnRun').disabled = !c.picked;
+    $('btnRun').textContent = c.picked
+      ? 'Change the category on ' + c.picked + (c.picked === 1 ? ' transaction' : ' transactions')
+      : 'Change the category';
+    $('runHint').textContent = c.picked
+      ? c.pickedLines + (c.pickedLines === 1 ? ' line' : ' lines') + ', ' +
+        money(c.pickedAmount) + ' in all'
+      : 'Tick what to move';
+  }
+
+  function tickAll(on){
+    shown().forEach(function(r){ if(r.state === 'ready') S.picked[key(r)] = on; });
+    drawPlan();
+  }
+
+  function csv(){
+    var rows = [['Date','Type','Number','Name','Paid from','Description','Amount','State']];
+    S.rows.forEach(function(r){
+      r.hits.forEach(function(l){
+        rows.push([r.date, r.kindLabel, r.doc, r.name, r.payFrom,
+                   l.description, l.amount, r.state]);
+      });
+    });
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'change-category.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- the record ---------- */
+
+  function drawHistory(){
+    var list = S.history;
+    $('histWhen').textContent = list.length
+      ? list.length + (list.length === 1 ? ' transaction' : ' transactions')
+      : '';
+
+    $('histRows').innerHTML = list.length ? list.map(function(h){
+      return '<tr>' +
+        '<td class="mono">' + esc(String(h.at || '').slice(0, 16).replace('T', ' ')) + '</td>' +
+        '<td class="mono">' + esc(h.date || '') + '</td>' +
+        '<td>' + esc(h.kind || '') + '</td>' +
+        '<td class="mono">' + esc(h.doc || '') + '</td>' +
+        '<td class="memo">' + esc(h.name || '') + '</td>' +
+        '<td class="memo">' + esc(h.from || '') + '</td>' +
+        '<td class="memo">' + esc(h.to || '') + '</td>' +
+        '<td class="num">' + money(h.amount) + '</td>' +
+        '<td>' + (h.status === 'moved'
+          ? '<span class="pill good">moved</span>'
+          : '<span class="pill paid">failed</span>') +
+          (h.message ? '<div style="font-size:11px;color:var(--muted)">' +
+                       esc(h.message) + '</div>' : '') +
+        '</td></tr>';
+    }).join('')
+      : '<tr><td colspan="9" style="color:var(--faint);padding:14px">' +
+        'Nothing has been moved from this company yet.</td></tr>';
+  }
+
+  function loadHistory(){
+    return get('/api/recat/history').then(function(d){
+      S.history = d.moves || [];
+      drawHistory();
+    }).catch(function(){ /* the record is not worth an error on screen */ });
+  }
+
+  function histCsv(){
+    var rows = [['Moved on','Date','Type','Number','Name','Out of','Into','Lines','Amount','State','Message']];
+    S.history.forEach(function(h){
+      rows.push([h.at, h.date, h.kind, h.doc, h.name, h.from, h.to,
+                 h.lines, h.amount, h.status, h.message]);
+    });
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'categories-moved.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- running ---------- */
+
+  function run(){
+    var ids = S.rows.filter(function(r){ return r.state === 'ready' && S.picked[key(r)]; })
+                    .map(key);
+    if(!ids.length) return;
+
+    $('btnRun').disabled = true;
+    $('log').innerHTML = '';
+    S.logged = 0;
+
+    post('/api/recat/run', { ids: ids })
+      .then(function(){
+        $('runSheet').classList.remove('hide');
+        $('btnStop').classList.remove('hide');
+        $('runSheet').scrollIntoView({ behavior:'smooth', block:'start' });
+        poll();
+      })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        $('btnRun').disabled = false;
+      });
+  }
+
+  function drawScan(s){
+    if(s.running){
+      say('busy', 'Reading the books &mdash; up to <b>' + esc(s.upto) + '</b>, ' +
+        s.read + ' transactions read, <b>' + s.found + '</b> under that category so far');
+      return;
+    }
+    $('btnScan').disabled = false;
+    if(s.error) say('bad', '<b>' + esc(s.error) + '</b>');
+    else say('ok', '<b>' + s.found + (s.found === 1 ? ' transaction' : ' transactions') +
+      '</b> under that category between ' + esc(s.from) + ' and ' + esc(s.to) +
+      ' &mdash; ' + s.read + ' read in all');
+  }
+
+  function drawJob(job){
+    $('runSheet').classList.remove('hide');
+    var pct = job.total ? Math.round(100 * job.done / job.total) : 0;
+    $('bar').style.width = pct + '%';
+    $('runCount').textContent = job.done + ' of ' + job.total;
+    $('kDone').textContent = job.done - job.failed;
+    $('kFailed').textContent = job.failed;
+    $('kLines').textContent = job.changedLines;
+    $('kMoved').textContent = money(job.moved);
+
+    var box = $('log');
+    var atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
+    (job.log || []).slice(S.logged).forEach(function(l){
+      var div = document.createElement('div');
+      if(l.ok){
+        div.className = 'ok';
+        div.textContent = l.doc + ' — ' + l.lines + ' line' + (l.lines === 1 ? '' : 's') +
+          ' moved' + (l.moved ? '  (total moved by ' + l.moved + ')' : '');
+      } else {
+        div.className = 'err';
+        div.textContent = l.doc + ' — ' + l.msg;
+      }
+      box.appendChild(div);
+    });
+    S.logged = (job.log || []).length;
+    if(atEnd) box.scrollTop = box.scrollHeight;
+
+    if(!job.running){
+      $('btnStop').classList.add('hide');
+      $('btnRun').disabled = false;
+      if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');
+      else say('ok', '<b>' + (job.done - job.failed) + ' moved to ' + esc(S.to ? S.to.name : '') +
+        (job.failed ? ', ' + job.failed + ' failed' : '') + '</b>');
+    }
+  }
+
+  function poll(){
+    clearInterval(S.poller);
+    var tick = function(){
+      get('/api/recat/status').then(function(d){
+        if(!d.has) return;
+        S.from = d.from || S.from;
+        S.to = d.to || S.to;
+        var fresh = (d.rows || []).length !== S.rows.length;
+        S.rows = d.rows || [];
+        if(fresh) S.rows.forEach(function(r){
+          if(r.state === 'ready' && S.picked[key(r)] === undefined) S.picked[key(r)] = true;
+        });
+        if(d.scan) drawScan(d.scan);
+        if(d.scan && !d.scan.running) drawPlan();
+        if(d.job) drawJob(d.job);
+        var busy = (d.scan && d.scan.running) || (d.job && d.job.running);
+        if(!busy){
+          clearInterval(S.poller); S.poller = null;
+          drawPlan();
+          // whatever was moved is in the record now
+          if(d.job) loadHistory();
+        }
+      }).catch(function(){ /* keep trying */ });
+    };
+    tick();
+    S.poller = setInterval(tick, 2000);
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('fromFind').addEventListener('input', function(){ drawPicker('from'); });
+  $('toFind').addEventListener('input', function(){ drawPicker('to'); });
+  $('rowFind').addEventListener('input', function(){
+    S.filter = $('rowFind').value.trim().toLowerCase();
+    drawPlan();
+  });
+  $('btnScan').addEventListener('click', scan);
+  $('btnAll').addEventListener('click', function(){ tickAll(true); });
+  $('btnNone').addEventListener('click', function(){ tickAll(false); });
+  $('btnCsv').addEventListener('click', csv);
+  $('btnHist').addEventListener('click', loadHistory);
+  $('btnHistCsv').addEventListener('click', histCsv);
+  $('btnRun').addEventListener('click', run);
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    post('/api/recat/stop').then(function(){ $('btnStop').disabled = false; });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.quick button'), function(b){
+    b.addEventListener('click', function(){ setSpan(b.getAttribute('data-span')); });
+  });
+  $('btnReset').addEventListener('click', function(){
+    post('/api/recat/clear').then(function(){
+      clearInterval(S.poller); S.poller = null;
+      S.rows = []; S.picked = {}; S.filter = '';
+      $('rowFind').value = '';
+      $('planSheet').classList.add('hide');
+      $('runSheet').classList.add('hide');
+      $('btnScan').disabled = false;
+      say('', '');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  setSpan('ytd');
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+    loadHistory();
+
+    loadAccounts().then(function(){
+      // a scan or a run left going in another tab, or before a reload, is picked back up
+      return get('/api/recat/status');
+    }).then(function(d){
+      if(!d || !d.has) return;
+      S.from = d.from; S.to = d.to;
+      drawChosen('from'); drawChosen('to');
+      drawPicker('from'); drawPicker('to');
+      S.rows = d.rows || [];
+      S.rows.forEach(function(r){ if(r.state === 'ready') S.picked[key(r)] = true; });
+      if(d.scan){
+        $('dFrom').value = d.scan.from;
+        $('dTo').value = d.scan.to;
+        drawScan(d.scan);
+      }
+      drawPlan();
+      if(d.job){ S.logged = 0; drawJob(d.job); }
+      if((d.scan && d.scan.running) || (d.job && d.job.running)) poll();
+    }).catch(function(){ /* nothing to pick up */ });
+  });
+})();
+</script>
+</body>
+</html>

@@ -67,6 +67,14 @@ import {
 import {
   parseNumbers as parseSwapNumbers, buildPlan as buildSwapPlan, swapOnInvoice
 } from './swapitem.js';
+import {
+  KINDS as RECAT_KINDS, listAccounts as listRecatAccounts,
+  scanAccount as scanRecatAccount, recatOne
+} from './recat.js';
+import {
+  initRecatStore, saveRecatState, saveRecatProgress, loadRecatState,
+  clearRecatState, unfinishedRecat, logMove as logRecatMove, listMoves as listRecatMoves
+} from './recatstore.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
 import {
   dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy, eachOrder
@@ -2868,6 +2876,307 @@ app.post('/api/swap/clear', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ==================== change category ====================
+// The P&L heading a transaction sits under is one field on one line. This moves
+// that field and leaves the date, the payee, the bank account, the amount and
+// the VAT exactly where they are.
+
+const recatStore = new Map();          // realmId -> { from, to, scan, rows, job, at }
+
+// The run lives in memory while it goes and in Postgres as well, so a deploy
+// half way through does not lose the list. Memory is read first; the table is
+// only gone back to after a restart.
+async function getRecat(realmId) {
+  const live = recatStore.get(realmId);
+  if (live) return live;
+
+  const saved = await loadRecatState(realmId);
+  if (!saved) return null;
+
+  // the process it was running in is gone, so whatever it says, it is not
+  // running now - the boot resume is what restarts one
+  if (saved.scan && saved.scan.running) {
+    saved.scan.running = false;
+    saved.scan.error = 'The server restarted part way through the read. Find them again.';
+  }
+  if (saved.job && saved.job.running) saved.job.running = false;
+
+  recatStore.set(realmId, saved);
+  return saved;
+}
+
+function recatAccount(list, id) {
+  const a = list.filter(x => String(x.id) === String(id))[0];
+  if (!a) throw new Error('That category is not in this company any more');
+  return a;
+}
+
+app.get('/api/recat/accounts', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const token = await getAccessToken(realmId);
+    const accounts = await listRecatAccounts(realmId, token);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      count: accounts.length,
+      accounts,
+      kinds: RECAT_KINDS.map(k => ({ key: k.key, label: k.label }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Reading a year of books takes longer than a request should, so the scan runs
+// on the server and the page polls it - the same shape as every other long job
+// here.
+async function runRecatScan(realmId, st, scan) {
+  const token = await getAccessToken(realmId);
+  const out = await scanRecatAccount(realmId, token,
+    { from: scan.from, to: scan.to, accountId: st.from.id, kinds: scan.kinds },
+    step => {
+      if (scan.stop) throw new Error('stopped');
+      scan.upto = step.upto;
+      scan.kind = step.kind;
+      scan.found = step.found;
+      scan.read = step.read;
+    });
+
+  st.rows = out.rows;
+  scan.read = out.read;
+  scan.found = out.rows.length;
+  scan.running = false;
+  scan.finished = Date.now();
+  // the list is written down once, whole - a part-read scan is not worth
+  // keeping when reading the books again is a minute's work
+  await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+}
+
+app.post('/api/recat/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const { from, to, dateFrom, dateTo, kinds } = req.body || {};
+    if (!from || !to) throw new Error('Pick the category to move out of and the one to move into');
+    if (String(from) === String(to)) throw new Error('Those are the same category');
+    if (!dateFrom || !dateTo) throw new Error('Give the dates to look between');
+    if (dateFrom > dateTo) throw new Error('The first date is after the last one');
+
+    const old = await getRecat(realmId);
+    if (old && old.job && old.job.running) throw new Error('A change is still running');
+    if (old && old.scan && old.scan.running) throw new Error('A scan is still running');
+
+    const token = await getAccessToken(realmId);
+    const accounts = await listRecatAccounts(realmId, token);
+    const fromA = recatAccount(accounts, from);
+    const toA = recatAccount(accounts, to);
+
+    const scan = {
+      running: true, stop: false, from: dateFrom, to: dateTo,
+      kinds: Array.isArray(kinds) ? kinds : null,
+      upto: dateFrom, kind: '', found: 0, read: 0, started: Date.now()
+    };
+    const st = { from: fromA, to: toA, scan, rows: [], job: null, at: Date.now() };
+    recatStore.set(realmId, st);
+    await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+
+    runRecatScan(realmId, st, scan).catch(e => {
+      scan.running = false;
+      scan.error = e.message === 'stopped' ? null : e.message;
+    });
+
+    res.json({ ok: true, from: fromA, to: toA });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// One transaction per request. The batch API times out under load, and a slow
+// run that finishes beats a fast one that does not.
+async function runRecat(realmId, st, job) {
+  const token = await getAccessToken(realmId);
+
+  for (const row of job.rows) {
+    if (job.stop) break;
+    // a resumed run walks the same list again - what is already moved is done
+    if (row.state !== 'ready') continue;
+
+    try {
+      const out = await recatOne(realmId, token, row.kind, row.qbId, st.from.id, st.to);
+      row.state = 'changed';
+      row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' now under ' + st.to.name;
+      job.done++;
+      job.changedLines += out.lines;
+      job.moved = Math.round((job.moved + row.hitTotal) * 100) / 100;
+      job.log.push({
+        ok: true,
+        doc: out.doc || (row.kindLabel + ' ' + row.date),
+        lines: out.lines,
+        // the total is the proof that nothing but the category moved
+        moved: Math.round((out.total - out.before) * 100) / 100
+      });
+      await logRecatMove(realmId, st, row, { ok: true, lines: out.lines })
+        .catch(e => console.error('recat log:', e.message));
+    } catch (e) {
+      row.state = 'failed';
+      row.note = e.message;
+      job.done++;
+      job.failed++;
+      job.log.push({ ok: false, doc: row.doc || (row.kindLabel + ' ' + row.date), msg: e.message });
+      await logRecatMove(realmId, st, row, { ok: false, message: e.message })
+        .catch(err => console.error('recat log:', err.message));
+    }
+
+    // written down after every transaction, so a deploy mid-run costs at most
+    // the one that was in flight
+    job.cursor = job.done;
+    await saveRecatProgress(realmId, st).catch(e => console.error('recat save:', e.message));
+  }
+
+  job.running = false;
+  job.finished = Date.now();
+  await saveRecatProgress(realmId, st).catch(e => console.error('recat save:', e.message));
+}
+
+app.post('/api/recat/run', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = await getRecat(realmId);
+    if (!st) throw new Error('Find the transactions first');
+    if (st.scan && st.scan.running) throw new Error('The scan is still running');
+    if (st.job && st.job.running) throw new Error('That is already running');
+
+    const only = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : null;
+    const rows = st.rows.filter(r =>
+      r.state === 'ready' && r.qbId && (!only || only.includes(r.kind + '|' + r.qbId)));
+    if (!rows.length) throw new Error('None of these are waiting to be moved');
+
+    const job = {
+      running: true, stop: false, done: 0, failed: 0, changedLines: 0, moved: 0,
+      total: rows.length, cursor: 0, log: [], started: Date.now(), rows,
+      // the keys are what a restart reads back to know which rows this run is for
+      keys: rows.map(r => r.kind + '|' + r.qbId)
+    };
+    st.job = job;
+    await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+
+    runRecat(realmId, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+      saveRecatProgress(realmId, st).catch(() => {});
+    });
+
+    res.json({ ok: true, transactions: job.total });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/recat/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const st = await getRecat(realmId);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!st) return res.json({ has: false });
+
+  const s = st.scan, job = st.job;
+  res.json({
+    has: true,
+    from: st.from, to: st.to,
+    rows: st.rows,
+    scan: s ? {
+      running: s.running, from: s.from, to: s.to, upto: s.upto, kind: s.kind,
+      found: s.found, read: s.read, error: s.error || null
+    } : null,
+    job: job ? {
+      running: job.running, done: job.done, failed: job.failed,
+      changedLines: job.changedLines, moved: job.moved, total: job.total,
+      error: job.error || null, log: job.log.slice(-80)
+    } : null
+  });
+});
+
+app.post('/api/recat/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = recatStore.get(realmId);
+  if (st && st.job && st.job.running) st.job.stop = true;
+  if (st && st.scan && st.scan.running) st.scan.stop = true;
+  res.json({ ok: true });
+});
+
+app.post('/api/recat/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = recatStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
+  if (st && st.scan && st.scan.running) return res.status(400).json({ error: 'A scan is still running' });
+  recatStore.delete(realmId);
+  // the list goes; what was actually moved stays in recat_moves
+  await clearRecatState(realmId).catch(e => console.error('recat clear:', e.message));
+  res.json({ ok: true });
+});
+
+// What has been moved in this company, newest first. Read only - this is the
+// record, not something to change.
+app.get('/api/recat/history', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const moves = await listRecatMoves(realmId, Number(req.query.limit) || 200);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ count: moves.length, moves });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// A deploy in the middle of a run leaves the rest of the list sitting in
+// Postgres. This picks it up where it stopped.
+async function resumeRecat() {
+  const rows = await unfinishedRecat();
+
+  for (const r of rows) {
+    const st = {
+      from: r.from_acct, to: r.to_acct, scan: r.scan,
+      rows: r.txns || [], job: null, at: Date.now()
+    };
+    if (!st.from || !st.to || recatStore.has(r.realm_id)) continue;
+
+    const saved = r.job || {};
+    const byKey = new Map(st.rows.map(x => [x.kind + '|' + x.qbId, x]));
+    const left = (saved.keys || []).map(k => byKey.get(k))
+      .filter(x => x && x.state === 'ready');
+    if (!left.length) continue;
+
+    const job = {
+      running: true, stop: false,
+      done: saved.done || 0, failed: saved.failed || 0,
+      changedLines: saved.changedLines || 0, moved: saved.moved || 0,
+      total: saved.total || (saved.keys || []).length,
+      cursor: saved.cursor || 0, keys: saved.keys || [],
+      log: saved.log || [], started: saved.started || Date.now(),
+      rows: left
+    };
+    st.job = job;
+    recatStore.set(r.realm_id, st);
+
+    console.log(`recat: picking up ${left.length} left for ${r.realm_id}`);
+    runRecat(r.realm_id, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+      saveRecatProgress(r.realm_id, st).catch(() => {});
+    });
+  }
+}
+
 // Only asks Google what it has. Nothing is changed.
 app.get('/api/adv/peek-images', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -5639,10 +5948,12 @@ initDb()
   .then(() => initCache())
   .then(() => initCouriers())
     .then(() => import('./jobstore.js').then(m => m.initJobStore()))
+  .then(() => initRecatStore())
   .then(() => app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startKeeper();
         resumeUnfinished().catch(e => console.error('resume failed:', e.message));
+    resumeRecat().catch(e => console.error('recat resume failed:', e.message));
   }))
   .catch(err => {
     console.error('DB init failed:', err);
