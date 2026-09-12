@@ -43,7 +43,9 @@ understand what is happening underneath.
 | Courier dashboard | `courierlive.js`, `dashdata.js`, `postex.js` | Live courier data |
 | Fix duplicates | `fix.html` | Bulk rename / delete of duplicate invoices |
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |
-| Change category | `recat.html`, `recat.js`, `recatstore.js` | Moves transactions from one P&L heading to another, nothing else touched; every move is recorded |
+| Changes (Product / Category / Description) | `swap.html`, `recat.html`, `desc.html` | One rail entry, three tabs — a new kind of change is a new tab, not a new nav line |
+| — Change category | `recat.html`, `recat.js`, `recatstore.js` | Moves transactions from one P&L heading to another, nothing else touched; every move is recorded |
+| — Change by description | `desc.html`, `redesc.js` | Gathers every description in a date range and moves the lines carrying the ticked ones to another heading; recorded alongside the category change |
 
 ---
 

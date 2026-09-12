@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change by description</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs a:hover{color:var(--ink)}
+  .tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+
+  .picker{border:1px solid var(--line-2);border-radius:7px;background:#fff;overflow:hidden}
+  .picker .find{border:0;border-bottom:1px solid var(--line);border-radius:0;
+    font-family:var(--sans);font-size:13.5px}
+  .picker .find:focus-visible{outline-offset:-2px}
+  .picker .list{max-height:210px;overflow:auto}
+  .picker .list button{display:block;width:100%;text-align:left;border:0;background:none;
+    font:inherit;font-size:13px;padding:8px 12px;cursor:pointer;
+    border-bottom:1px solid #EFF1F3;color:var(--text)}
+  .picker .list button:last-child{border-bottom:0}
+  .picker .list button:hover{background:var(--accent-soft)}
+  .picker .list button.on{background:#F2FAF0;font-weight:600}
+  .picker .list button small{display:block;font-family:var(--mono);font-size:11px;
+    color:var(--muted);font-weight:400;margin-top:2px}
+  .picker .none{padding:12px;font-size:12.5px;color:var(--faint)}
+
+  .chosen{border:1px solid var(--qbo);background:#F2FAF0;border-radius:7px;
+    padding:11px 14px;margin-bottom:10px;font-size:13.5px;font-weight:600;
+    display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .chosen small{font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:400}
+  .chosen .swapto{margin-left:auto;font-weight:400}
+
+  .dates{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .dates label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);display:block;margin-bottom:4px}
+  .dates input[type=date]{font-family:var(--mono);font-size:13px;padding:8px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+  .kinds{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}
+  .kinds label{font-size:12.5px;display:flex;align-items:center;gap:6px;cursor:pointer}
+  .kinds input{accent-color:var(--qbo);width:14px;height:14px;margin:0}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px}
+  .tally > div{flex:1;min-width:120px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+  .tally .bad .n{color:var(--neg)}
+
+  td.tick{width:34px}
+  td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
+  td.desc{white-space:normal;max-width:340px;font-weight:600}
+  td.unders{white-space:normal;font-size:11.5px;color:var(--muted);max-width:300px}
+  td.unders b{font-weight:500;color:var(--text)}
+  tr.off{opacity:.42}
+  .rowfind{width:100%;max-width:280px;font-size:13px;padding:7px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .look{border:0;background:none;font:inherit;font-size:11.5px;color:var(--qbo);
+    cursor:pointer;padding:0;text-decoration:underline}
+  tr.peek td{background:#FAFBFA;font-size:11.5px;color:var(--muted);white-space:normal}
+  tr.peek table{width:100%;border-collapse:collapse;margin:4px 0}
+  tr.peek td.in{padding:4px 8px;border-bottom:1px solid var(--line)}
+
+  .optacct{margin-top:12px}
+  .optacct summary{font-size:12.5px;color:var(--muted);cursor:pointer;
+    padding:6px 0;user-select:none}
+  .optacct summary:hover{color:var(--ink)}
+  .optacct .inner{padding-top:8px}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Change by description</h1>
+        <div class="sub">Put every line carrying the same description under a different Profit &amp; Loss heading &mdash; the date, the payee, the bank account, the amount, the VAT and the description itself stay as they are.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Nothing is changed until you have seen the list and pressed the button.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="tabs">
+          <a href="/swap.html">Product</a>
+          <a href="/recat.html">Category</a>
+          <a class="on" href="/desc.html">Description</a>
+        </div>
+
+        <div class="sheet">
+          <div class="sec">
+            <h2><span class="no">01</span> The dates to look between
+              <span class="aside" id="acctCount"></span></h2>
+            <p class="hint" style="margin:0 0 10px">QuickBooks will not search inside a
+              transaction's lines, so the books are read date by date and every description
+              found on the way is gathered. A tighter range is a faster read.</p>
+            <div class="dates">
+              <div><label for="dFrom">From</label><input type="date" id="dFrom"></div>
+              <div><label for="dTo">To</label><input type="date" id="dTo"></div>
+            </div>
+            <div class="quick">
+              <button class="mini" data-span="ytd">This year to date</button>
+              <button class="mini" data-span="last90">Last 90 days</button>
+              <button class="mini" data-span="thismonth">This month</button>
+              <button class="mini" data-span="lastyear">Last year</button>
+            </div>
+
+            <div class="kinds" id="kinds"></div>
+            <p class="hint">Untick what cannot be the problem and the read is shorter.</p>
+
+            <details class="optacct">
+              <summary>Only descriptions sitting under one category &mdash; optional</summary>
+              <div class="inner">
+                <p class="hint" style="margin:0 0 8px">Leave this alone to see every
+                  description in the range. Pick a category to see only the descriptions
+                  posted to it &mdash; Bank charges, say, when that one heading is being
+                  split up.</p>
+                <div id="onlyChosen"></div>
+                <div class="picker">
+                  <input type="text" class="find" id="onlyFind" placeholder="Search by name or type">
+                  <div class="list" id="onlyList"></div>
+                </div>
+                <button class="mini" id="btnOnlyClear" style="margin-top:8px">Any category</button>
+              </div>
+            </details>
+
+            <div class="acts" style="margin-top:14px">
+              <button class="solid" id="btnScan">Find the descriptions</button>
+              <button class="ghost" id="btnReset">Start again</button>
+            </div>
+            <div class="stat" id="statBox"></div>
+          </div>
+        </div>
+
+        <!-- ============ what was found ============ -->
+        <div class="sheet hide" id="planSheet">
+          <div class="sec">
+            <h2><span class="no">02</span> The descriptions in that range
+              <span class="aside" id="planWhen"></span></h2>
+
+            <div class="tally">
+              <div class="ok"><div class="n" id="tDescs">0</div><div class="l">Descriptions</div></div>
+              <div><div class="n" id="tLines">0</div><div class="l">Lines carrying them</div></div>
+              <div><div class="n" id="tAmount">0.00</div><div class="l">What they add up to</div></div>
+              <div class="warn"><div class="n" id="tPicked">0</div><div class="l">Ticked to move</div></div>
+            </div>
+
+            <div class="acts">
+              <input type="text" class="rowfind" id="rowFind" placeholder="Filter by description or category">
+              <button class="mini" id="btnAll">Tick all shown</button>
+              <button class="mini" id="btnNone">Untick all</button>
+              <button class="mini" id="btnCsv">Download this list</button>
+            </div>
+
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Description</th>
+                    <th class="num">Transactions</th>
+                    <th class="num">Lines</th>
+                    <th class="num">Amount</th>
+                    <th>Under now</th>
+                    <th>First</th>
+                    <th>Last</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ where they go ============ -->
+        <div class="sheet hide" id="toSheet">
+          <div class="sec">
+            <h2><span class="no">03</span> The category to put them under</h2>
+            <div id="toChosen"></div>
+            <div class="picker">
+              <input type="text" class="find" id="toFind" placeholder="Search by name or type">
+              <div class="list" id="toList"></div>
+            </div>
+
+            <div class="note info" style="margin-top:16px" id="promise"></div>
+
+            <button class="run" id="btnRun" style="margin-top:14px">Change the category</button>
+            <p class="runhint" id="runHint"></p>
+          </div>
+        </div>
+
+        <!-- ============ the run ============ -->
+        <div class="sheet hide" id="runSheet">
+          <div class="sec">
+            <h2><span class="no">04</span> Moving
+              <span class="aside" id="runCount"></span></h2>
+            <div class="prog"><i id="bar"></i></div>
+            <div class="keys" style="margin-bottom:12px">
+              <div><em style="background:var(--ok)"></em>Done <b id="kDone">0</b></div>
+              <div><em style="background:var(--neg)"></em>Failed <b id="kFailed">0</b></div>
+              <div><em style="background:var(--line-2)"></em>Lines changed <b id="kLines">0</b></div>
+              <div><em style="background:var(--line-2)"></em>Moved <b id="kMoved">0.00</b></div>
+            </div>
+            <div class="log" id="log"></div>
+            <div class="acts" style="margin-top:14px">
+              <button class="ghost hide" id="btnStop">Stop</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ the record ============ -->
+        <div class="sheet" id="histSheet">
+          <div class="sec">
+            <h2><span class="no">05</span> What has been moved
+              <span class="aside" id="histWhen"></span></h2>
+            <p class="hint" style="margin:0 0 10px">The same record the category change
+              writes to &mdash; QuickBooks' own audit log only says a transaction was
+              edited, so this is the only place that says which heading it came from.</p>
+            <div class="acts">
+              <button class="mini" id="btnHist">Refresh</button>
+              <button class="mini" id="btnHistCsv">Download the record</button>
+            </div>
+            <div class="tbl" style="max-height:300px">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Moved on</th>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Number</th>
+                    <th>Name</th>
+                    <th>Out of</th>
+                    <th>Into</th>
+                    <th class="num">Amount</th>
+                    <th>State</th>
+                  </tr>
+                </thead>
+                <tbody id="histRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <footer>
+          <p><b>What this changes.</b> Only the category on the lines carrying a ticked
+            description. The date, the payee, the payment account, the amount, the VAT code,
+            the description, the memo, the class, the customer and the attachments are
+            written back exactly as QuickBooks handed them over, so the transaction total
+            comes out at what it was before and only the Profit &amp; Loss heading moves.</p>
+          <p>Transactions are changed one at a time. Closing this page does not stop the run.</p>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    accounts: [], kinds: [], only: null, to: null,
+    groups: [], picked: {}, poller: null, logged: 0, filter: '',
+    history: [], open: {}
+  };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+
+  function get(url){
+    return fetch(url, { cache:'no-store' }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+
+  /* ---------- the dates ---------- */
+
+  function iso(d){ return d.toISOString().slice(0, 10); }
+
+  function setSpan(which){
+    var now = new Date();
+    var y = now.getUTCFullYear(), m = now.getUTCMonth();
+    var a, b = new Date(Date.UTC(y, m, now.getUTCDate()));
+
+    if(which === 'ytd')            a = new Date(Date.UTC(y, 0, 1));
+    else if(which === 'thismonth') a = new Date(Date.UTC(y, m, 1));
+    else if(which === 'lastyear'){ a = new Date(Date.UTC(y - 1, 0, 1));
+                                   b = new Date(Date.UTC(y - 1, 11, 31)); }
+    else { a = new Date(Date.UTC(y, m, now.getUTCDate() - 89)); }
+
+    $('dFrom').value = iso(a);
+    $('dTo').value = iso(b);
+  }
+
+  /* ---------- picking a category ---------- */
+
+  function drawPicker(which){
+    var find = $(which + 'Find').value.trim().toLowerCase();
+    var chosen = S[which];
+    var box = $(which + 'List');
+
+    var hits = S.accounts.filter(function(a){
+      if(!find) return true;
+      return (a.name || '').toLowerCase().indexOf(find) > -1 ||
+             (a.type || '').toLowerCase().indexOf(find) > -1 ||
+             (a.sub || '').toLowerCase().indexOf(find) > -1;
+    }).slice(0, 300);
+
+    if(!hits.length){
+      box.innerHTML = '<div class="none">Nothing here by that name or type.</div>';
+      return;
+    }
+
+    box.innerHTML = hits.map(function(a){
+      var on = chosen && chosen.id === a.id;
+      return '<button type="button" data-id="' + esc(a.id) + '"' + (on ? ' class="on"' : '') + '>' +
+             esc(a.name) + (a.active ? '' : ' <small style="display:inline">(inactive)</small>') +
+             '<small>' + esc(a.type || '') + (a.sub ? ' &middot; ' + esc(a.sub) : '') +
+             '</small></button>';
+    }).join('');
+
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){
+        var id = b.getAttribute('data-id');
+        S[which] = S.accounts.filter(function(a){ return a.id === id; })[0] || null;
+        drawChosen(which);
+        drawPicker(which);
+        if(which === 'to') drawPlan();
+      });
+    });
+  }
+
+  function drawChosen(which){
+    var a = S[which];
+    var box = $(which + 'Chosen');
+    if(!a){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="chosen">' + esc(a.name) +
+      '<small>' + esc(a.type || '') + '</small>' +
+      '<span class="swapto"><small>' +
+      (which === 'only' ? 'only what is under this' : 'they go under this instead') +
+      '</small></span></div>';
+  }
+
+  function drawKinds(){
+    $('kinds').innerHTML = S.kinds.map(function(k){
+      return '<label><input type="checkbox" value="' + esc(k.key) + '" checked> ' +
+             esc(k.label) + '</label>';
+    }).join('');
+  }
+
+  function pickedKinds(){
+    return Array.prototype.filter
+      .call($('kinds').querySelectorAll('input'), function(b){ return b.checked; })
+      .map(function(b){ return b.value; });
+  }
+
+  function loadAccounts(){
+    say('busy', 'Reading the chart of accounts from QuickBooks…');
+    // the same list the category change reads - one chart of accounts, one call
+    return get('/api/recat/accounts').then(function(d){
+      S.accounts = d.accounts || [];
+      S.kinds = d.kinds || [];
+      $('acctCount').textContent = d.count + ' accounts';
+      drawKinds();
+      drawPicker('only'); drawPicker('to');
+      say('', '');
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  /* ---------- finding them ---------- */
+
+  function scan(){
+    if(!$('dFrom').value || !$('dTo').value) return say('bad', '<b>Give both dates</b>');
+    var kinds = pickedKinds();
+    if(!kinds.length) return say('bad', '<b>Leave at least one kind of transaction ticked</b>');
+
+    $('btnScan').disabled = true;
+    S.picked = {}; S.open = {};
+    say('busy', 'Reading the books…');
+
+    post('/api/desc/scan', {
+      dateFrom: $('dFrom').value, dateTo: $('dTo').value,
+      kinds: kinds,
+      accountId: S.only ? S.only.id : null
+    })
+      .then(function(){ poll(); })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        $('btnScan').disabled = false;
+      });
+  }
+
+  function shown(){
+    var f = S.filter;
+    if(!f) return S.groups;
+    return S.groups.filter(function(g){
+      return (g.description || '').toLowerCase().indexOf(f) > -1 ||
+             (g.accounts || []).some(function(a){
+               return (a.name || '').toLowerCase().indexOf(f) > -1;
+             });
+    });
+  }
+
+  function counts(){
+    var c = { descs:0, lines:0, amount:0, picked:0, pickedLines:0,
+              pickedAmount:0, pickedTxns:0 };
+    S.groups.forEach(function(g){
+      c.descs++;
+      c.lines += g.lines;
+      c.amount += g.total;
+      if(S.picked[g.key]){
+        c.picked++;
+        c.pickedLines += g.lines;
+        c.pickedTxns += g.txns;
+        c.pickedAmount += g.total;
+      }
+    });
+    return c;
+  }
+
+  function unders(g){
+    return (g.accounts || []).map(function(a){
+      return '<b>' + esc(a.name || '(none)') + '</b> &middot; ' + a.lines;
+    }).join('<br>');
+  }
+
+  function drawPlan(){
+    $('planSheet').classList.remove('hide');
+    $('toSheet').classList.remove('hide');
+
+    var c = counts();
+    $('tDescs').textContent = c.descs;
+    $('tLines').textContent = c.lines;
+    $('tAmount').textContent = money(c.amount);
+    $('tPicked').textContent = c.picked;
+
+    var list = shown();
+
+    $('rows').innerHTML = list.length ? list.map(function(g){
+      var on = !!S.picked[g.key];
+      var state = g.changed || g.failed
+        ? '<div style="font-size:11px;color:var(--muted)">' +
+          (g.changed ? g.changed + ' moved' : '') +
+          (g.failed ? (g.changed ? ', ' : '') + g.failed + ' failed' : '') + '</div>'
+        : '';
+
+      var row = '<tr class="' + (on ? '' : 'off') + '">' +
+        '<td class="tick"><input type="checkbox" data-k="' + esc(g.key) + '"' +
+          (on ? ' checked' : '') + '></td>' +
+        '<td class="desc">' + esc(g.description) + state + '</td>' +
+        '<td class="num">' + g.txns + '</td>' +
+        '<td class="num">' + g.lines + '</td>' +
+        '<td class="num">' + money(g.total) + '</td>' +
+        '<td class="unders">' + unders(g) + '</td>' +
+        '<td class="mono">' + esc(g.first || '') + '</td>' +
+        '<td class="mono">' + esc(g.last || '') + '</td>' +
+        '<td><button class="look" data-peek="' + esc(g.key) + '">' +
+          (S.open[g.key] ? 'hide' : 'see them') + '</button></td>' +
+        '</tr>';
+
+      if(S.open[g.key]){
+        row += '<tr class="peek"><td colspan="9" id="' + peekId(g.key) +
+               '">Reading…</td></tr>';
+      }
+      return row;
+    }).join('')
+      : '<tr><td colspan="9" style="color:var(--faint);padding:14px">' +
+        (S.groups.length ? 'Nothing matches that filter.'
+                         : 'No descriptions were found between those dates.') +
+        '</td></tr>';
+
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[type=checkbox]'), function(b){
+      b.addEventListener('change', function(){
+        S.picked[b.getAttribute('data-k')] = b.checked;
+        drawPlan();
+      });
+    });
+    Array.prototype.forEach.call($('rows').querySelectorAll('button[data-peek]'), function(b){
+      b.addEventListener('click', function(){
+        var k = b.getAttribute('data-peek');
+        S.open[k] = !S.open[k];
+        drawPlan();
+      });
+    });
+    // a group left open before a redraw is filled in again
+    Object.keys(S.open).forEach(function(k){ if(S.open[k]) peek(k); });
+
+    $('promise').innerHTML = S.to
+      ? 'Every line carrying a ticked description moves to <b>' + esc(S.to.name) +
+        '</b>. The date, the payee, the payment account, the amount, the VAT code and ' +
+        'the description are written back unchanged &mdash; only the Profit &amp; Loss ' +
+        'heading moves.'
+      : 'Pick the category they go under.';
+
+    $('btnRun').disabled = !c.picked || !S.to;
+    $('btnRun').textContent = c.picked
+      ? 'Change the category on ' + c.pickedTxns +
+        (c.pickedTxns === 1 ? ' transaction' : ' transactions')
+      : 'Change the category';
+    $('runHint').textContent = c.picked
+      ? c.picked + (c.picked === 1 ? ' description' : ' descriptions') + ', ' +
+        c.pickedLines + (c.pickedLines === 1 ? ' line' : ' lines') + ', ' +
+        money(c.pickedAmount) + ' in all'
+      : 'Tick what to move';
+  }
+
+  function peekId(k){ return 'peek-' + k.replace(/[^a-z0-9]/gi, '_'); }
+
+  function peek(k){
+    var box = $(peekId(k));
+    if(!box) return;
+    var g = S.groups.filter(function(x){ return x.key === k; })[0];
+    get('/api/desc/rows?desc=' + encodeURIComponent(g ? g.description : k)).then(function(d){
+      var rows = d.rows || [];
+      box.innerHTML = rows.length
+        ? '<table>' + rows.slice(0, 60).map(function(r){
+            return '<tr>' +
+              '<td class="in mono">' + esc(r.date || '') + '</td>' +
+              '<td class="in">' + esc(r.kindLabel || r.kind) + '</td>' +
+              '<td class="in mono">' + esc(r.doc || '') + '</td>' +
+              '<td class="in">' + esc(r.name || '') + '</td>' +
+              '<td class="in">' + esc(r.payFrom || '') + '</td>' +
+              '<td class="in num">' + money(r.hitTotal) + '</td>' +
+              '<td class="in">' + esc(r.note || r.state || '') + '</td>' +
+            '</tr>';
+          }).join('') + '</table>' +
+          (rows.length > 60 ? '<div>and ' + (rows.length - 60) + ' more</div>' : '')
+        : 'Nothing to show.';
+    }).catch(function(e){ box.textContent = e.message; });
+  }
+
+  function tickAll(on){
+    shown().forEach(function(g){ S.picked[g.key] = on; });
+    drawPlan();
+  }
+
+  function csv(){
+    var rows = [['Description','Transactions','Lines','Amount','Under now','First','Last']];
+    S.groups.forEach(function(g){
+      rows.push([g.description, g.txns, g.lines, g.total,
+                 (g.accounts || []).map(function(a){ return a.name + ' (' + a.lines + ')'; }).join(' | '),
+                 g.first, g.last]);
+    });
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'descriptions.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- the record ---------- */
+
+  function drawHistory(){
+    var list = S.history;
+    $('histWhen').textContent = list.length
+      ? list.length + (list.length === 1 ? ' transaction' : ' transactions')
+      : '';
+
+    $('histRows').innerHTML = list.length ? list.map(function(h){
+      return '<tr>' +
+        '<td class="mono">' + esc(String(h.at || '').slice(0, 16).replace('T', ' ')) + '</td>' +
+        '<td class="mono">' + esc(h.date || '') + '</td>' +
+        '<td>' + esc(h.kind || '') + '</td>' +
+        '<td class="mono">' + esc(h.doc || '') + '</td>' +
+        '<td class="memo">' + esc(h.name || '') + '</td>' +
+        '<td class="memo">' + esc(h.from || '') + '</td>' +
+        '<td class="memo">' + esc(h.to || '') + '</td>' +
+        '<td class="num">' + money(h.amount) + '</td>' +
+        '<td>' + (h.status === 'moved'
+          ? '<span class="pill good">moved</span>'
+          : '<span class="pill paid">failed</span>') +
+          (h.message ? '<div style="font-size:11px;color:var(--muted)">' +
+                       esc(h.message) + '</div>' : '') +
+        '</td></tr>';
+    }).join('')
+      : '<tr><td colspan="9" style="color:var(--faint);padding:14px">' +
+        'Nothing has been moved from this company yet.</td></tr>';
+  }
+
+  function loadHistory(){
+    return get('/api/recat/history').then(function(d){
+      S.history = d.moves || [];
+      drawHistory();
+    }).catch(function(){ /* the record is not worth an error on screen */ });
+  }
+
+  function histCsv(){
+    var rows = [['Moved on','Date','Type','Number','Name','Out of','Into','Lines','Amount','State','Message']];
+    S.history.forEach(function(h){
+      rows.push([h.at, h.date, h.kind, h.doc, h.name, h.from, h.to,
+                 h.lines, h.amount, h.status, h.message]);
+    });
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'categories-moved.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- running ---------- */
+
+  function run(){
+    var keys = S.groups.filter(function(g){ return S.picked[g.key]; })
+                       .map(function(g){ return g.description; });
+    if(!keys.length || !S.to) return;
+
+    $('btnRun').disabled = true;
+    $('log').innerHTML = '';
+    S.logged = 0;
+
+    post('/api/desc/run', { descs: keys, to: S.to.id })
+      .then(function(){
+        $('runSheet').classList.remove('hide');
+        $('btnStop').classList.remove('hide');
+        $('runSheet').scrollIntoView({ behavior:'smooth', block:'start' });
+        poll();
+      })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        $('btnRun').disabled = false;
+      });
+  }
+
+  function drawScan(s){
+    if(s.running){
+      say('busy', 'Reading the books &mdash; up to <b>' + esc(s.upto) + '</b>, ' +
+        s.read + ' transactions read, <b>' + s.found + '</b> carrying a description so far');
+      return;
+    }
+    $('btnScan').disabled = false;
+    if(s.error) say('bad', '<b>' + esc(s.error) + '</b>');
+    else say('ok', '<b>' + S.groups.length +
+      (S.groups.length === 1 ? ' description' : ' descriptions') + '</b> on ' + s.found +
+      ' transactions between ' + esc(s.from) + ' and ' + esc(s.to) +
+      ' &mdash; ' + s.read + ' read in all');
+  }
+
+  function drawJob(job){
+    $('runSheet').classList.remove('hide');
+    var pct = job.total ? Math.round(100 * job.done / job.total) : 0;
+    $('bar').style.width = pct + '%';
+    $('runCount').textContent = job.done + ' of ' + job.total;
+    $('kDone').textContent = job.done - job.failed;
+    $('kFailed').textContent = job.failed;
+    $('kLines').textContent = job.changedLines;
+    $('kMoved').textContent = money(job.moved);
+
+    var box = $('log');
+    var atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
+    (job.log || []).slice(S.logged).forEach(function(l){
+      var div = document.createElement('div');
+      if(l.ok){
+        div.className = 'ok';
+        div.textContent = l.doc + ' — ' + l.lines + ' line' + (l.lines === 1 ? '' : 's') +
+          ' moved' + (l.moved ? '  (total moved by ' + l.moved + ')' : '');
+      } else {
+        div.className = 'err';
+        div.textContent = l.doc + ' — ' + l.msg;
+      }
+      box.appendChild(div);
+    });
+    S.logged = (job.log || []).length;
+    if(atEnd) box.scrollTop = box.scrollHeight;
+
+    if(!job.running){
+      $('btnStop').classList.add('hide');
+      $('btnRun').disabled = false;
+      if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');
+      else say('ok', '<b>' + (job.done - job.failed) + ' moved to ' + esc(S.to ? S.to.name : '') +
+        (job.failed ? ', ' + job.failed + ' failed' : '') + '</b>');
+    }
+  }
+
+  function poll(){
+    clearInterval(S.poller);
+    var tick = function(){
+      get('/api/desc/status').then(function(d){
+        if(!d.has) return;
+        S.only = d.account || S.only;
+        var fresh = (d.groups || []).length !== S.groups.length;
+        S.groups = d.groups || [];
+        if(fresh) S.groups.forEach(function(g){
+          if(S.picked[g.key] === undefined) S.picked[g.key] = false;
+        });
+        if(d.scan) drawScan(d.scan);
+        if(d.scan && !d.scan.running) drawPlan();
+        if(d.job) drawJob(d.job);
+        var busy = (d.scan && d.scan.running) || (d.job && d.job.running);
+        if(!busy){
+          clearInterval(S.poller); S.poller = null;
+          drawPlan();
+          if(d.job) loadHistory();
+        }
+      }).catch(function(){ /* keep trying */ });
+    };
+    tick();
+    S.poller = setInterval(tick, 2000);
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('onlyFind').addEventListener('input', function(){ drawPicker('only'); });
+  $('toFind').addEventListener('input', function(){ drawPicker('to'); });
+  $('btnOnlyClear').addEventListener('click', function(){
+    S.only = null; drawChosen('only'); drawPicker('only');
+  });
+  $('rowFind').addEventListener('input', function(){
+    S.filter = $('rowFind').value.trim().toLowerCase();
+    drawPlan();
+  });
+  $('btnScan').addEventListener('click', scan);
+  $('btnAll').addEventListener('click', function(){ tickAll(true); });
+  $('btnNone').addEventListener('click', function(){ tickAll(false); });
+  $('btnCsv').addEventListener('click', csv);
+  $('btnHist').addEventListener('click', loadHistory);
+  $('btnHistCsv').addEventListener('click', histCsv);
+  $('btnRun').addEventListener('click', run);
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    post('/api/desc/stop').then(function(){ $('btnStop').disabled = false; });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.quick button'), function(b){
+    b.addEventListener('click', function(){ setSpan(b.getAttribute('data-span')); });
+  });
+  $('btnReset').addEventListener('click', function(){
+    post('/api/desc/clear').then(function(){
+      clearInterval(S.poller); S.poller = null;
+      S.groups = []; S.picked = {}; S.open = {}; S.filter = '';
+      $('rowFind').value = '';
+      $('planSheet').classList.add('hide');
+      $('toSheet').classList.add('hide');
+      $('runSheet').classList.add('hide');
+      $('btnScan').disabled = false;
+      say('', '');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  setSpan('ytd');
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+    loadHistory();
+
+    loadAccounts().then(function(){
+      // a scan or a run left going in another tab, or before a reload, is picked back up
+      return get('/api/desc/status');
+    }).then(function(d){
+      if(!d || !d.has) return;
+      S.only = d.account || null;
+      S.to = d.to || null;
+      drawChosen('only'); drawChosen('to');
+      drawPicker('only'); drawPicker('to');
+      S.groups = d.groups || [];
+      if(d.scan){
+        $('dFrom').value = d.scan.from;
+        $('dTo').value = d.scan.to;
+        drawScan(d.scan);
+      }
+      if(d.job && d.job.descs){
+        d.job.descs.forEach(function(k){ S.picked[k] = true; });
+      }
+      drawPlan();
+      if(d.job){ S.logged = 0; drawJob(d.job); }
+      if((d.scan && d.scan.running) || (d.job && d.job.running)) poll();
+    }).catch(function(){ /* nothing to pick up */ });
+  });
+})();
+</script>
+</body>
+</html>

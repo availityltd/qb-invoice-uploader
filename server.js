@@ -75,6 +75,9 @@ import {
   initRecatStore, saveRecatState, saveRecatProgress, loadRecatState,
   clearRecatState, unfinishedRecat, logMove as logRecatMove, listMoves as listRecatMoves
 } from './recatstore.js';
+import {
+  scanDescriptions, groupByDescription, linesFor, descKey, redescOne
+} from './redesc.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
 import {
   dashboard as dashData, recentCprs, pickups, pickupOrders, ordersBy, eachOrder
@@ -3136,6 +3139,264 @@ app.get('/api/recat/history', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+/* ==================== change category by description ==================== */
+
+// Same edit as the category change, picked a different way. The description on
+// a line is what tells one bank charge from another, so the range is read once,
+// the descriptions in it are gathered with what they are worth and what they
+// sit under now, and the ticked ones are moved to the category chosen.
+//
+// The list lives in memory only. It is rebuilt by reading the books again,
+// which is a minute's work, and what was actually moved goes into the same
+// record as the category change so there is one place to look.
+
+const descStore = new Map();           // realmId -> { scan, rows, accountId, to, job, at }
+
+const descRound = n => Math.round(n * 100) / 100;
+
+// The transactions a run is about, each carrying the lines that will move and
+// what those lines are worth - that is what the record is written from.
+function descPick(st, keys) {
+  const want = new Set(keys);
+  const out = [];
+
+  st.rows.forEach(row => {
+    if (row.state !== 'ready') return;
+    const hits = linesFor(row, want, st.accountId);
+    if (!hits.length) return;
+    row.hits = hits;
+    row.hitTotal = descRound(hits.reduce((s, l) => s + Number(l.amount || 0), 0));
+    out.push(row);
+  });
+
+  return out;
+}
+
+app.post('/api/desc/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const { dateFrom, dateTo, kinds, accountId } = req.body || {};
+    if (!dateFrom || !dateTo) throw new Error('Give the dates to look between');
+    if (dateFrom > dateTo) throw new Error('The first date is after the last one');
+
+    const old = descStore.get(realmId);
+    if (old && old.job && old.job.running) throw new Error('A change is still running');
+    if (old && old.scan && old.scan.running) throw new Error('A scan is still running');
+
+    const token = await getAccessToken(realmId);
+    let only = null;
+    if (accountId) {
+      const accounts = await listRecatAccounts(realmId, token);
+      only = recatAccount(accounts, accountId);
+    }
+
+    const scan = {
+      running: true, stop: false, from: dateFrom, to: dateTo,
+      kinds: Array.isArray(kinds) ? kinds : null,
+      upto: dateFrom, kind: '', found: 0, read: 0, started: Date.now()
+    };
+    const st = {
+      scan, rows: [], accountId: only ? only.id : null, account: only,
+      to: null, job: null, at: Date.now()
+    };
+    descStore.set(realmId, st);
+
+    scanDescriptions(realmId, token,
+      { from: dateFrom, to: dateTo, accountId: st.accountId, kinds: scan.kinds },
+      step => {
+        if (scan.stop) throw new Error('stopped');
+        scan.upto = step.upto;
+        scan.kind = step.kind;
+        scan.found = step.found;
+        scan.read = step.read;
+      })
+      .then(out => {
+        st.rows = out.rows;
+        scan.read = out.read;
+        scan.found = out.rows.length;
+        scan.running = false;
+        scan.finished = Date.now();
+      })
+      .catch(e => {
+        scan.running = false;
+        scan.error = e.message === 'stopped' ? null : e.message;
+      });
+
+    res.json({ ok: true, account: only });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/desc/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const st = descStore.get(realmId);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!st) return res.json({ has: false });
+
+  const s = st.scan, job = st.job;
+  res.json({
+    has: true,
+    account: st.account || null,
+    to: st.to || null,
+    // one row per description, not per transaction - the transactions behind
+    // one of them are asked for on their own
+    groups: groupByDescription(st.rows),
+    txns: st.rows.length,
+    scan: s ? {
+      running: s.running, from: s.from, to: s.to, upto: s.upto, kind: s.kind,
+      found: s.found, read: s.read, error: s.error || null
+    } : null,
+    job: job ? {
+      running: job.running, done: job.done, failed: job.failed,
+      changedLines: job.changedLines, moved: job.moved, total: job.total,
+      descs: job.descs, error: job.error || null, log: job.log.slice(-80)
+    } : null
+  });
+});
+
+// The transactions carrying one description, so what is about to move can be
+// looked at before it moves.
+app.get('/api/desc/rows', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const st = descStore.get(realmId);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!st) return res.json({ rows: [] });
+
+  const want = new Set([descKey(req.query.desc || '')]);
+  const limit = Math.min(Number(req.query.limit) || 300, 1000);
+  const out = [];
+
+  for (const row of st.rows) {
+    const hits = linesFor(row, want, st.accountId);
+    if (!hits.length) continue;
+    out.push({
+      kind: row.kind, kindLabel: row.kindLabel, qbId: row.qbId, doc: row.doc,
+      date: row.date, name: row.name, payFrom: row.payFrom,
+      state: row.state, note: row.note || '',
+      hits,
+      hitTotal: descRound(hits.reduce((s, l) => s + Number(l.amount || 0), 0))
+    });
+    if (out.length >= limit) break;
+  }
+
+  res.json({ rows: out });
+});
+
+// One transaction per request, the same as the category change - the batch API
+// times out under load and a slow run that finishes beats a fast one that does
+// not.
+async function runDesc(realmId, st, job) {
+  const token = await getAccessToken(realmId);
+
+  for (const row of job.rows) {
+    if (job.stop) break;
+    if (row.state !== 'ready') continue;
+
+    // what this row is posted to now, so the record says where it came from
+    const was = row.hits[0];
+    const from = { id: String(was.accountId), name: was.account || '' };
+
+    try {
+      const out = await redescOne(realmId, token, row.kind, row.qbId,
+        row.hits.map(l => l.id), st.to);
+      row.state = 'changed';
+      row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' now under ' + st.to.name;
+      // the list on screen is rebuilt from these lines, so they say where the
+      // lines are now rather than where they were when the books were read
+      row.hits.forEach(l => { l.accountId = String(st.to.id); l.account = st.to.name; });
+      job.done++;
+      job.changedLines += out.lines;
+      job.moved = descRound(job.moved + row.hitTotal);
+      job.log.push({
+        ok: true,
+        doc: out.doc || (row.kindLabel + ' ' + row.date),
+        lines: out.lines,
+        // the total is the proof that nothing but the category moved
+        moved: descRound(out.total - out.before)
+      });
+      await logRecatMove(realmId, { from, to: st.to }, row, { ok: true, lines: out.lines })
+        .catch(e => console.error('desc log:', e.message));
+    } catch (e) {
+      row.state = 'failed';
+      row.note = e.message;
+      job.done++;
+      job.failed++;
+      job.log.push({ ok: false, doc: row.doc || (row.kindLabel + ' ' + row.date), msg: e.message });
+      await logRecatMove(realmId, { from, to: st.to }, row, { ok: false, message: e.message })
+        .catch(err => console.error('desc log:', err.message));
+    }
+  }
+
+  job.running = false;
+  job.finished = Date.now();
+}
+
+app.post('/api/desc/run', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = descStore.get(realmId);
+    if (!st) throw new Error('Find the descriptions first');
+    if (st.scan && st.scan.running) throw new Error('The scan is still running');
+    if (st.job && st.job.running) throw new Error('That is already running');
+
+    const body = req.body || {};
+    const keys = (Array.isArray(body.descs) ? body.descs : []).map(descKey).filter(Boolean);
+    if (!keys.length) throw new Error('Tick at least one description');
+    if (!body.to) throw new Error('Pick the category to put them under');
+
+    const token = await getAccessToken(realmId);
+    const accounts = await listRecatAccounts(realmId, token);
+    const toA = recatAccount(accounts, body.to);
+    st.to = toA;
+
+    const rows = descPick(st, keys);
+    if (!rows.length) throw new Error('Nothing is waiting under those descriptions');
+
+    const job = {
+      running: true, stop: false, done: 0, failed: 0, changedLines: 0, moved: 0,
+      total: rows.length, descs: keys, log: [], started: Date.now(), rows
+    };
+    st.job = job;
+
+    runDesc(realmId, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+    });
+
+    res.json({ ok: true, transactions: job.total, to: toA });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/desc/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = descStore.get(realmId);
+  if (st && st.job && st.job.running) st.job.stop = true;
+  if (st && st.scan && st.scan.running) st.scan.stop = true;
+  res.json({ ok: true });
+});
+
+app.post('/api/desc/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = descStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
+  if (st && st.scan && st.scan.running) return res.status(400).json({ error: 'A scan is still running' });
+  descStore.delete(realmId);
+  res.json({ ok: true });
 });
 
 // A deploy in the middle of a run leaves the rest of the list sitting in

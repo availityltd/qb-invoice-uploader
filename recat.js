@@ -37,13 +37,13 @@ export const kindOf = key => KINDS.filter(k => k.key === key)[0] || null;
 
 const quote = s => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
-function shiftDays(iso, n) {
+export function shiftDays(iso, n) {
   const d = new Date(iso + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
 
-function monthEnd(iso) {
+export function monthEnd(iso) {
   const d = new Date(iso + 'T00:00:00Z');
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))
     .toISOString().slice(0, 10);
@@ -166,13 +166,34 @@ export function planTxn(kind, txn, accountId) {
   };
 }
 
+// The same row, but carrying every account line rather than only the ones
+// under one category. Picking by description needs to see them all first.
+export function planAnyTxn(kind, txn) {
+  const lines = linesOf(kind, txn);
+  if (!lines.length) return null;
+
+  return {
+    kind: kind.key,
+    kindLabel: labelOf(kind, txn),
+    qbId: String(txn.Id),
+    doc: String(txn.DocNumber || ''),
+    date: txn.TxnDate || '',
+    name: nameOf(kind, txn),
+    payFrom: payFrom(kind, txn),
+    memo: txn.PrivateNote || txn.Memo || '',
+    total: Number(txn.TotalAmt || 0),
+    lineCount: lines.length,
+    lines
+  };
+}
+
 /* ==================== finding them ==================== */
 
 // QuickBooks will not filter on an account sitting inside a line, so the only
 // way to the transactions behind a P&L figure is to read the date range and
 // keep the ones that carry the account. A month at a time, a week at a time if
 // a month runs past the 9,000 row cap.
-async function readWindow(realmId, token, kind, from, to, keep) {
+export async function readWindow(realmId, token, kind, from, to, keep) {
   let start = 1;
   let hitCap = false;
 

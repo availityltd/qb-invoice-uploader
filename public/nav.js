@@ -18,8 +18,9 @@
     ]},
     { group: 'Maintenance', items: [
       { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
-      { href:'/swap.html',     label:'Change product',   icon:'swap' },
-      { href:'/recat.html',    label:'Change category',  icon:'tag' },
+      // Product, Category and Description are tabs of one page, not three
+      // lines in the rail - a new kind of change is a new tab, not a new link
+      { href:'/swap.html',     label:'Changes',          icon:'swap' },
       { href:'/void.html',     label:'Void invoices',    icon:'ban' }
     ]}
   ];
@@ -64,7 +65,10 @@
     sec.items.forEach(function(it){
       // Merge payments is a tab of Receive payments, so that is what lights up
       var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0) ||
-               (it.href === '/payments.html' && path === '/merge.html');
+               (it.href === '/payments.html' && path === '/merge.html') ||
+               // every tab of the changes page lights up the one link
+               (it.href === '/swap.html' &&
+                (path === '/recat.html' || path === '/desc.html'));
       html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') +
               (it.tree ? ' id="couriersLink"' : '') + '>' +
               svg(it.icon) + it.label +

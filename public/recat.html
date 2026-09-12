@@ -61,6 +61,11 @@
   td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
   .rowfind{width:100%;max-width:280px;font-size:13px;padding:7px 10px;
     border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs a:hover{color:var(--ink)}
+  .tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
 </style>
 </head>
 <body>
@@ -86,6 +91,12 @@
       </div>
 
       <div id="body" class="hide">
+
+        <div class="tabs">
+          <a href="/swap.html">Product</a>
+          <a class="on" href="/recat.html">Category</a>
+          <a href="/desc.html">Description</a>
+        </div>
 
         <div class="sheet">
           <div class="sec">
