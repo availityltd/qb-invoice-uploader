@@ -47,7 +47,7 @@ understand what is happening underneath.
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |
 | Changes (Product / Category / Description) | `swap.html`, `recat.html`, `desc.html` | One rail entry, three tabs — a new kind of change is a new tab, not a new nav line |
 | — Change category | `recat.html`, `recat.js`, `recatstore.js` | Moves transactions from one P&L heading to another, nothing else touched; every move is recorded |
-| — Change by description | `desc.html`, `redesc.js` | Gathers every description in a date range and moves the lines carrying the ticked ones to another heading; recorded alongside the category change |
+| — Change by description / name | `desc.html`, `redesc.js` | Reads a date range once and lists it by description, by payee or by the heading it is under; moves the lines under the ticked ones to another heading; recorded alongside the category change |
 
 ---
 

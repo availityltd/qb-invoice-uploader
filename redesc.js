@@ -31,21 +31,48 @@ const round2 = n => Math.round(n * 100) / 100;
 
 /* ==================== finding them ==================== */
 
-// Which lines of a row this run is about: the ones whose description was
-// ticked, and - when the scan was narrowed to one category - only the ones
-// sitting under it.
-export function linesFor(row, keys, accountId) {
+// Three ways of saying "these ones". A charge is not always recognisable by
+// what is written on the line - plenty are blank, or say the same thing on
+// every row - but the payee is there, and so is the heading it sits under.
+export const WAYS = [
+  { key: 'description', label: 'Description', column: 'Description' },
+  { key: 'name',        label: 'Name',        column: 'Name on the transaction' },
+  { key: 'account',     label: 'Category',    column: 'Category it is under' }
+];
+
+export const wayOf = by => WAYS.filter(w => w.key === by)[0] || WAYS[0];
+
+// What one line is called, whichever way the list is being read. A category is
+// keyed by its id rather than its name, because two headings can be written the
+// same way under different parents.
+export function keyOf(by, row, line) {
+  if (by === 'name')    return descKey(row.name);
+  if (by === 'account') return line.accountId ? 'acct:' + String(line.accountId) : '';
+  return descKey(line.description);
+}
+
+export function labelOf(by, row, line) {
+  if (by === 'name')    return String(row.name || '').trim();
+  if (by === 'account') return String(line.account || '').trim();
+  return String(line.description || '').trim();
+}
+
+// Which lines of a row this run is about: the ones under a ticked heading, and
+// - when the scan was narrowed to one category - only the ones sitting under
+// it. Read by name, a ticked payee means every line of that transaction.
+export function linesFor(row, keys, accountId, by) {
   const want = keys instanceof Set ? keys : new Set(keys || []);
   return (row.lines || []).filter(l =>
-    want.has(descKey(l.description)) &&
+    want.has(keyOf(by || 'description', row, l)) &&
     (!accountId || String(l.accountId) === String(accountId)));
 }
 
-// A row is kept only if it has a line with something written on it. A line with
-// no description cannot be picked by description, so it is not carried around.
+// A row is kept if it has an account-carrying line - with a description or
+// without one, because a blank description is exactly the row that has to be
+// found by its payee instead.
 function keepable(row, accountId) {
   const lines = (row.lines || []).filter(l =>
-    descKey(l.description) && (!accountId || String(l.accountId) === String(accountId)));
+    !accountId || String(l.accountId) === String(accountId));
   if (!lines.length) return null;
   return Object.assign({}, row, { lines, state: 'ready', note: '' });
 }
@@ -106,24 +133,28 @@ export async function scanDescriptions(realmId, token, opts, onStep) {
   return { rows, read };
 }
 
-/* ==================== one line per description ==================== */
+/* ==================== one line per heading ==================== */
 
-// What the page shows: one row per description, how many transactions and lines
-// carry it, what they add up to, and the categories they sit under now. This is
-// the list the change is picked from.
-export function groupByDescription(rows) {
+// What the page shows: one row per description, per payee or per category -
+// whichever way is being read - with how many transactions and lines carry it,
+// what they add up to, and the categories they sit under now. This is the list
+// the change is picked from.
+export function groupRows(rows, by) {
+  const way = wayOf(by).key;
   const map = new Map();
 
   (rows || []).forEach(row => {
+    const here = new Set();
+
     (row.lines || []).forEach(l => {
-      const key = descKey(l.description);
+      const key = keyOf(way, row, l);
       if (!key) return;
 
       let g = map.get(key);
       if (!g) {
         g = {
           key,
-          description: String(l.description || '').trim(),
+          description: labelOf(way, row, l),
           txns: 0, lines: 0, total: 0,
           first: row.date || '', last: row.date || '',
           accounts: [], changed: 0, failed: 0,
@@ -135,6 +166,7 @@ export function groupByDescription(rows) {
       g.lines++;
       g.total = round2(g.total + Number(l.amount || 0));
       g._txns.add(row.kind + '|' + row.qbId);
+      here.add(key);
       if (row.date) {
         if (!g.first || row.date < g.first) g.first = row.date;
         if (!g.last  || row.date > g.last)  g.last  = row.date;
@@ -147,13 +179,9 @@ export function groupByDescription(rows) {
       g._acc.set(a.id, a);
     });
 
+    // a transaction is counted once against every heading it carried
     if (row.state === 'changed' || row.state === 'failed') {
-      // a transaction is counted once against every description it carried
-      const done = new Set();
-      (row.lines || []).forEach(l => {
-        const key = descKey(l.description);
-        if (!key || done.has(key)) return;
-        done.add(key);
+      here.forEach(key => {
         const g = map.get(key);
         if (!g) return;
         if (row.state === 'changed') g.changed++; else g.failed++;

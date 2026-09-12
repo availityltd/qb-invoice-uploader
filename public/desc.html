@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Change by description</title>
+<title>Change in bulk</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0F2E24">
@@ -74,6 +74,15 @@
   tr.peek table{width:100%;border-collapse:collapse;margin:4px 0}
   tr.peek td.in{padding:4px 8px;border-bottom:1px solid var(--line)}
 
+  .ways{display:flex;gap:2px;margin:0 0 14px;border:1px solid var(--line-2);
+    border-radius:8px;padding:3px;background:#F7F8F7;width:max-content;max-width:100%;
+    flex-wrap:wrap}
+  .ways button{border:0;background:none;font:inherit;font-size:12.5px;padding:7px 15px;
+    border-radius:6px;cursor:pointer;color:var(--muted)}
+  .ways button:hover{color:var(--ink)}
+  .ways button.on{background:#fff;color:var(--ink);font-weight:600;
+    box-shadow:0 1px 2px rgba(0,0,0,.07)}
+
   .optacct{margin-top:12px}
   .optacct summary{font-size:12.5px;color:var(--muted);cursor:pointer;
     padding:6px 0;user-select:none}
@@ -89,8 +98,8 @@
   <div class="main">
     <div class="topline">
       <div>
-        <h1>Change by description</h1>
-        <div class="sub">Put every line carrying the same description under a different Profit &amp; Loss heading &mdash; the date, the payee, the bank account, the amount, the VAT and the description itself stay as they are.</div>
+        <h1>Change by description, name or category</h1>
+        <div class="sub">Put every line that shares a description, a payee or a category under a different Profit &amp; Loss heading &mdash; the date, the payee, the bank account, the amount, the VAT and the description itself stay as they are.</div>
       </div>
     </div>
 
@@ -108,7 +117,7 @@
         <div class="tabs">
           <a href="/swap.html">Product</a>
           <a href="/recat.html">Category</a>
-          <a class="on" href="/desc.html">Description</a>
+          <a class="on" href="/desc.html">Description / Name</a>
         </div>
 
         <div class="sheet">
@@ -159,18 +168,23 @@
         <!-- ============ what was found ============ -->
         <div class="sheet hide" id="planSheet">
           <div class="sec">
-            <h2><span class="no">02</span> The descriptions in that range
+            <h2><span class="no">02</span> What is in that range
               <span class="aside" id="planWhen"></span></h2>
 
+            <p class="hint" style="margin:0 0 10px">One read of the books, three ways of
+              reading it. A charge with nothing written on the line is still found by the
+              payee it was paid to, or by the heading it is sitting under.</p>
+            <div class="ways" id="ways"></div>
+
             <div class="tally">
-              <div class="ok"><div class="n" id="tDescs">0</div><div class="l">Descriptions</div></div>
+              <div class="ok"><div class="n" id="tDescs">0</div><div class="l" id="tDescsL">Descriptions</div></div>
               <div><div class="n" id="tLines">0</div><div class="l">Lines carrying them</div></div>
               <div><div class="n" id="tAmount">0.00</div><div class="l">What they add up to</div></div>
               <div class="warn"><div class="n" id="tPicked">0</div><div class="l">Ticked to move</div></div>
             </div>
 
             <div class="acts">
-              <input type="text" class="rowfind" id="rowFind" placeholder="Filter by description or category">
+              <input type="text" class="rowfind" id="rowFind" placeholder="Filter this list">
               <button class="mini" id="btnAll">Tick all shown</button>
               <button class="mini" id="btnNone">Untick all</button>
               <button class="mini" id="btnCsv">Download this list</button>
@@ -181,7 +195,7 @@
                 <thead>
                   <tr>
                     <th></th>
-                    <th>Description</th>
+                    <th id="thLabel">Description</th>
                     <th class="num">Transactions</th>
                     <th class="num">Lines</th>
                     <th class="num">Amount</th>
@@ -289,8 +303,16 @@
   var S = {
     accounts: [], kinds: [], only: null, to: null,
     groups: [], picked: {}, poller: null, logged: 0, filter: '',
-    history: [], open: {}
+    history: [], open: {},
+    by: 'description',
+    ways: [ { key:'description', label:'Description', column:'Description' },
+            { key:'name',        label:'Name',        column:'Name on the transaction' },
+            { key:'account',     label:'Category',    column:'Category it is under' } ]
   };
+
+  function way(){
+    return S.ways.filter(function(w){ return w.key === S.by; })[0] || S.ways[0];
+  }
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -477,6 +499,9 @@
     $('toSheet').classList.remove('hide');
 
     var c = counts();
+    $('thLabel').textContent = way().column;
+    $('tDescsL').textContent = way().label === 'Description' ? 'Descriptions'
+                             : way().label === 'Name' ? 'Names' : 'Categories';
     $('tDescs').textContent = c.descs;
     $('tLines').textContent = c.lines;
     $('tAmount').textContent = money(c.amount);
@@ -514,7 +539,7 @@
     }).join('')
       : '<tr><td colspan="9" style="color:var(--faint);padding:14px">' +
         (S.groups.length ? 'Nothing matches that filter.'
-                         : 'No descriptions were found between those dates.') +
+                         : 'Nothing was found between those dates.') +
         '</td></tr>';
 
     Array.prototype.forEach.call($('rows').querySelectorAll('input[type=checkbox]'), function(b){
@@ -534,10 +559,16 @@
     Object.keys(S.open).forEach(function(k){ if(S.open[k]) peek(k); });
 
     $('promise').innerHTML = S.to
-      ? 'Every line carrying a ticked description moves to <b>' + esc(S.to.name) +
+      ? 'Every line under a ticked ' + esc(way().label.toLowerCase()) +
+        ' moves to <b>' + esc(S.to.name) +
         '</b>. The date, the payee, the payment account, the amount, the VAT code and ' +
         'the description are written back unchanged &mdash; only the Profit &amp; Loss ' +
-        'heading moves.'
+        'heading moves.' +
+        (S.by === 'name' && !S.only
+          ? '<br><br>Read by name, that is <b>every</b> line of those transactions. If ' +
+            'one of them is split across two headings, both lines move. Narrow the scan ' +
+            'to one category above to move only what is under it.'
+          : '')
       : 'Pick the category they go under.';
 
     $('btnRun').disabled = !c.picked || !S.to;
@@ -546,10 +577,41 @@
         (c.pickedTxns === 1 ? ' transaction' : ' transactions')
       : 'Change the category';
     $('runHint').textContent = c.picked
-      ? c.picked + (c.picked === 1 ? ' description' : ' descriptions') + ', ' +
+      ? c.picked + ' ' + esc(way().label.toLowerCase()) + (c.picked === 1 ? '' : 's') + ', ' +
         c.pickedLines + (c.pickedLines === 1 ? ' line' : ' lines') + ', ' +
         money(c.pickedAmount) + ' in all'
       : 'Tick what to move';
+  }
+
+  // One read of the books listed three ways. Regrouping costs nothing on the
+  // server, so switching does not read QuickBooks again - but the ticks are
+  // dropped, because a description ticked is not a payee ticked.
+  function drawWays(){
+    $('ways').innerHTML = S.ways.map(function(w){
+      return '<button type="button" data-by="' + esc(w.key) + '"' +
+             (w.key === S.by ? ' class="on"' : '') + '>' + esc(w.label) + '</button>';
+    }).join('');
+
+    Array.prototype.forEach.call($('ways').querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){
+        var by = b.getAttribute('data-by');
+        if(by === S.by) return;
+        S.by = by;
+        S.picked = {}; S.open = {};
+        try { localStorage.setItem('descBy', by); } catch(e){ /* not worth an error */ }
+        drawWays();
+        refresh();
+      });
+    });
+  }
+
+  // the list as it stands, read the way that is asked for now
+  function refresh(){
+    return get('/api/desc/status?by=' + encodeURIComponent(S.by)).then(function(d){
+      if(!d.has) return;
+      S.groups = d.groups || [];
+      drawPlan();
+    }).catch(function(){ /* the list on screen is still the last good one */ });
   }
 
   function peekId(k){ return 'peek-' + k.replace(/[^a-z0-9]/gi, '_'); }
@@ -557,8 +619,8 @@
   function peek(k){
     var box = $(peekId(k));
     if(!box) return;
-    var g = S.groups.filter(function(x){ return x.key === k; })[0];
-    get('/api/desc/rows?desc=' + encodeURIComponent(g ? g.description : k)).then(function(d){
+    get('/api/desc/rows?by=' + encodeURIComponent(S.by) +
+        '&key=' + encodeURIComponent(k)).then(function(d){
       var rows = d.rows || [];
       box.innerHTML = rows.length
         ? '<table>' + rows.slice(0, 60).map(function(r){
@@ -661,14 +723,14 @@
 
   function run(){
     var keys = S.groups.filter(function(g){ return S.picked[g.key]; })
-                       .map(function(g){ return g.description; });
+                       .map(function(g){ return g.key; });
     if(!keys.length || !S.to) return;
 
     $('btnRun').disabled = true;
     $('log').innerHTML = '';
     S.logged = 0;
 
-    post('/api/desc/run', { descs: keys, to: S.to.id })
+    post('/api/desc/run', { keys: keys, by: S.by, to: S.to.id })
       .then(function(){
         $('runSheet').classList.remove('hide');
         $('btnStop').classList.remove('hide');
@@ -684,13 +746,13 @@
   function drawScan(s){
     if(s.running){
       say('busy', 'Reading the books &mdash; up to <b>' + esc(s.upto) + '</b>, ' +
-        s.read + ' transactions read, <b>' + s.found + '</b> carrying a description so far');
+        s.read + ' transactions read, <b>' + s.found + '</b> kept so far');
       return;
     }
     $('btnScan').disabled = false;
     if(s.error) say('bad', '<b>' + esc(s.error) + '</b>');
-    else say('ok', '<b>' + S.groups.length +
-      (S.groups.length === 1 ? ' description' : ' descriptions') + '</b> on ' + s.found +
+    else say('ok', '<b>' + S.groups.length + ' ' + way().label.toLowerCase() +
+      (S.groups.length === 1 ? '' : 's') + '</b> on ' + s.found +
       ' transactions between ' + esc(s.from) + ' and ' + esc(s.to) +
       ' &mdash; ' + s.read + ' read in all');
   }
@@ -734,9 +796,10 @@
   function poll(){
     clearInterval(S.poller);
     var tick = function(){
-      get('/api/desc/status').then(function(d){
+      get('/api/desc/status?by=' + encodeURIComponent(S.by)).then(function(d){
         if(!d.has) return;
         S.only = d.account || S.only;
+        if(d.ways && d.ways.length) S.ways = d.ways;
         var fresh = (d.groups || []).length !== S.groups.length;
         S.groups = d.groups || [];
         if(fresh) S.groups.forEach(function(g){
@@ -797,6 +860,11 @@
   });
 
   setSpan('ytd');
+  try {
+    var saved = localStorage.getItem('descBy');
+    if(saved) S.by = saved;
+  } catch(e){ /* the default way is fine */ }
+  drawWays();
 
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
@@ -805,7 +873,7 @@
 
     loadAccounts().then(function(){
       // a scan or a run left going in another tab, or before a reload, is picked back up
-      return get('/api/desc/status');
+      return get('/api/desc/status?by=' + encodeURIComponent(S.by));
     }).then(function(d){
       if(!d || !d.has) return;
       S.only = d.account || null;
@@ -818,7 +886,8 @@
         $('dTo').value = d.scan.to;
         drawScan(d.scan);
       }
-      if(d.job && d.job.descs){
+      if(d.ways && d.ways.length) S.ways = d.ways;
+      if(d.job && d.job.descs && (d.job.by || 'description') === S.by){
         d.job.descs.forEach(function(k){ S.picked[k] = true; });
       }
       drawPlan();

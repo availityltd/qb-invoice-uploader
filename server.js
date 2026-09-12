@@ -79,7 +79,8 @@ import {
   clearRecatState, unfinishedRecat, logMove as logRecatMove, listMoves as listRecatMoves
 } from './recatstore.js';
 import {
-  scanDescriptions, groupByDescription, linesFor, descKey, redescOne
+  scanDescriptions, groupRows as groupDescRows, linesFor, descKey, redescOne,
+  WAYS as DESC_WAYS, wayOf as descWayOf
 } from './redesc.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
 import {
@@ -3297,13 +3298,13 @@ const descRound = n => Math.round(n * 100) / 100;
 
 // The transactions a run is about, each carrying the lines that will move and
 // what those lines are worth - that is what the record is written from.
-function descPick(st, keys) {
+function descPick(st, keys, by) {
   const want = new Set(keys);
   const out = [];
 
   st.rows.forEach(row => {
     if (row.state !== 'ready') return;
-    const hits = linesFor(row, want, st.accountId);
+    const hits = linesFor(row, want, st.accountId, by);
     if (!hits.length) return;
     row.hits = hits;
     row.hitTotal = descRound(hits.reduce((s, l) => s + Number(l.amount || 0), 0));
@@ -3380,13 +3381,20 @@ app.get('/api/desc/status', async (req, res) => {
   if (!st) return res.json({ has: false });
 
   const s = st.scan, job = st.job;
+  // the same read, listed by description, by payee or by the heading it is
+  // under - whichever the page is asking for. Regrouping is free, so changing
+  // the way does not read the books again.
+  const by = descWayOf(req.query.by).key;
+
   res.json({
     has: true,
     account: st.account || null,
     to: st.to || null,
-    // one row per description, not per transaction - the transactions behind
-    // one of them are asked for on their own
-    groups: groupByDescription(st.rows),
+    by,
+    ways: DESC_WAYS,
+    // one row per heading, not per transaction - the transactions behind one of
+    // them are asked for on their own
+    groups: groupDescRows(st.rows, by),
     txns: st.rows.length,
     scan: s ? {
       running: s.running, from: s.from, to: s.to, upto: s.upto, kind: s.kind,
@@ -3395,7 +3403,8 @@ app.get('/api/desc/status', async (req, res) => {
     job: job ? {
       running: job.running, done: job.done, failed: job.failed,
       changedLines: job.changedLines, moved: job.moved, total: job.total,
-      descs: job.descs, error: job.error || null, log: job.log.slice(-80)
+      descs: job.descs, by: job.by || 'description',
+      error: job.error || null, log: job.log.slice(-80)
     } : null
   });
 });
@@ -3410,12 +3419,13 @@ app.get('/api/desc/rows', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!st) return res.json({ rows: [] });
 
-  const want = new Set([descKey(req.query.desc || '')]);
+  const by = descWayOf(req.query.by).key;
+  const want = new Set([String(req.query.key || descKey(req.query.desc || ''))]);
   const limit = Math.min(Number(req.query.limit) || 300, 1000);
   const out = [];
 
   for (const row of st.rows) {
-    const hits = linesFor(row, want, st.accountId);
+    const hits = linesFor(row, want, st.accountId, by);
     if (!hits.length) continue;
     out.push({
       kind: row.kind, kindLabel: row.kindLabel, qbId: row.qbId, doc: row.doc,
@@ -3490,8 +3500,12 @@ app.post('/api/desc/run', async (req, res) => {
     if (st.job && st.job.running) throw new Error('That is already running');
 
     const body = req.body || {};
-    const keys = (Array.isArray(body.descs) ? body.descs : []).map(descKey).filter(Boolean);
-    if (!keys.length) throw new Error('Tick at least one description');
+    const by = descWayOf(body.by).key;
+    // the keys come back as the list handed out - already levelled for case and
+    // spacing, and a category keyed by its id
+    const keys = (Array.isArray(body.keys) ? body.keys : [])
+      .map(k => String(k || '').trim()).filter(Boolean);
+    if (!keys.length) throw new Error('Tick at least one of them');
     if (!body.to) throw new Error('Pick the category to put them under');
 
     const token = await getAccessToken(realmId);
@@ -3499,12 +3513,12 @@ app.post('/api/desc/run', async (req, res) => {
     const toA = recatAccount(accounts, body.to);
     st.to = toA;
 
-    const rows = descPick(st, keys);
-    if (!rows.length) throw new Error('Nothing is waiting under those descriptions');
+    const rows = descPick(st, keys, by);
+    if (!rows.length) throw new Error('Nothing is waiting under those');
 
     const job = {
       running: true, stop: false, done: 0, failed: 0, changedLines: 0, moved: 0,
-      total: rows.length, descs: keys, log: [], started: Date.now(), rows
+      total: rows.length, descs: keys, by, log: [], started: Date.now(), rows
     };
     st.job = job;
 
