@@ -15,7 +15,7 @@ const API = 'https://quickbooks.api.intuit.com';
 
 // "Default Shipping Product", SKU Shipping, 199 a parcel - named plainly enough
 // that the name is what finds it, in whichever of the three places it is written
-const looksLikeShipping = line => {
+export const looksLikeShipping = line => {
   const d = line.SalesItemLineDetail || {};
   const item = d.ItemRef ? String(d.ItemRef.name || '') : '';
   return /shipping|delivery|courier|freight/i.test(item + ' ' + (line.Description || ''));

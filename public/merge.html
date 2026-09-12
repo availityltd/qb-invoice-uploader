@@ -133,6 +133,25 @@
     border-bottom:2px solid transparent;margin-bottom:-1px}
   .tabs a:hover{color:var(--ink)}
   .tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+
+  /* take the shipping off pasted invoices - its own little table */
+  .shiptbl{border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:420px;
+    background:#fff}
+  .shiptbl table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .shiptbl th{position:sticky;top:0;background:#F7F8F7;text-align:left;font-weight:600;
+    font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+    padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .shiptbl td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top;
+    white-space:nowrap}
+  .shiptbl tr:last-child td{border-bottom:0}
+  .shiptbl td.num{text-align:right;font-family:var(--mono)}
+  .shiptbl td.mono{font-family:var(--mono)}
+  .shiptbl td.ship{white-space:normal;font-size:11.5px;color:var(--muted);max-width:320px}
+  .shiptbl td.ship b{font-family:var(--mono);font-weight:500;color:var(--text)}
+  .shiptbl td.tick{width:34px}
+  .shiptbl td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
+  .shiptbl tr.off{opacity:.45}
+  #stepShip textarea{min-height:120px}
 </style>
 </head>
 <body>
@@ -250,6 +269,65 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Its own thing: no CPR, no arithmetic - the numbers are known and the
+             shipping line on them has to come off. -->
+        <div class="step" id="stepShip">
+          <h2>Take the shipping off pasted invoices</h2>
+          <div class="hint">Nothing above is needed for this. Paste the invoice numbers,
+            look at the shipping line found on each one, and take it off. Everything else
+            on the invoice &mdash; the products, the customer, the date, the tax &mdash;
+            stays exactly as it is.</div>
+
+          <textarea id="shipIn" spellcheck="false"
+            placeholder="One invoice number a line&#10;91306999&#10;WH1132&#10;#91307004"></textarea>
+
+          <div class="row" style="margin-top:10px">
+            <button class="solid" id="btnShipFind">Find these invoices</button>
+            <button id="btnShipClear">Start again</button>
+            <span id="shipNote2" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+
+          <div id="shipOut" class="hide" style="margin-top:16px">
+            <div class="tally" id="shipTally"></div>
+
+            <div class="row" style="margin-bottom:10px">
+              <button id="btnShipAll">Tick all that can be done</button>
+              <button id="btnShipNone">Untick all</button>
+            </div>
+
+            <div class="shiptbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Invoice</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Shipping line</th>
+                    <th class="num">Shipping</th>
+                    <th class="num">Invoice total</th>
+                    <th>State</th>
+                  </tr>
+                </thead>
+                <tbody id="shipRows"></tbody>
+              </table>
+            </div>
+
+            <div class="row" style="margin-top:14px">
+              <button class="solid" id="btnShipRun">Take the shipping off</button>
+              <button id="btnShipStop" style="display:none;background:var(--neg);color:#fff">Stop</button>
+              <span id="shipRunNote" style="font-size:12px;color:var(--muted)"></span>
+            </div>
+
+            <div id="shipRun" class="hide">
+              <div class="prog"><i id="shipBar"></i></div>
+              <div class="paylog" id="shipLog"></div>
+            </div>
+          </div>
+
+          <div class="stat" id="shipStat"></div>
         </div>
 
         <div class="stat" id="statBox"></div>
@@ -878,5 +956,259 @@
 
 })();
 </script>
+
+<script>
+/* Take the shipping off pasted invoices.
+   Its own list, its own run - nothing here touches the CPR match above. */
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = { rows: [], picked: {}, poller: null, logged: 0 };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function say(cls, html){
+    $('shipStat').className = 'stat' + (cls ? ' ' + cls : '');
+    $('shipStat').innerHTML = html;
+  }
+  function post(url, body){
+    return fetch(url, {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+  function get(url){
+    return fetch(url, { cache:'no-store' }).then(function(r){ return r.json(); })
+      .then(function(d){ if(d.error) throw new Error(d.error); return d; });
+  }
+
+  function counts(){
+    var c = { found:0, ready:0, picked:0, pickedAmount:0, missing:0, noship:0, done:0, failed:0 };
+    S.rows.forEach(function(r){
+      c.found++;
+      if(r.state === 'ready'){
+        c.ready++;
+        if(S.picked[r.qbId]){ c.picked++; c.pickedAmount += r.hitTotal; }
+      }
+      if(r.state === 'missing')  c.missing++;
+      if(r.state === 'noship')   c.noship++;
+      if(r.state === 'stripped') c.done++;
+      if(r.state === 'failed')   c.failed++;
+    });
+    return c;
+  }
+
+  function pill(r){
+    if(r.state === 'ready')    return '<span class="pill open">ready</span>';
+    if(r.state === 'stripped') return '<span class="pill good">shipping off</span>';
+    if(r.state === 'failed')   return '<span class="pill paid">failed</span>';
+    if(r.state === 'missing')  return '<span class="pill miss">not found</span>';
+    return '<span class="pill miss">nothing to take off</span>';
+  }
+
+  function draw(){
+    $('shipOut').classList.remove('hide');
+    var c = counts();
+
+    function box(cls, n, label){
+      return '<div' + (cls ? ' class="' + cls + '"' : '') + '><div class="n">' + n +
+             '</div><div class="l">' + label + '</div></div>';
+    }
+    $('shipTally').innerHTML =
+      box('', c.found, 'Invoices found') +
+      box('ok', c.ready, 'With shipping on them') +
+      box('warn', c.picked, 'Ticked') +
+      box('', money(c.pickedAmount), 'Shipping to come off') +
+      (c.missing ? box('warn', c.missing, 'Not in QuickBooks') : '') +
+      (c.done ? box('ok', c.done, 'Done') : '') +
+      (c.failed ? box('bad', c.failed, 'Failed') : '');
+
+    $('shipRows').innerHTML = S.rows.length ? S.rows.map(function(r){
+      var on = r.state === 'ready' && S.picked[r.qbId];
+      var lines = r.hits.length
+        ? r.hits.map(function(l){
+            return esc(l.item || l.description || 'Shipping') +
+                   ' <b>' + money(l.amount) + '</b>';
+          }).join('<br>')
+        : '<span style="color:var(--faint)">&mdash;</span>';
+
+      return '<tr class="' + (r.state === 'ready' && !on ? 'off' : '') + '">' +
+        '<td class="tick">' + (r.state === 'ready'
+          ? '<input type="checkbox" data-id="' + esc(r.qbId) + '"' + (on ? ' checked' : '') + '>'
+          : '') + '</td>' +
+        '<td class="mono">' + esc(r.doc || r.pastedAs || '') +
+          (r.paid ? ' <span class="pill paid">paid</span>' : '') + '</td>' +
+        '<td class="mono">' + esc(r.date || '') + '</td>' +
+        '<td>' + esc(r.customer || '') + '</td>' +
+        '<td class="ship">' + lines + '</td>' +
+        '<td class="num">' + money(r.hitTotal) + '</td>' +
+        '<td class="num">' + money(r.total) + '</td>' +
+        '<td>' + pill(r) +
+          (r.note ? '<div style="font-size:11px;color:var(--muted)">' + esc(r.note) + '</div>' : '') +
+        '</td></tr>';
+    }).join('')
+      : '<tr><td colspan="8" style="color:var(--faint);padding:14px">Nothing pasted yet.</td></tr>';
+
+    Array.prototype.forEach.call($('shipRows').querySelectorAll('input[type=checkbox]'), function(b){
+      b.addEventListener('change', function(){
+        S.picked[b.getAttribute('data-id')] = b.checked;
+        draw();
+      });
+    });
+
+    $('btnShipRun').disabled = !c.picked;
+    $('btnShipRun').textContent = c.picked
+      ? 'Take the shipping off ' + c.picked + (c.picked === 1 ? ' invoice' : ' invoices')
+      : 'Take the shipping off';
+    $('shipRunNote').textContent = c.picked
+      ? money(c.pickedAmount) + ' of shipping in all'
+      : 'Tick what to take it off';
+  }
+
+  function find(){
+    var text = $('shipIn').value;
+    if(!text.trim()) return say('bad', '<b>Paste the invoice numbers first</b>');
+
+    $('btnShipFind').disabled = true;
+    say('busy', 'Reading these invoices from QuickBooks…');
+
+    post('/api/shipfix/plan', { text: text })
+      .then(function(d){
+        S.rows = d.rows || [];
+        S.picked = {};
+        // a paid invoice going down in value leaves a credit, so it is shown
+        // but not ticked for you
+        S.rows.forEach(function(r){
+          if(r.state === 'ready' && !r.paid) S.picked[r.qbId] = true;
+        });
+        draw();
+        var c = counts();
+        say('ok', '<b>' + c.ready + (c.ready === 1 ? ' invoice' : ' invoices') +
+          '</b> with a shipping line, out of ' + d.pasted + ' pasted' +
+          (c.missing ? ' &mdash; ' + c.missing + ' not in QuickBooks' : ''));
+      })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); })
+      .then(function(){ $('btnShipFind').disabled = false; });
+  }
+
+  function drawJob(job){
+    $('shipRun').classList.remove('hide');
+    var pct = job.total ? Math.round(100 * job.done / job.total) : 0;
+    $('shipBar').style.width = pct + '%';
+
+    var box = $('shipLog');
+    (job.log || []).slice(S.logged).forEach(function(l){
+      var div = document.createElement('div');
+      if(l.ok){
+        div.textContent = l.doc + ' — ' + l.lines + ' shipping line' +
+          (l.lines === 1 ? '' : 's') + ' off, ' + money(l.amount);
+      } else {
+        div.className = 'fail';
+        div.textContent = l.doc + ' — ' + l.msg;
+      }
+      box.appendChild(div);
+    });
+    S.logged = (job.log || []).length;
+    box.scrollTop = box.scrollHeight;
+
+    if(!job.running){
+      $('btnShipStop').style.display = 'none';
+      $('btnShipRun').disabled = false;
+      if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');
+      else say('ok', '<b>' + (job.done - job.failed) +
+        (job.done - job.failed === 1 ? ' invoice' : ' invoices') + ' done, ' +
+        money(job.taken) + ' of shipping taken off' +
+        (job.failed ? ', ' + job.failed + ' failed' : '') + '</b>');
+    }
+  }
+
+  function poll(){
+    clearInterval(S.poller);
+    var tick = function(){
+      get('/api/shipfix/status').then(function(d){
+        if(!d.has) return;
+        S.rows = d.rows || [];
+        draw();
+        if(d.job) drawJob(d.job);
+        if(!d.job || !d.job.running){ clearInterval(S.poller); S.poller = null; }
+      }).catch(function(){ /* keep trying */ });
+    };
+    tick();
+    S.poller = setInterval(tick, 1500);
+  }
+
+  function run(){
+    var ids = S.rows.filter(function(r){ return r.state === 'ready' && S.picked[r.qbId]; })
+                    .map(function(r){ return r.qbId; });
+    if(!ids.length) return;
+
+    $('btnShipRun').disabled = true;
+    $('shipLog').innerHTML = '';
+    S.logged = 0;
+
+    post('/api/shipfix/run', { ids: ids })
+      .then(function(){
+        $('shipRun').classList.remove('hide');
+        $('btnShipStop').style.display = '';
+        say('busy', 'Taking the shipping off…');
+        poll();
+      })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        $('btnShipRun').disabled = false;
+      });
+  }
+
+  function tickAll(on){
+    S.rows.forEach(function(r){ if(r.state === 'ready') S.picked[r.qbId] = on; });
+    draw();
+  }
+
+  $('btnShipFind').addEventListener('click', find);
+  $('btnShipAll').addEventListener('click', function(){ tickAll(true); });
+  $('btnShipNone').addEventListener('click', function(){ tickAll(false); });
+  $('btnShipRun').addEventListener('click', run);
+  $('btnShipStop').addEventListener('click', function(){
+    $('btnShipStop').disabled = true;
+    post('/api/shipfix/stop').then(function(){ $('btnShipStop').disabled = false; });
+  });
+  $('btnShipClear').addEventListener('click', function(){
+    post('/api/shipfix/clear').then(function(){
+      clearInterval(S.poller); S.poller = null;
+      S.rows = []; S.picked = {}; S.logged = 0;
+      $('shipIn').value = '';
+      $('shipOut').classList.add('hide');
+      $('shipRun').classList.add('hide');
+      $('shipLog').innerHTML = '';
+      say('', '');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  // a list found before a reload, or a run still going, is picked back up
+  window.APP.ready.then(function(s){
+    if(!s.connected) return;
+    get('/api/shipfix/status').then(function(d){
+      if(!d || !d.has) return;
+      S.rows = d.rows || [];
+      S.rows.forEach(function(r){
+        if(r.state === 'ready' && !r.paid) S.picked[r.qbId] = true;
+      });
+      draw();
+      if(d.job){ S.logged = 0; drawJob(d.job); }
+      if(d.job && d.job.running){ $('btnShipStop').style.display = ''; poll(); }
+    }).catch(function(){ /* nothing to pick up */ });
+  });
+})();
+</script>
+
 </body>
 </html>

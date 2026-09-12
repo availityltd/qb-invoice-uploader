@@ -37,6 +37,8 @@ understand what is happening underneath.
 | Convert | `convert.html` | Shopify CSV → QB invoice rows, SKU matching, gap check |
 | Upload | `upload.html`, `jobs.js`, `jobstore.js` | Creates the invoices in QuickBooks |
 | Receive payments | `payments.html`, `cpr.js` | Matches a courier CPR sheet against QB, records payment |
+| Merge payments | `merge.html`, `merges.js`, `mergeqb.js` | Groups one customer's orders against a CPR and takes the extra shipping off |
+| — Shipping off pasted invoices | `merge.html`, `shipfix.js` | Standalone: paste invoice numbers, see the shipping line on each, take it off. No CPR, no arithmetic |
 | Advance payments | `advance.html`, `advance.js`, `advjobs.js` | Part payments taken before delivery |
 | Delivery charges | `journal.js`, `traxsheet.js` | Courier fees and taxes as journal entries |
 | Find orders | `find.html`, `finder.js` | Searches every CPR sheet for pasted order numbers |

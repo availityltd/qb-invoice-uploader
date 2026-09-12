@@ -65,6 +65,9 @@ import {
   invoicesWithLines, planGroup, remarkFor, stripShipping
 } from './mergeqb.js';
 import {
+  parseNumbers as parseShipNumbers, buildPlan as buildShipPlan
+} from './shipfix.js';
+import {
   parseNumbers as parseSwapNumbers, buildPlan as buildSwapPlan, swapOnInvoice
 } from './swapitem.js';
 import {
@@ -2688,6 +2691,142 @@ app.post('/api/merge/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   mergeStore.delete(realmId);
+  res.json({ ok: true });
+});
+
+/* ==================== shipping off pasted invoices ==================== */
+
+// Merge payments above works out for itself how many shipping lines have to go,
+// by reading a CPR. This is the same edit without the arithmetic: the numbers
+// are pasted, the shipping line on each is shown, and the ticked ones are taken
+// off. It keeps its own list so it does not disturb a CPR match in progress.
+
+const shipStore = new Map();           // realmId -> { rows, job, at }
+
+app.post('/api/shipfix/plan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const numbers = parseShipNumbers((req.body && req.body.text) || '');
+    if (!numbers.length) throw new Error('Paste the invoice numbers first');
+    if (numbers.length > 600) throw new Error('That is more than 600 numbers - do it in blocks');
+
+    const old = shipStore.get(realmId);
+    if (old && old.job && old.job.running) throw new Error('A change is still running');
+
+    const token = await getAccessToken(realmId);
+    const rows = await buildShipPlan(realmId, token, numbers);
+
+    shipStore.set(realmId, { rows, job: null, at: Date.now() });
+    res.json({ ok: true, pasted: numbers.length, rows });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// One invoice per request. The batch API times out under load, and a slow run
+// that finishes beats a fast one that does not.
+async function runShipfix(realmId, st, job) {
+  const token = await getAccessToken(realmId);
+
+  for (const row of job.rows) {
+    if (job.stop) break;
+    if (row.state !== 'ready') continue;
+
+    try {
+      const out = await stripShipping(realmId, token, row.qbId, row.hits.map(l => l.id));
+      row.state = 'stripped';
+      row.note = row.hits.length + (row.hits.length === 1 ? ' line' : ' lines') +
+        ' off, now ' + out.total.toFixed(2);
+      row.total = out.total;
+      row.balance = out.balance;
+      job.done++;
+      job.taken = Math.round((job.taken + row.hitTotal) * 100) / 100;
+      job.log.push({
+        ok: true,
+        doc: out.doc || row.doc,
+        lines: row.hits.length,
+        amount: row.hitTotal
+      });
+    } catch (e) {
+      row.state = 'failed';
+      row.note = e.message;
+      job.done++;
+      job.failed++;
+      job.log.push({ ok: false, doc: row.doc, msg: e.message });
+    }
+  }
+
+  job.running = false;
+  job.finished = Date.now();
+}
+
+app.post('/api/shipfix/run', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = shipStore.get(realmId);
+    if (!st) throw new Error('Find the invoices first');
+    if (st.job && st.job.running) throw new Error('That is already running');
+
+    const only = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : null;
+    const rows = st.rows.filter(r =>
+      r.state === 'ready' && r.qbId && (!only || only.includes(String(r.qbId))));
+    if (!rows.length) throw new Error('None of these are waiting to have shipping taken off');
+
+    const job = {
+      running: true, stop: false, done: 0, failed: 0, taken: 0,
+      total: rows.length, log: [], started: Date.now(), rows
+    };
+    st.job = job;
+
+    runShipfix(realmId, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+    });
+
+    res.json({ ok: true, invoices: job.total });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/shipfix/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const st = shipStore.get(realmId);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!st) return res.json({ has: false });
+
+  const job = st.job;
+  res.json({
+    has: true,
+    rows: st.rows,
+    job: job ? {
+      running: job.running, done: job.done, failed: job.failed,
+      taken: job.taken, total: job.total,
+      error: job.error || null, log: job.log.slice(-80)
+    } : null
+  });
+});
+
+app.post('/api/shipfix/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = shipStore.get(realmId);
+  if (st && st.job && st.job.running) st.job.stop = true;
+  res.json({ ok: true });
+});
+
+app.post('/api/shipfix/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = shipStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
+  shipStore.delete(realmId);
   res.json({ ok: true });
 });
 
