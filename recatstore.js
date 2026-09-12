@@ -160,6 +160,14 @@ export async function logMove(realmId, st, row, out) {
   );
 }
 
+// The record is kept until it is asked to go. Emptying it throws away what was
+// moved and out of which heading - QuickBooks' own audit log will still say the
+// transaction was edited, but not why - so nothing here empties it on its own.
+export async function clearMoves(realmId) {
+  const r = await pool.query(`DELETE FROM recat_moves WHERE realm_id = $1`, [realmId]);
+  return r.rowCount || 0;
+}
+
 // what has been moved in this company, newest first
 export async function listMoves(realmId, limit = 200) {
   const r = await pool.query(

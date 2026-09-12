@@ -76,7 +76,8 @@ import {
 } from './recat.js';
 import {
   initRecatStore, saveRecatState, saveRecatProgress, loadRecatState,
-  clearRecatState, unfinishedRecat, logMove as logRecatMove, listMoves as listRecatMoves
+  clearRecatState, unfinishedRecat, logMove as logRecatMove, listMoves as listRecatMoves,
+  clearMoves as clearRecatMoves
 } from './recatstore.js';
 import {
   scanDescriptions, groupRows as groupDescRows, linesFor, descKey, redescOne,
@@ -3550,6 +3551,21 @@ app.post('/api/desc/clear', async (req, res) => {
   if (st && st.scan && st.scan.running) return res.status(400).json({ error: 'A scan is still running' });
   descStore.delete(realmId);
   res.json({ ok: true });
+});
+
+// Empty the record. Asked for from either page - the category change and the
+// description change write to the same table, so there is one record and one
+// place to clear it.
+app.post('/api/recat/history/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const gone = await clearRecatMoves(realmId);
+    res.json({ ok: true, cleared: gone });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // A deploy in the middle of a run leaves the rest of the list sitting in

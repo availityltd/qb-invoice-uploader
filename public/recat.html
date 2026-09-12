@@ -221,6 +221,7 @@
             <div class="acts">
               <button class="mini" id="btnHist">Refresh</button>
               <button class="mini" id="btnHistCsv">Download the record</button>
+              <button class="mini" id="btnHistClear">Empty the record</button>
             </div>
             <div class="tbl" style="max-height:300px">
               <table>
@@ -709,6 +710,22 @@
   $('btnNone').addEventListener('click', function(){ tickAll(false); });
   $('btnCsv').addEventListener('click', csv);
   $('btnHist').addEventListener('click', loadHistory);
+  // the record is the only place that says which heading a transaction came out
+  // of, so it is asked for plainly before it goes
+  $('btnHistClear').addEventListener('click', function(){
+    if(!S.history.length) return;
+    if(!confirm('Empty the record of ' + S.history.length +
+                (S.history.length === 1 ? ' transaction' : ' transactions') +
+                '?
+
+What was moved stays moved in QuickBooks. This only throws away ' +
+                'the note of which heading each one came out of, and it cannot be undone.')) return;
+    $('btnHistClear').disabled = true;
+    post('/api/recat/history/clear')
+      .then(function(){ return loadHistory(); })
+      .catch(function(e){ alert(e.message); })
+      .then(function(){ $('btnHistClear').disabled = false; });
+  });
   $('btnHistCsv').addEventListener('click', histCsv);
   $('btnRun').addEventListener('click', run);
   $('btnStop').addEventListener('click', function(){
