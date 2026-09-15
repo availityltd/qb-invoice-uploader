@@ -34,7 +34,7 @@ understand what is happening underneath.
 
 | Page | File | What it does |
 |---|---|---|
-| Convert | `convert.html` | Shopify CSV → QB invoice rows, SKU matching, gap check |
+| Convert | `convert.html` | Shopify CSV → QB invoice rows, SKU matched against QB items directly (product-list CSV optional), gap check; a product not in QB can be held, which keeps every order carrying it out of the upload and in the not-uploaded report |
 | Upload | `upload.html`, `jobs.js`, `jobstore.js` | Creates the invoices in QuickBooks |
 | Receive payments | `payments.html`, `cpr.js` | Matches a courier CPR sheet against QB, records payment |
 | Merge payments | `merge.html`, `merges.js`, `mergeqb.js` | Groups one customer's orders against a CPR and takes the extra shipping off |
@@ -161,8 +161,6 @@ store, and duplicate protection. Biggest piece — leave it last.
   we import downloaded CPR CSVs.
 - Roughly 1,700 PostEx orders land in the `other` / `unknown` status bucket;
   `GROUPS` in `postex.js` needs to cover them.
-- Convert still asks for a QB product-list CSV every run. QB already returns
-  `Sku` on `/api/qb-products` — use it and drop the upload.
 - Move off Render's free tier eventually (a small VPS at $5–7/month was the
   preferred option over Render paid at $25).
 - Intuit App Store submission, once multi-company is solid.
