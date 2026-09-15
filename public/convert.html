@@ -216,6 +216,7 @@
             <h2><span class="no">06</span> Orders not uploaded <span class="aside" id="exAside"></span></h2>
             <div class="acts">
               <button class="mini" id="dlExcluded">Download this list</button>
+              <button class="mini hide" id="dlHeldShop">Held orders as a Shopify export</button>
             </div>
             <div class="tbl" style="max-height:320px">
               <table>
@@ -482,7 +483,7 @@
           setStat(s,"bad","Not a Shopify orders export. Missing: "+need.join(", "));
           shop=null; ready(); return;
         }
-        shop={name:file.name,rows:rows.slice(1),map:map};
+        shop={name:file.name,headers:rows[0],rows:rows.slice(1),map:map};
         setStat(s,d.text.indexOf("\uFFFD")>-1?"bad":"ok",
           "<b>"+file.name+"</b><i>"+nf(shop.rows.length)+" rows · "+d.enc+
           (map.sku<0?" · no SKU column":"")+(map.fulfil<0?" · no fulfillment column":"")+"</i>");
@@ -753,13 +754,14 @@
       if(k) last=k; else k=last;
       if(!k) continue;
       var g=index[k];
-      if(g===undefined){ g=index[k]={head:r,lines:[],statusRow:null}; groups.push(g); g.k=k; }
+      if(g===undefined){ g=index[k]={head:r,lines:[],all:[],statusRow:null}; groups.push(g); g.k=k; }
+      g.all.push(r);
       if(cell(r,iItem)) g.lines.push(r);
       if(!g.statusRow && (cell(r,iStat)||cell(r,iFul))) g.statusRow=r;
     }
 
     var parts=[], cur=[], curInv=[], flatCount=0, allInvoices=[], excluded=[],
-        noLines=0, alreadyInQb=0, heldOrders=0, grand=0, held={},
+        noLines=0, alreadyInQb=0, heldOrders=0, heldRows=[], grand=0, held={},
         bySku=0, byName=0, byMap=0, skippedLines=0, unresolved=0,
         dateCache={}, gnameCache={};
     pending.forEach(function(p){ if(p.hold) held[p.key]=1; });
@@ -805,6 +807,9 @@
       if(heldHere.length){
         excluded.push([grp2.k, 'Product not in QuickBooks', fin||'—', ful||'—', tot||'', heldHere.join(' | ')]);
         heldOrders++;
+        // every row of the order as Shopify exported it, so the held ones can be
+        // put through again once the product is in QuickBooks
+        for(i=0;i<grp2.all.length;i++) heldRows.push(grp2.all[i]);
         continue;
       }
 
@@ -878,7 +883,7 @@
 
     result={parts:parts,lines:flatCount,invoices:allInvoices.length,total:grand,
       bySku:bySku,byName:byName,byMap:byMap,skippedLines:skippedLines,unresolved:unresolved,
-      noLines:noLines,alreadyInQb:alreadyInQb,heldOrders:heldOrders,rowCap:ROW_CAP,excluded:excluded,
+      noLines:noLines,alreadyInQb:alreadyInQb,heldOrders:heldOrders,heldRows:heldRows,rowCap:ROW_CAP,excluded:excluded,
       allInvoices:allInvoices,ms:Math.round(performance.now()-t0)};
     render();
   }
@@ -926,6 +931,8 @@
     else if(!r.unresolved) note(nb,"ok","Every line has a QuickBooks product. Ready to upload.");
 
     $('excludedSheet').classList.toggle('hide', !r.excluded.length);
+    $('dlHeldShop').classList.toggle('hide', !r.heldOrders);
+    $('dlHeldShop').textContent='Held orders as a Shopify export ('+nf(r.heldOrders)+')';
     if(r.excluded.length){
       $('exAside').textContent=nf(r.excluded.length)+" orders";
       var eb=$('exBody'); eb.innerHTML='';
@@ -969,6 +976,14 @@
     if(!result||!result.excluded.length) return;
     download("orders-not-uploaded.csv",
       buildCSV(["Order","Reason","Financial status","Fulfillment status","Total","Product held"],result.excluded));
+  });
+
+  // the same columns and rows the export came with, only the held orders in it -
+  // it goes back into this page as it is
+  $('dlHeldShop').addEventListener('click',function(){
+    if(!result||!result.heldRows.length||!shop) return;
+    download("held-orders-shopify.csv",
+      buildCSV(shop.headers.map(esc),result.heldRows));
   });
 
   $('btnSend').addEventListener("click",function(){
