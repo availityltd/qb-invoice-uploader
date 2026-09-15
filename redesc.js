@@ -57,14 +57,40 @@ export function labelOf(by, row, line) {
   return String(line.description || '').trim();
 }
 
+// A ticked heading can be narrowed to some of the categories it sits under -
+// Amazon Sales, but only what is in Clearing Account. That comes as the key, this
+// mark, and the account id.
+export const SUB = '';
+
+// The ticked keys sorted once into the headings taken whole and the headings
+// taken only under certain categories.
+export function wantOf(keys) {
+  if (keys && keys.full) return keys;
+  const full = new Set(), narrow = new Map();
+  (keys || []).forEach(k => {
+    k = String(k);
+    const i = k.indexOf(SUB);
+    if (i < 0) { full.add(k); return; }
+    const head = k.slice(0, i);
+    if (!narrow.has(head)) narrow.set(head, new Set());
+    narrow.get(head).add(k.slice(i + 1));
+  });
+  return { full, narrow };
+}
+
 // Which lines of a row this run is about: the ones under a ticked heading, and
-// - when the scan was narrowed to one category - only the ones sitting under
-// it. Read by name, a ticked payee means every line of that transaction.
+// - when the scan was narrowed to one category, or the heading was narrowed to
+// some of its categories - only the ones sitting under those. Read by name, a
+// payee ticked whole means every line of that transaction.
 export function linesFor(row, keys, accountId, by) {
-  const want = keys instanceof Set ? keys : new Set(keys || []);
-  return (row.lines || []).filter(l =>
-    want.has(keyOf(by || 'description', row, l)) &&
-    (!accountId || String(l.accountId) === String(accountId)));
+  const want = wantOf(keys instanceof Set ? Array.from(keys) : keys);
+  return (row.lines || []).filter(l => {
+    if (accountId && String(l.accountId) !== String(accountId)) return false;
+    const k = keyOf(by || 'description', row, l);
+    if (want.full.has(k)) return true;
+    const only = want.narrow.get(k);
+    return !!only && only.has(String(l.accountId));
+  });
 }
 
 // A row is kept if it has an account-carrying line - with a description or
@@ -173,8 +199,9 @@ export function groupRows(rows, by) {
       }
 
       const a = g._acc.get(String(l.accountId)) ||
-                { id: String(l.accountId), name: l.account || '', lines: 0, total: 0 };
+                { id: String(l.accountId), name: l.account || '', lines: 0, total: 0, _txns: new Set() };
       a.lines++;
+      a._txns.add(row.kind + '|' + row.qbId);
       a.total = round2(a.total + Number(l.amount || 0));
       g._acc.set(a.id, a);
     });
@@ -191,7 +218,11 @@ export function groupRows(rows, by) {
 
   return Array.from(map.values()).map(g => {
     g.txns = g._txns.size;
-    g.accounts = Array.from(g._acc.values()).sort((a, b) => b.lines - a.lines);
+    g.accounts = Array.from(g._acc.values()).map(a => {
+      a.txns = a._txns.size;
+      delete a._txns;
+      return a;
+    }).sort((a, b) => b.lines - a.lines);
     delete g._txns; delete g._acc;
     return g;
   }).sort((a, b) => b.lines - a.lines || a.description.localeCompare(b.description));

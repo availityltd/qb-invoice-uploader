@@ -80,7 +80,7 @@ import {
   clearMoves as clearRecatMoves
 } from './recatstore.js';
 import {
-  scanDescriptions, groupRows as groupDescRows, linesFor, descKey, redescOne,
+  scanDescriptions, groupRows as groupDescRows, linesFor, wantOf as descWantOf, descKey, redescOne,
   WAYS as DESC_WAYS, wayOf as descWayOf
 } from './redesc.js';
 import { startKeeper, keeperState, sweepNow } from './keeper.js';
@@ -3300,7 +3300,7 @@ const descRound = n => Math.round(n * 100) / 100;
 // The transactions a run is about, each carrying the lines that will move and
 // what those lines are worth - that is what the record is written from.
 function descPick(st, keys, by) {
-  const want = new Set(keys);
+  const want = descWantOf(keys);
   const out = [];
 
   st.rows.forEach(row => {

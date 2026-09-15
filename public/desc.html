@@ -65,6 +65,8 @@
   td.desc{white-space:normal;max-width:340px;font-weight:600}
   td.unders{white-space:normal;font-size:11.5px;color:var(--muted);max-width:300px}
   td.unders b{font-weight:500;color:var(--text)}
+  td.unders label.sub{cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  td.unders label.sub input{margin:0;width:12px;height:12px}
   tr.off{opacity:.42}
   .rowfind{width:100%;max-width:280px;font-size:13px;padding:7px 10px;
     border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
@@ -306,7 +308,8 @@
 
   var S = {
     accounts: [], kinds: [], only: null, to: null,
-    groups: [], picked: {}, poller: null, logged: 0, filter: '',
+    // under: a ticked heading narrowed to some of its categories - key -> { accountId: true }
+    groups: [], picked: {}, under: {}, poller: null, logged: 0, filter: '',
     history: [], open: {},
     by: 'description',
     ways: [ { key:'description', label:'Description', column:'Description' },
@@ -320,7 +323,8 @@
 
   function esc(s){
     return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
   function money(n){
     var v = Number(n || 0);
@@ -449,7 +453,7 @@
     if(!kinds.length) return say('bad', '<b>Leave at least one kind of transaction ticked</b>');
 
     $('btnScan').disabled = true;
-    S.picked = {}; S.open = {};
+    S.picked = {}; S.under = {}; S.open = {};
     say('busy', 'Reading the books…');
 
     post('/api/desc/scan', {
@@ -484,23 +488,67 @@
       c.amount += g.total;
       if(S.picked[g.key]){
         c.picked++;
-        c.pickedLines += g.lines;
-        c.pickedTxns += g.txns;
-        c.pickedAmount += g.total;
+        var subs = subsOf(g);
+        if(subs.length){
+          subs.forEach(function(a){
+            c.pickedLines += a.lines;
+            c.pickedTxns += a.txns || 0;
+            c.pickedAmount += a.total;
+          });
+        } else {
+          c.pickedLines += g.lines;
+          c.pickedTxns += g.txns;
+          c.pickedAmount += g.total;
+        }
       }
     });
     return c;
   }
 
+  // the categories a ticked heading has been narrowed to - none means all of them
+  function subsOf(g){
+    var s = S.under[g.key] || {};
+    return (g.accounts || []).filter(function(a){ return s[a.id]; });
+  }
+
+  // what goes to the server: the heading whole, or the heading once per category kept
+  var SUB = '';
+  function keysOf(g){
+    var subs = subsOf(g);
+    return subs.length
+      ? subs.map(function(a){ return g.key + SUB + a.id; })
+      : [g.key];
+  }
+
   function unders(g){
-    return (g.accounts || []).map(function(a){
-      return '<b>' + esc(a.name || '(none)') + '</b> &middot; ' + a.lines;
+    var list = g.accounts || [];
+    // a heading sitting under one category has nothing to narrow
+    var many = list.length > 1;
+    var s = S.under[g.key] || {};
+    return list.map(function(a){
+      var text = '<b>' + esc(a.name || '(none)') + '</b> &middot; ' + a.lines;
+      if(!many) return text;
+      return '<label class="sub" title="Move only what is under this category">' +
+        '<input type="checkbox" data-g="' + esc(g.key) + '" data-a="' + esc(a.id) + '"' +
+        (s[a.id] ? ' checked' : '') + '> ' + text + '</label>';
     }).join('<br>');
   }
 
   function drawPlan(){
     $('planSheet').classList.remove('hide');
     $('toSheet').classList.remove('hide');
+
+    // once the lines under a kept category have moved, that category is gone from
+    // the heading - left ticked, the heading would read as "all of it" and the
+    // next run would take the lines that were meant to stay
+    S.groups.forEach(function(g){
+      var s = S.under[g.key];
+      if(!s) return;
+      var ids = {};
+      (g.accounts || []).forEach(function(a){ ids[a.id] = true; });
+      Object.keys(s).forEach(function(a){ if(!ids[a]) delete s[a]; });
+      if(!Object.keys(s).length){ delete S.under[g.key]; S.picked[g.key] = false; }
+    });
 
     var c = counts();
     $('thLabel').textContent = way().column;
@@ -546,9 +594,24 @@
                          : 'Nothing was found between those dates.') +
         '</td></tr>';
 
-    Array.prototype.forEach.call($('rows').querySelectorAll('input[type=checkbox]'), function(b){
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[data-k]'), function(b){
       b.addEventListener('change', function(){
-        S.picked[b.getAttribute('data-k')] = b.checked;
+        var k = b.getAttribute('data-k');
+        S.picked[k] = b.checked;
+        // unticked, the heading forgets which of its categories were kept
+        if(!b.checked) delete S.under[k];
+        drawPlan();
+      });
+    });
+    // ticking one category under a heading ticks the heading, narrowed to it;
+    // unticking the last one unticks the heading, rather than widening it to all
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[data-g]'), function(b){
+      b.addEventListener('change', function(){
+        var k = b.getAttribute('data-g'), a = b.getAttribute('data-a');
+        var s = S.under[k] || (S.under[k] = {});
+        if(b.checked) s[a] = true; else delete s[a];
+        if(Object.keys(s).length) S.picked[k] = true;
+        else { delete S.under[k]; S.picked[k] = false; }
         drawPlan();
       });
     });
@@ -568,6 +631,8 @@
         '</b>. The date, the payee, the payment account, the amount, the VAT code and ' +
         'the description are written back unchanged &mdash; only the Profit &amp; Loss ' +
         'heading moves.' +
+        '<br><br>Where a row sits under more than one category, tick the category ' +
+        'itself to move only the lines under it and leave the rest where they are.' +
         (S.by === 'name' && !S.only
           ? '<br><br>Read by name, that is <b>every</b> line of those transactions. If ' +
             'one of them is split across two headings, both lines move. Narrow the scan ' +
@@ -601,7 +666,7 @@
         var by = b.getAttribute('data-by');
         if(by === S.by) return;
         S.by = by;
-        S.picked = {}; S.open = {};
+        S.picked = {}; S.under = {}; S.open = {};
         try { localStorage.setItem('descBy', by); } catch(e){ /* not worth an error */ }
         drawWays();
         refresh();
@@ -644,7 +709,10 @@
   }
 
   function tickAll(on){
-    shown().forEach(function(g){ S.picked[g.key] = on; });
+    shown().forEach(function(g){
+      S.picked[g.key] = on;
+      if(!on) delete S.under[g.key];
+    });
     drawPlan();
   }
 
@@ -726,8 +794,10 @@
   /* ---------- running ---------- */
 
   function run(){
-    var keys = S.groups.filter(function(g){ return S.picked[g.key]; })
-                       .map(function(g){ return g.key; });
+    var keys = [];
+    S.groups.forEach(function(g){
+      if(S.picked[g.key]) keys = keys.concat(keysOf(g));
+    });
     if(!keys.length || !S.to) return;
 
     $('btnRun').disabled = true;
@@ -866,7 +936,7 @@
   $('btnReset').addEventListener('click', function(){
     post('/api/desc/clear').then(function(){
       clearInterval(S.poller); S.poller = null;
-      S.groups = []; S.picked = {}; S.open = {}; S.filter = '';
+      S.groups = []; S.picked = {}; S.under = {}; S.open = {}; S.filter = '';
       $('rowFind').value = '';
       $('planSheet').classList.add('hide');
       $('toSheet').classList.add('hide');
@@ -905,7 +975,13 @@
       }
       if(d.ways && d.ways.length) S.ways = d.ways;
       if(d.job && d.job.descs && (d.job.by || 'description') === S.by){
-        d.job.descs.forEach(function(k){ S.picked[k] = true; });
+        d.job.descs.forEach(function(k){
+          var i = k.indexOf(SUB);
+          if(i < 0){ S.picked[k] = true; return; }
+          var head = k.slice(0, i);
+          S.picked[head] = true;
+          (S.under[head] || (S.under[head] = {}))[k.slice(i + 1)] = true;
+        });
       }
       drawPlan();
       if(d.job){ S.logged = 0; drawJob(d.job); }
