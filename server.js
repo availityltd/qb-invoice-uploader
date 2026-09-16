@@ -20,7 +20,8 @@ import {
 import {
   readItems, readItemSales, readValuation, readPurchases,
   buildRows as buildProductRows, summarise as summariseProducts,
-  updateItem as updateProductItem
+  updateItem as updateProductItem,
+  listAdjustAccounts, adjustStock
 } from './products.js';
 import {
   initProdStore, logProductChange, listProductChanges, clearProductChanges
@@ -6695,6 +6696,25 @@ async function runProductJob(realmId, st, job) {
         patch = { Active: false };
         was = 'in use';
         now = 'put away';
+      } else if (job.field === 'stock') {
+        // the correction itself, rather than a field on the item: what the stock
+        // should read, against what it reads now
+        const to = Number(one.value);
+        if (!isFinite(to)) throw new Error('Say what the stock should read');
+        const had = Number(row.qty || 0);
+        const made = await adjustStock(realmId, token, {
+          accountId: job.accountId, date: job.date, memo: job.memo,
+          itemId: one.id, from: had, to
+        });
+        row.qty = to;
+        job.done++;
+        job.log.push({ ok: true, name: row.name || one.id,
+                       was: had, now: to + (made.doc ? ' (' + made.doc + ')' : '') });
+        await logProductChange(realmId, {
+          id: one.id, name: row.name || '', sku: row.sku || '',
+          field: 'stock', was: had, now: to, ok: true
+        }).catch(e => console.error('product log:', e.message));
+        continue;
       } else {
         throw new Error('Unknown change ' + job.field);
       }
@@ -6740,7 +6760,10 @@ app.post('/api/products/apply', async (req, res) => {
 
     const body = req.body || {};
     const field = String(body.field || '');
-    if (['cost', 'active'].indexOf(field) < 0) throw new Error('Unknown change');
+    if (['cost', 'active', 'stock'].indexOf(field) < 0) throw new Error('Unknown change');
+    if (field === 'stock' && !body.accountId) {
+      throw new Error('Pick the account to write the difference off to');
+    }
 
     const items = (Array.isArray(body.items) ? body.items : [])
       .map(i => ({ id: String(i.id || ''), value: i.value }))
@@ -6749,7 +6772,8 @@ app.post('/api/products/apply', async (req, res) => {
 
     const job = {
       running: true, stop: false, field, done: 0, failed: 0,
-      total: items.length, items, log: [], started: Date.now()
+      total: items.length, items, log: [], started: Date.now(),
+      accountId: body.accountId || '', date: body.date || '', memo: body.memo || ''
     };
     st.job = job;
 
@@ -6759,6 +6783,18 @@ app.post('/api/products/apply', async (req, res) => {
     });
 
     res.json({ ok: true, total: job.total });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/products/adjust-accounts', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const token = await getAccessToken(realmId);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ accounts: await listAdjustAccounts(realmId, token) });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

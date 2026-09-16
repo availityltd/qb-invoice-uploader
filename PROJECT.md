@@ -43,7 +43,7 @@ understand what is happening underneath.
 | Delivery charges | `journal.js`, `traxsheet.js` | Courier fees and taxes as journal entries |
 | Find orders | `find.html`, `finder.js` | Searches every CPR sheet for pasted order numbers |
 | Courier dashboard | `courierlive.js`, `dashdata.js`, `postex.js` | Live courier data |
-| Product health | `products.html`, `products.js` | One read of items + ItemSales + InventoryValuationSummary + bill item lines, then tabs over it: cost missing, untouched items, duplicate items, and the reports - selling at no cost, sold never bought, bought never sold, stock below zero |
+| Product health | `products.html`, `products.js` | One read of items + ItemSales + InventoryValuationSummary + bill item lines, then tabs over it: cost missing, stock put right by inventory adjustment, untouched items, duplicate items, and the reports - selling at no cost, sold never bought, bought never sold, stock below zero |
 | Purchases | `purchases.html`, `purchases.js` | The purchase orders and bills already in QuickBooks, with what went onto products and what went onto an account instead; and making another - every line carrying an item, because a line on an account brings no stock in |
 | Fix duplicates | `fix.html` | Bulk rename / delete of duplicate invoices |
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |

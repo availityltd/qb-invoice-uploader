@@ -372,3 +372,69 @@ export async function updateItem(realmId, token, id, patch) {
 
   return data.Item || {};
 }
+
+/* ==================== putting the stock right ==================== */
+
+// Where the other side of the correction goes. Stock that was never there has to
+// be written off somewhere, and that somewhere is a cost account - Inventory
+// Shrinkage if the company has one, cost of sales otherwise.
+export async function listAdjustAccounts(realmId, token) {
+  const q = await qbQuery(realmId, token,
+    `SELECT Id, Name, AccountType, AccountSubType FROM Account
+      WHERE Active = true AND AccountType IN ('Cost of Goods Sold', 'Expense', 'Other Expense')
+      MAXRESULTS 300`);
+
+  return (q.Account || [])
+    .map(a => ({
+      id: String(a.Id), name: a.Name || '', type: a.AccountType || '',
+      // the one QuickBooks itself reaches for when stock is written off
+      shrinkage: /shrink/i.test(a.Name || '')
+    }))
+    .sort((a, b) => (b.shrinkage ? 1 : 0) - (a.shrinkage ? 1 : 0) || a.name.localeCompare(b.name));
+}
+
+// One item's stock put where it should be. QuickBooks takes the difference, not
+// the new figure, so what is asked for here is the quantity it should read and
+// the difference is worked out against what it reads now.
+export async function adjustStock(realmId, token, opts) {
+  const { accountId, date, memo, itemId, from, to } = opts;
+  if (!accountId) throw new Error('Pick the account to write it off to');
+
+  const diff = Math.round((Number(to) - Number(from)) * 10000) / 10000;
+  if (!diff) throw new Error('That is already what it reads');
+
+  const payload = {
+    AdjustAccountRef: { value: String(accountId) },
+    TxnDate: date || undefined,
+    PrivateNote: memo || undefined,
+    Line: [{
+      DetailType: 'ItemAdjustmentLineDetail',
+      ItemAdjustmentLineDetail: {
+        ItemRef: { value: String(itemId) },
+        QtyDiff: diff
+      }
+    }]
+  };
+
+  const res = await fetch(`${API}/v3/company/${realmId}/inventoryadjustment?minorversion=70`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch (e) { /* left as it came */ }
+
+  if (!res.ok) {
+    const f = data.Fault && data.Fault.Error && data.Fault.Error[0];
+    throw new Error(f ? (f.Message + (f.Detail ? ' - ' + f.Detail : '')) : text.slice(0, 300));
+  }
+
+  const made = data.InventoryAdjustment || {};
+  return { id: String(made.Id || ''), doc: made.DocNumber || '', diff };
+}

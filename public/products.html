@@ -137,6 +137,25 @@
                 <input type="text" class="rowfind" id="rowFind" placeholder="Search by name or SKU">
                 <button class="mini" id="btnCsv">Download this list</button>
               </div>
+              <div class="hide" id="stockBox" style="margin:0 0 14px;padding:14px;
+                   border:1px solid var(--line);border-radius:8px;background:#FAFBFA">
+                <div class="dates">
+                  <div style="min-width:260px">
+                    <label for="adjAcct">Write the difference off to</label>
+                    <select id="adjAcct" style="width:100%;font-size:13.5px;padding:8px 10px;
+                      border:1px solid var(--line-2);border-radius:6px;background:#fff">
+                      <option value="">— pick an account —</option>
+                    </select>
+                  </div>
+                  <div><label for="adjDate">On this date</label><input type="date" id="adjDate"></div>
+                  <div style="flex:1;min-width:200px">
+                    <label for="adjMemo">Note on it</label>
+                    <input type="text" id="adjMemo" class="rowfind" style="max-width:none"
+                      value="Stock put right from Product health">
+                  </div>
+                </div>
+              </div>
+
               <div class="acts hide" id="applyBar" style="margin-top:12px">
                 <button class="mini" id="btnAll">Tick all shown</button>
                 <button class="mini" id="btnNone">Untick all</button>
@@ -150,6 +169,7 @@
                   <thead><tr>
                     <th class="tickh hide"></th>
                     <th class="costh hide">Cost to put on</th>
+                    <th class="stockh hide">Should read</th>
                     <th>Product</th>
                     <th>Type</th>
                     <th class="num">Stock</th>
@@ -226,6 +246,9 @@
     { key:'unused',   label:'Active',
       title:'Items nothing has ever happened to',
       hint:'Active, never sold, never bought, no stock. These are the ones safe to put away - but check them here before anything is switched off.' },
+    { key:'negative', label:'Stock',
+      title:'Stock gone below zero',
+      hint:'More was sold than was ever brought in, so QuickBooks charged nothing for the sales out of nothing. Say what each should read and the difference is written off to the account chosen below. A purchase is the better repair where there was a real purchase - this is for the stock that was never there.' },
     { key:'twin',     label:'Duplicates',
       title:'One product, two items',
       hint:'The same product on more than one item, matched on name, description or SKU - usually one made by the connector against a SKU and one made by hand. Bills go to one and sales to the other, which is how stock goes negative on one while the other sits full. Where one of a pair has a cost and the other has none, the cost box is already filled with it: tick and put it across. Stock cannot be moved between them from here, and QuickBooks will not merge two inventory items at all.' },
@@ -254,14 +277,15 @@
   // box, which starts at what the read suggests and is the operator's after that
   var S = { tab:'overview', report:'zero-cogs', rows:[], total:0,
             summary:null, filter:'', poller:null, from:'', to:'',
-            picked:{}, costs:{}, record:[], logged:0 };
+            picked:{}, costs:{}, stock:{}, adjust:[], record:[], logged:0 };
 
   // the two tabs that write. Everything else only reads
   function acts(){
     // the duplicates tab writes the same field: where one of a pair carries a
     // cost and the other does not, the cost is copied across rather than typed
     if(S.tab === 'no-cost' || S.tab === 'twin') return 'cost';
-    if(S.tab === 'unused')  return 'active';
+    if(S.tab === 'unused')   return 'active';
+    if(S.tab === 'negative') return 'stock';
     return '';
   }
 
@@ -482,6 +506,10 @@
     Array.prototype.forEach.call(document.querySelectorAll('.costh'), function(th){
       th.classList.toggle('hide', act !== 'cost');
     });
+    Array.prototype.forEach.call(document.querySelectorAll('.stockh'), function(th){
+      th.classList.toggle('hide', act !== 'stock');
+    });
+    $('stockBox').classList.toggle('hide', act !== 'stock');
 
     $('rows').innerHTML = S.rows.length ? S.rows.map(function(r){
       var on = !!S.picked[r.id];
@@ -492,6 +520,10 @@
         (act === 'cost'
           ? '<td><input type="text" class="costbox mono" data-cost="' + esc(r.id) + '" value="' +
             esc(cost) + '" inputmode="decimal" placeholder="—"></td>'
+          : '') +
+        (act === 'stock'
+          ? '<td><input type="text" class="costbox mono" data-stock="' + esc(r.id) + '" value="' +
+            esc(S.stock[r.id] !== undefined ? S.stock[r.id] : 0) + '" inputmode="decimal"></td>'
           : '') +
         '<td class="pname">' + esc(r.name) +
           (r.sku ? '<small>' + esc(r.sku) + '</small>' : '') + tags(r) + '</td>' +
@@ -530,6 +562,12 @@
         drawApply();
       });
     });
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[data-stock]'), function(b){
+      b.addEventListener('input', function(){
+        S.stock[b.getAttribute('data-stock')] = b.value;
+        drawApply();
+      });
+    });
     drawApply();
   }
 
@@ -559,6 +597,24 @@
           'It is what a new bill opens at, and what the reports read.'
         : 'Tick the items to put a cost on. The suggested cost is what the item was last bought for, ' +
           'what QuickBooks averages it at, or what its twin cost — whichever was found first.';
+    } else if(act === 'stock'){
+      var moving = picked.filter(function(r){
+        var to = parseFloat(S.stock[r.id] !== undefined ? S.stock[r.id] : 0);
+        return isFinite(to) && to !== Number(r.qty || 0);
+      });
+      var up = moving.reduce(function(sum, r){
+        return sum + (parseFloat(S.stock[r.id] !== undefined ? S.stock[r.id] : 0) - Number(r.qty || 0));
+      }, 0);
+      var acct = $('adjAcct').value;
+      $('btnApply').disabled = !moving.length || !acct;
+      $('btnApply').textContent = moving.length
+        ? 'Put ' + nf(moving.length) + (moving.length === 1 ? ' item' : ' items') + ' right'
+        : 'Nothing ticked';
+      $('applyHint').textContent = !moving.length
+        ? 'Tick the items and say what each should read. Zero is the usual answer for stock that was never there.'
+        : nf(moving.length) + ' ticked, ' + nf(up) + ' units added in all' +
+          (acct ? '. This writes an inventory adjustment per item on the date above — the value of the difference lands on that account and changes the Profit and Loss.'
+                : '. Pick the account to write the difference off to first.');
     } else {
       var holding = picked.filter(function(r){ return Number(r.qty || 0) !== 0; }).length;
       $('btnApply').disabled = !n || n === holding;
@@ -609,6 +665,10 @@
         var v = parseFloat(S.costs[r.id] !== undefined ? S.costs[r.id] : r.suggest);
         if(!(v > 0)) return;
         items.push({ id: r.id, value: v });
+      } else if(act === 'stock'){
+        var to = parseFloat(S.stock[r.id] !== undefined ? S.stock[r.id] : 0);
+        if(!isFinite(to) || to === Number(r.qty || 0)) return;
+        items.push({ id: r.id, value: to });
       } else {
         if(Number(r.qty || 0) !== 0) return;
         items.push({ id: r.id });
@@ -620,7 +680,12 @@
     $('log').innerHTML = '';
     S.logged = 0;
 
-    post('/api/products/apply', { field: act, items: items })
+    post('/api/products/apply', {
+      field: act, items: items,
+      accountId: act === 'stock' ? $('adjAcct').value : undefined,
+      date: act === 'stock' ? $('adjDate').value : undefined,
+      memo: act === 'stock' ? $('adjMemo').value.trim() : undefined
+    })
       .then(function(){
         $('runSheet').classList.remove('hide');
         $('btnStop').classList.remove('hide');
@@ -673,7 +738,10 @@
         '<td class="mono">' + esc(String(h.at || '').slice(0, 16).replace('T', ' ')) + '</td>' +
         '<td class="pname">' + esc(h.name) + '</td>' +
         '<td class="mono">' + esc(h.sku) + '</td>' +
-        '<td>' + (h.field === 'cost' ? 'Cost' : 'Put away') + '</td>' +
+        '<td>' + (h.field === 'cost' ? 'Cost'
+                : h.field === 'stock' ? 'Stock'
+                : h.field === 'bill' ? 'Bill'
+                : h.field === 'order' ? 'Order' : 'Put away') + '</td>' +
         '<td class="mono">' + esc(h.was || '—') + '</td>' +
         '<td class="mono">' + esc(h.now || '—') + '</td>' +
         '<td>' + (h.status === 'done'
@@ -776,6 +844,7 @@
   $('btnScan').addEventListener('click', scan);
   $('btnCsv').addEventListener('click', csv);
   $('btnApply').addEventListener('click', apply);
+  $('adjAcct').addEventListener('change', drawApply);
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     post('/api/products/stop').then(function(){ $('btnStop').disabled = false; });
@@ -818,6 +887,16 @@
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
     loadRecord();
+    $('adjDate').value = iso(new Date());
+    get('/api/products/adjust-accounts').then(function(d){
+      S.adjust = d.accounts || [];
+      $('adjAcct').innerHTML = '<option value="">— pick an account —</option>' +
+        S.adjust.map(function(a){
+          return '<option value="' + esc(a.id) + '">' + esc(a.name) +
+                 (a.shrinkage ? ' — what QuickBooks uses for stock written off' : '') +
+                 '</option>';
+        }).join('');
+    }).catch(function(){ /* the tab says what is missing */ });
 
     // a read left going in another tab, or before a reload, is picked back up
     get('/api/products/status').then(function(d){
