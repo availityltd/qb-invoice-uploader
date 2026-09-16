@@ -60,6 +60,16 @@
   .subways button.on{background:#fff;color:var(--ink);font-weight:600;
     box-shadow:0 1px 2px rgba(0,0,0,.07)}
 
+  .pastebox{margin:12px 0 14px;border:1px solid var(--line);border-radius:8px;
+    background:#FAFBFA;padding:0 14px}
+  .pastebox summary{font-size:13px;font-weight:600;cursor:pointer;padding:11px 0;user-select:none}
+  .pastebox[open] summary{border-bottom:1px solid var(--line);margin-bottom:12px}
+  .pastebox .inner{padding-bottom:14px}
+  .pastebox textarea{width:100%;font-family:var(--mono);font-size:12.5px;padding:9px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text);resize:vertical}
+  .pastebox .miss{max-height:160px;overflow:auto;font-family:var(--mono);font-size:11.5px;
+    color:var(--muted);margin-top:6px;white-space:pre-wrap}
+
   td.tick{width:34px}
   td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
   tr.off{opacity:.45}
@@ -143,6 +153,22 @@
                 <input type="text" class="rowfind" id="rowFind" placeholder="Search by name or SKU">
                 <button class="mini" id="btnCsv">Download this list</button>
               </div>
+              <details class="pastebox hide" id="pasteBox">
+                <summary>Paste SKUs or product names to select them</summary>
+                <div class="inner">
+                  <p class="hint" style="margin:0 0 8px">One to a line &mdash; a column copied
+                    straight out of Excel works. Each line is matched whole, on the SKU or on the
+                    full product name, never on part of a name: <i>Lip Tint</i> is inside forty
+                    other products, and a loose match here would put the wrong one away.</p>
+                  <textarea id="pasteText" rows="6" placeholder="7301-490/K-15/L-653&#10;Miss Rose Dream Glide Lipstick 653&#10;SP-6"></textarea>
+                  <div class="acts" style="margin-top:8px">
+                    <button class="solid" id="btnPaste">Select these</button>
+                    <button class="ghost hide" id="btnPasteClear">Show the whole list again</button>
+                  </div>
+                  <div class="stat" id="pasteStat"></div>
+                </div>
+              </details>
+
               <div class="hide" id="stockBox" style="margin:0 0 14px;padding:14px;
                    border:1px solid var(--line);border-radius:8px;background:#FAFBFA">
                 <div class="dates">
@@ -496,7 +522,80 @@
 
   /* ---------- the list ---------- */
 
+  /* ---------- selecting by paste ---------- */
+
+  // the list goes back to being the whole tab: a paste is a way of choosing,
+  // not a place to be stuck in
+  function leavePaste(){
+    S.pasted = false;
+    $('btnPasteClear').classList.add('hide');
+    $('pasteStat').className = 'stat';
+    $('pasteStat').innerHTML = '';
+  }
+
+  function whyNot(flags){
+    var words = (flags || []).map(function(f){ return TAGS[f] ? TAGS[f].text : ''; })
+      .filter(Boolean);
+    return words.length ? words.join(', ') : 'nothing wrong with it';
+  }
+
+  function paste(){
+    var text = $('pasteText').value;
+    if(!text.trim()) return;
+
+    $('btnPaste').disabled = true;
+    $('pasteStat').className = 'stat busy';
+    $('pasteStat').textContent = 'Finding them…';
+
+    post('/api/products/paste', { flag: flagNow(), text: text })
+      .then(function(d){
+        $('btnPaste').disabled = false;
+        S.pasted = true;
+        S.rows = d.rows || [];
+        S.total = S.rows.length;
+        S.picked = {};
+        S.rows.forEach(function(r){
+          // on the duplicates tab a tick means nothing without the item to keep,
+          // so the one carrying the trade is chosen where one has not been
+          if(acts() === 'merge'){
+            if(!S.keep[r.id] && r.keepSuggest) S.keep[r.id] = r.keepSuggest;
+            if(S.keep[r.id]) S.picked[r.id] = true;
+          } else {
+            S.picked[r.id] = true;
+          }
+        });
+        $('btnPasteClear').classList.remove('hide');
+
+        var out = '<b>' + nf(d.pasted) + ' pasted, ' + nf(S.rows.length) +
+          (S.rows.length === 1 ? ' item' : ' items') + ' selected on this tab.</b>';
+
+        if(d.elsewhere && d.elsewhere.length){
+          out += '<br>' + nf(d.elsewhere.length) + ' are in the books but not on this tab, and were left alone:' +
+            '<div class="miss">' + d.elsewhere.map(function(e){
+              return esc(e.pasted) + '  →  ' + e.items.map(function(i){
+                return esc(i.name) + ' (' + nf(i.qty || 0) + ' in stock' +
+                       (i.active ? '' : ', already off') + '; ' + esc(whyNot(i.flags)) + ')';
+              }).join(' | ');
+            }).join('\n') + '</div>';
+        }
+        if(d.missing && d.missing.length){
+          out += '<br>' + nf(d.missing.length) + ' matched nothing in QuickBooks:' +
+            '<div class="miss">' + d.missing.map(esc).join('\n') + '</div>';
+        }
+
+        $('pasteStat').className = 'stat ' + ((d.missing.length || d.elsewhere.length) ? 'bad' : 'ok');
+        $('pasteStat').innerHTML = out;
+        drawRows();
+      })
+      .catch(function(e){
+        $('btnPaste').disabled = false;
+        $('pasteStat').className = 'stat bad';
+        $('pasteStat').innerHTML = '<b>' + esc(e.message) + '</b>';
+      });
+  }
+
   function loadRows(){
+    leavePaste();
     var flag = flagNow(), w = wordsNow();
     $('listTitle').textContent = w.title || w.label;
     $('listHint').textContent = w.hint || '';
@@ -538,9 +637,11 @@
   function drawRows(){
     var act = acts();
     $('listAside').textContent = nf(S.total) + (S.total === 1 ? ' item' : ' items') +
-      (S.rows.length < S.total ? ' — ' + nf(S.rows.length) + ' shown' : '');
+      (S.pasted ? ' — the ones pasted'
+                : (S.rows.length < S.total ? ' — ' + nf(S.rows.length) + ' shown' : ''));
 
     $('applyBar').classList.toggle('hide', !act);
+    $('pasteBox').classList.toggle('hide', !act);
     $('applyHint').classList.toggle('hide', !act);
     Array.prototype.forEach.call(document.querySelectorAll('.tickh'), function(th){
       th.classList.toggle('hide', !act);
@@ -911,7 +1012,11 @@
       nf(S.summary.twins) + ' with a twin');
     $('work').classList.remove('hide');
     drawTabs();
-    if(S.tab === 'overview') drawOverview(); else loadRows();
+    // a list chosen by paste is kept while a run goes through it, rather than
+    // swapped back to the whole tab on every poll
+    if(S.tab === 'overview') drawOverview();
+    else if(S.pasted) drawRows();
+    else loadRows();
   }
 
   function poll(){
@@ -949,6 +1054,11 @@
     drawRows();
   });
   $('btnNone').addEventListener('click', function(){ S.picked = {}; drawRows(); });
+  $('btnPaste').addEventListener('click', paste);
+  $('btnPasteClear').addEventListener('click', function(){
+    $('pasteText').value = '';
+    loadRows();
+  });
   $('btnRec').addEventListener('click', loadRecord);
   $('btnRecCsv').addEventListener('click', recCsv);
   $('btnRecClear').addEventListener('click', function(){

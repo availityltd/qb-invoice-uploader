@@ -21,7 +21,7 @@ import {
   readItems, readItemSales, readValuation, readPurchases,
   buildRows as buildProductRows, summarise as summariseProducts,
   updateItem as updateProductItem,
-  listAdjustAccounts, adjustStock
+  listAdjustAccounts, adjustStock, looseName as productKey
 } from './products.js';
 import {
   initProdStore, logProductChange, listProductChanges, clearProductChanges
@@ -6646,6 +6646,71 @@ app.get('/api/products/rows', async (req, res) => {
     shown: Math.min(sorted.length, limit),
     rows: sorted.slice(0, limit)
   });
+});
+
+// A pasted column of SKUs or product names, found in the read. Ticking three
+// thousand boxes by hand is not a way to work; a column copied out of a sheet is.
+//
+// Each pasted line is matched whole - on the SKU, on the name, or on the name
+// with its bracketed SKU taken off - and never on part of a name, because
+// "Lip Tint" is inside forty other products and a wrong match here puts the
+// wrong item away. What is found on this tab comes back to be ticked; what is in
+// the books but not on this tab, and what is not in the books at all, come back
+// named, so nothing pasted goes quietly missing.
+app.post('/api/products/paste', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = prodStore.get(realmId);
+    if (!st || !st.rows.length) throw new Error('Read the books first');
+
+    const flag = String((req.body || {}).flag || '');
+    const lines = String((req.body || {}).text || '')
+      .split(/[\r\n\t]+/).map(x => x.trim()).filter(Boolean);
+    if (!lines.length) throw new Error('Paste at least one SKU or product name');
+    if (lines.length > 10000) throw new Error('That is more than ten thousand lines - paste it in parts');
+
+    // every way an item can be named, pointing back at it
+    const index = new Map();
+    const add = (k, row) => {
+      if (!k) return;
+      if (!index.has(k)) index.set(k, []);
+      if (index.get(k).indexOf(row) < 0) index.get(k).push(row);
+    };
+    st.rows.forEach(r => {
+      add(productKey(r.sku), r);
+      add(productKey(r.name), r);
+      // "18 Color Lipstick Kit B-3(7301-006MB-3)" is also "18 Color Lipstick Kit B-3"
+      add(productKey(String(r.name || '').replace(/\([^)]*\)\s*$/, '')), r);
+    });
+
+    const onTab = r => !flag || flag === 'all' || r.flags.includes(flag);
+    const found = new Map(), elsewhere = [], missing = [];
+
+    lines.forEach(raw => {
+      const hits = index.get(productKey(raw)) || [];
+      if (!hits.length) { missing.push(raw); return; }
+
+      const here = hits.filter(onTab);
+      here.forEach(r => found.set(r.id, r));
+      if (!here.length) {
+        elsewhere.push({
+          pasted: raw,
+          items: hits.map(r => ({ name: r.name, sku: r.sku, qty: r.qty, active: r.active, flags: r.flags }))
+        });
+      }
+    });
+
+    res.json({
+      pasted: lines.length,
+      rows: Array.from(found.values()),
+      elsewhere,
+      missing
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 app.post('/api/products/clear', async (req, res) => {
