@@ -599,6 +599,58 @@ app.get('/api/qb-entity', async (req, res) => {
   }
 });
 
+// Reading an entity back tells us it can be asked for, not that it can be made.
+// An empty query answers the same either way, and the one thing that settles it -
+// whether stock can be put right from here at all - is what QuickBooks says when
+// something is posted to it.
+//
+// So a deliberately empty body is posted. Nothing can be created from nothing:
+// either QuickBooks says the entity is not there to post to, or it complains
+// about the missing fields, and that complaint is the yes. Writes nothing.
+app.get('/api/qb-can-write', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const name = String(req.query.name || '');
+    if (!QB_ENTITIES.includes(name)) {
+      throw new Error('Unknown entity. One of: ' + QB_ENTITIES.join(', '));
+    }
+
+    const token = await getAccessToken(realmId);
+    const r = await fetch(
+      `https://quickbooks.api.intuit.com/v3/company/${realmId}/${name.toLowerCase()}?minorversion=70`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: '{}'
+      });
+
+    const text = await r.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (e) { /* left as it came */ }
+    const fault = (((data.Fault || {}).Error || [])[0]) || null;
+
+    res.json({
+      entity: name,
+      status: r.status,
+      // a complaint about what is missing means the door is open; being told the
+      // operation is not supported means it is not
+      verdict: r.status === 404 ? 'no such endpoint'
+             : (fault && /unsupported|not supported/i.test(fault.Message || '')) ? 'not open to an app'
+             : fault ? 'open - it asked for the fields'
+             : 'open',
+      message: fault ? (fault.Message + (fault.Detail ? ' - ' + fault.Detail : '')) : text.slice(0, 300)
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ==================== Item mappings ====================
 app.get('/api/mappings', async (req, res) => {
   const realmId = await requireCompany(req, res);
