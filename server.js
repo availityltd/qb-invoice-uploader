@@ -7146,6 +7146,7 @@ app.post('/api/replace/scan', async (req, res) => {
     };
     st.scan = scan;
     st.rows = [];
+    st.onNew = {};
     st.job = null;
 
     const token = await getAccessToken(realmId);
@@ -7157,6 +7158,7 @@ app.post('/api/replace/scan', async (req, res) => {
       })
       .then(out => {
         st.rows = out.rows;
+        st.onNew = out.onNew || {};
         scan.found = out.rows.length;
         scan.read = out.read;
         scan.running = false;
@@ -7184,7 +7186,8 @@ app.get('/api/replace/status', async (req, res) => {
   if (!st) return res.json({ has: false });
 
   const byPair = new Map(st.pairs.map(p => [p.from.id, {
-    from: p.from, to: p.to, txns: 0, lines: 0, qty: 0, amount: 0, kinds: {}, done: 0, failed: 0
+    from: p.from, to: p.to, txns: 0, lines: 0, qty: 0, amount: 0, kinds: {}, done: 0, failed: 0,
+    onNew: (st.onNew || {})[p.to.id] || null
   }]));
   st.rows.forEach(r => {
     const touched = new Set();

@@ -107,7 +107,8 @@
                 <thead><tr>
                   <th>Going</th><th></th><th>Taking its place</th>
                   <th class="num">Transactions</th><th class="num">Lines</th>
-                  <th class="num">Qty</th><th class="num">Amount</th><th>Where</th><th></th>
+                  <th class="num">Qty</th><th class="num">Amount</th><th>Where</th>
+                  <th>Already on the new one</th><th></th>
                 </tr></thead>
                 <tbody id="pairRows"></tbody>
               </table>
@@ -315,6 +316,13 @@
         '<td class="num mono">' + (g ? nf(g.qty) : '—') + '</td>' +
         '<td class="num mono">' + (g ? money(g.amount) : '—') + '</td>' +
         '<td class="kinds">' + (g ? (where || 'nowhere in these dates') : '') + '</td>' +
+        '<td class="kinds">' + (g && g.onNew
+          ? (g.onNew.txns
+              ? Object.keys(g.onNew.kinds).map(function(k){
+                  return nf(g.onNew.kinds[k]) + ' ' + esc(k.toLowerCase());
+                }).join(', ') + ' · ' + nf(g.onNew.qty) + ' qty'
+              : 'none')
+          : '') + '</td>' +
         '<td>' + state + '</td>' +
         '</tr>';
     }).join('');
@@ -355,9 +363,12 @@
         ' and ' + esc(s.to) + ' for the kinds ticked.');
       return;
     }
-    say('scanStat', 'ok', '<b>' + nf(s.found) + (s.found === 1 ? ' transaction' : ' transactions') +
-      '</b> carry one of the products, out of ' + nf(s.read) + ' read between ' +
-      esc(s.from) + ' and ' + esc(s.to));
+    say('scanStat', s.found ? 'ok' : 'bad', '<b>' + nf(s.found) + (s.found === 1 ? ' transaction' : ' transactions') +
+      '</b> carry one of the products going, out of ' + nf(s.read) + ' read between ' +
+      esc(s.from) + ' and ' + esc(s.to) +
+      (s.found ? '' : '. Look at <b>Already on the new one</b> above: where that has a count, ' +
+        'these transactions were never on the old item &mdash; they are already on the new one, ' +
+        'and there is nothing here to replace. Tick Invoice to look on the sales side.'));
   }
 
   function drawFound(d){

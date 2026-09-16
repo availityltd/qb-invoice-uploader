@@ -173,8 +173,33 @@ export async function scanReplace(realmId, token, opts, onStep) {
   const seen = new Set();
   let read = 0;
 
+  // Where the item taking the place is already in use. Nothing is changed on
+  // these; they are counted because "none found" on its own does not say
+  // whether the old item was never there or the transactions were already on
+  // the new one - and those call for different things.
+  const onNew = new Map(pairs.map(p => [p.to.id, { txns: 0, lines: 0, qty: 0, kinds: {} }]));
+  const seenNew = new Set();
+
   const keepFor = kind => txn => {
     const k = kind.key + '|' + txn.Id;
+    if (!seenNew.has(k)) {
+      const touched = new Set();
+      (txn.Line || []).forEach(l => {
+        const d = l[kind.detail];
+        const id = d && d.ItemRef ? String(d.ItemRef.value) : '';
+        const g = id && onNew.get(id);
+        if (!g) return;
+        g.lines++;
+        g.qty = round2(g.qty + Number(d.Qty || 0));
+        if (!touched.has(id)) {
+          touched.add(id);
+          g.txns++;
+          g.kinds[kind.label] = (g.kinds[kind.label] || 0) + 1;
+        }
+      });
+      if (touched.size) seenNew.add(k);
+    }
+
     if (seen.has(k)) return;
     const hits = hitsOf(kind, txn, map);
     if (!hits.length) return;
@@ -228,7 +253,7 @@ export async function scanReplace(realmId, token, opts, onStep) {
   }
 
   rows.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.doc.localeCompare(b.doc));
-  return { rows, read };
+  return { rows, read, onNew: Object.fromEntries(onNew) };
 }
 
 /* ==================== changing one ==================== */
