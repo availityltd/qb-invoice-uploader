@@ -6696,6 +6696,51 @@ async function runProductJob(realmId, st, job) {
         patch = { Active: false };
         was = 'in use';
         now = 'put away';
+      } else if (job.field === 'merge') {
+        // Two items that are one product. QuickBooks will not merge them and the
+        // invoices already written stay where they are - what they cost has been
+        // charged already, and rewriting a year of them would move months that
+        // are closed. What can be put right is the stock: the one being kept
+        // holds what the other one sold, so the shortfall is carried across and
+        // the empty one is put away.
+        const keepId = String(one.value || '');
+        const keep = st.rows.filter(r => r.id === keepId)[0];
+        if (!keep) throw new Error('The item to keep is not in this read');
+        if (keepId === one.id) throw new Error('That is the same item');
+
+        const had = Number(row.qty || 0);
+        if (had !== 0) {
+          await adjustStock(realmId, token, {
+            accountId: job.accountId, date: job.date,
+            memo: (job.memo || 'Stock moved to ' + keep.name),
+            itemId: one.id, from: had, to: 0
+          });
+          await adjustStock(realmId, token, {
+            accountId: job.accountId, date: job.date,
+            memo: (job.memo || 'Stock taken over from ' + row.name),
+            itemId: keepId, from: Number(keep.qty || 0), to: Number(keep.qty || 0) + had
+          });
+          row.qty = 0;
+          keep.qty = Number(keep.qty || 0) + had;
+        }
+
+        // the cost travels with it where the one being kept has none
+        if (!keep.cost && row.cost) {
+          await updateProductItem(realmId, token, keepId, { PurchaseCost: Number(row.cost) });
+          keep.cost = Number(row.cost);
+        }
+
+        await updateProductItem(realmId, token, one.id, { Active: false });
+        row.active = false;
+
+        job.done++;
+        job.log.push({ ok: true, name: row.name || one.id,
+                       was: had + ' in stock', now: 'moved to ' + keep.name + ', put away' });
+        await logProductChange(realmId, {
+          id: one.id, name: row.name || '', sku: row.sku || '',
+          field: 'merge', was: had, now: keep.name, ok: true
+        }).catch(e => console.error('product log:', e.message));
+        continue;
       } else if (job.field === 'stock') {
         // the correction itself, rather than a field on the item: what the stock
         // should read, against what it reads now
@@ -6760,8 +6805,8 @@ app.post('/api/products/apply', async (req, res) => {
 
     const body = req.body || {};
     const field = String(body.field || '');
-    if (['cost', 'active', 'stock'].indexOf(field) < 0) throw new Error('Unknown change');
-    if (field === 'stock' && !body.accountId) {
+    if (['cost', 'active', 'stock', 'merge'].indexOf(field) < 0) throw new Error('Unknown change');
+    if ((field === 'stock' || field === 'merge') && !body.accountId) {
       throw new Error('Pick the account to write the difference off to');
     }
 

@@ -60,6 +60,8 @@
   td.tick{width:34px}
   td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
   tr.off{opacity:.45}
+  .keepbox{max-width:230px;font-size:12.5px;padding:6px 8px;border:1px solid var(--line-2);
+    border-radius:6px;background:#fff;color:var(--text)}
   .costbox{width:96px;font-size:13px;padding:6px 8px;border:1px solid var(--line-2);
     border-radius:6px;background:#fff;color:var(--text);text-align:right}
 </style>
@@ -170,6 +172,7 @@
                     <th class="tickh hide"></th>
                     <th class="costh hide">Cost to put on</th>
                     <th class="stockh hide">Should read</th>
+                    <th class="keeph hide">Keep instead</th>
                     <th>Product</th>
                     <th>Type</th>
                     <th class="num">Stock</th>
@@ -251,7 +254,7 @@
       hint:'More was sold than was ever brought in, so QuickBooks charged nothing for the sales out of nothing. Say what each should read and the difference is written off to the account chosen below. A purchase is the better repair where there was a real purchase - this is for the stock that was never there.' },
     { key:'twin',     label:'Duplicates',
       title:'One product, two items',
-      hint:'The same product on more than one item, matched on name, description or SKU - usually one made by the connector against a SKU and one made by hand. Bills go to one and sales to the other, which is how stock goes negative on one while the other sits full. Where one of a pair has a cost and the other has none, the cost box is already filled with it: tick and put it across. Stock cannot be moved between them from here, and QuickBooks will not merge two inventory items at all.' },
+      hint:'The same product on more than one item, matched on name, description or SKU - usually one made by the connector against a SKU and one made by hand. Bills go to one and sales to the other, which is how stock goes negative on one while the other sits full. Pick which of the pair to keep, and this carries the stock across, takes the cost with it if the kept one has none, and puts the other away. The invoices already written stay on the item they were written against: what they cost has been charged already, and rewriting a year of them would move months that are closed.' },
     { key:'reports',  label:'Reports' }
   ];
 
@@ -277,13 +280,14 @@
   // box, which starts at what the read suggests and is the operator's after that
   var S = { tab:'overview', report:'zero-cogs', rows:[], total:0,
             summary:null, filter:'', poller:null, from:'', to:'',
-            picked:{}, costs:{}, stock:{}, adjust:[], record:[], logged:0 };
+            picked:{}, costs:{}, stock:{}, keep:{}, adjust:[], record:[], logged:0 };
 
   // the two tabs that write. Everything else only reads
   function acts(){
     // the duplicates tab writes the same field: where one of a pair carries a
     // cost and the other does not, the cost is copied across rather than typed
-    if(S.tab === 'no-cost' || S.tab === 'twin') return 'cost';
+    if(S.tab === 'no-cost') return 'cost';
+    if(S.tab === 'twin')    return 'merge';
     if(S.tab === 'unused')   return 'active';
     if(S.tab === 'negative') return 'stock';
     return '';
@@ -509,7 +513,11 @@
     Array.prototype.forEach.call(document.querySelectorAll('.stockh'), function(th){
       th.classList.toggle('hide', act !== 'stock');
     });
-    $('stockBox').classList.toggle('hide', act !== 'stock');
+    Array.prototype.forEach.call(document.querySelectorAll('.keeph'), function(th){
+      th.classList.toggle('hide', act !== 'merge');
+    });
+    // a merge moves stock too, so it needs the same account and date
+    $('stockBox').classList.toggle('hide', act !== 'stock' && act !== 'merge');
 
     $('rows').innerHTML = S.rows.length ? S.rows.map(function(r){
       var on = !!S.picked[r.id];
@@ -524,6 +532,15 @@
         (act === 'stock'
           ? '<td><input type="text" class="costbox mono" data-stock="' + esc(r.id) + '" value="' +
             esc(S.stock[r.id] !== undefined ? S.stock[r.id] : 0) + '" inputmode="decimal"></td>'
+          : '') +
+        (act === 'merge'
+          ? '<td><select class="keepbox" data-keep="' + esc(r.id) + '">' +
+            '<option value="">— leave it alone —</option>' +
+            (r.twins || []).map(function(t){
+              return '<option value="' + esc(t.id) + '"' +
+                     (S.keep[r.id] === t.id ? ' selected' : '') + '>' +
+                     esc(t.name) + (t.cost ? ' · cost ' + money(t.cost) : ' · no cost') + '</option>';
+            }).join('') + '</select></td>'
           : '') +
         '<td class="pname">' + esc(r.name) +
           (r.sku ? '<small>' + esc(r.sku) + '</small>' : '') + tags(r) + '</td>' +
@@ -568,6 +585,15 @@
         drawApply();
       });
     });
+    Array.prototype.forEach.call($('rows').querySelectorAll('select[data-keep]'), function(b){
+      b.addEventListener('change', function(){
+        var id = b.getAttribute('data-keep');
+        S.keep[id] = b.value;
+        // choosing which to keep is the whole decision, so it ticks itself
+        if(b.value) S.picked[id] = true;
+        drawRows();
+      });
+    });
     drawApply();
   }
 
@@ -597,6 +623,18 @@
           'It is what a new bill opens at, and what the reports read.'
         : 'Tick the items to put a cost on. The suggested cost is what the item was last bought for, ' +
           'what QuickBooks averages it at, or what its twin cost — whichever was found first.';
+    } else if(act === 'merge'){
+      var pairs = picked.filter(function(r){ return S.keep[r.id]; });
+      var mAcct = $('adjAcct').value;
+      $('btnApply').disabled = !pairs.length || !mAcct;
+      $('btnApply').textContent = pairs.length
+        ? 'Merge ' + nf(pairs.length) + (pairs.length === 1 ? ' item' : ' items') + ' into the kept one'
+        : 'Nothing chosen';
+      $('applyHint').textContent = !pairs.length
+        ? 'For each pair, choose which item to keep. The other one hands its stock over and is put away.'
+        : nf(pairs.length) + ' to merge' +
+          (mAcct ? '. The stock moves across on the date above, the cost goes with it where the kept one has none, and the emptied item is switched off. Invoices already written stay where they are.'
+                 : '. Pick the account the stock difference is written off to first.');
     } else if(act === 'stock'){
       var moving = picked.filter(function(r){
         var to = parseFloat(S.stock[r.id] !== undefined ? S.stock[r.id] : 0);
@@ -669,6 +707,9 @@
         var to = parseFloat(S.stock[r.id] !== undefined ? S.stock[r.id] : 0);
         if(!isFinite(to) || to === Number(r.qty || 0)) return;
         items.push({ id: r.id, value: to });
+      } else if(act === 'merge'){
+        if(!S.keep[r.id]) return;
+        items.push({ id: r.id, value: S.keep[r.id] });
       } else {
         if(Number(r.qty || 0) !== 0) return;
         items.push({ id: r.id });
@@ -682,8 +723,8 @@
 
     post('/api/products/apply', {
       field: act, items: items,
-      accountId: act === 'stock' ? $('adjAcct').value : undefined,
-      date: act === 'stock' ? $('adjDate').value : undefined,
+      accountId: (act === 'stock' || act === 'merge') ? $('adjAcct').value : undefined,
+      date: (act === 'stock' || act === 'merge') ? $('adjDate').value : undefined,
       memo: act === 'stock' ? $('adjMemo').value.trim() : undefined
     })
       .then(function(){
@@ -741,7 +782,8 @@
         '<td>' + (h.field === 'cost' ? 'Cost'
                 : h.field === 'stock' ? 'Stock'
                 : h.field === 'bill' ? 'Bill'
-                : h.field === 'order' ? 'Order' : 'Put away') + '</td>' +
+                : h.field === 'order' ? 'Order'
+                : h.field === 'merge' ? 'Merged' : 'Put away') + '</td>' +
         '<td class="mono">' + esc(h.was || '—') + '</td>' +
         '<td class="mono">' + esc(h.now || '—') + '</td>' +
         '<td>' + (h.status === 'done'
