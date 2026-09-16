@@ -17,6 +17,10 @@ import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
   getOrCreateCustomer, postInvoice, qbQuery, qbReport
 } from './qb.js';
+import {
+  readItems, readItemSales, readValuation, readPurchases,
+  buildRows as buildProductRows, summarise as summariseProducts
+} from './products.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
 import {
@@ -6417,6 +6421,139 @@ app.get('/api/receipts/export', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// ==================== Product health ====================
+//
+// One read of the books, held in memory, that every tab of the products page is
+// drawn from: the items themselves, what they sold and what that cost, what the
+// stock is worth, and what was bought. Reading it is a minute's work, so it is
+// read once and asked of many times.
+
+const prodStore = new Map();       // realmId -> { scan, rows, summary, from, to, at }
+
+const prodRound = n => Math.round(n * 100) / 100;
+
+app.post('/api/products/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const { from, to } = req.body || {};
+    if (!from || !to) throw new Error('Give the dates to look between');
+    if (from > to) throw new Error('The first date is after the last one');
+
+    const old = prodStore.get(realmId);
+    if (old && old.scan && old.scan.running) throw new Error('A read is still running');
+
+    const scan = {
+      running: true, step: 'the items', items: 0, read: 0,
+      from, to, started: Date.now(), error: null
+    };
+    const st = { scan, rows: [], summary: null, from, to, at: Date.now() };
+    prodStore.set(realmId, st);
+
+    (async () => {
+      const token = await getAccessToken(realmId);
+
+      scan.step = 'the items';
+      const items = await readItems(realmId, token, s => { scan.items = s.items; });
+
+      scan.step = 'what sold, and what it cost';
+      const sales = await readItemSales(realmId, token, from, to);
+
+      scan.step = 'what the stock is worth';
+      const valuation = await readValuation(realmId, token, to);
+
+      scan.step = 'what was bought';
+      const purchases = await readPurchases(realmId, token, from, to,
+        s => { scan.read = s.read; });
+
+      st.rows = buildProductRows(items, sales.by, valuation.by, purchases.by);
+      st.summary = summariseProducts(st.rows);
+      st.columns = { sales: sales.columns, valuation: valuation.columns };
+      st.at = Date.now();
+      scan.running = false;
+      scan.finished = Date.now();
+    })().catch(e => {
+      scan.running = false;
+      scan.error = e.message;
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/products/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  res.setHeader('Cache-Control', 'no-store');
+  const st = prodStore.get(realmId);
+  if (!st) return res.json({ has: false });
+
+  res.json({
+    has: true,
+    from: st.from, to: st.to,
+    summary: st.summary,
+    columns: st.columns || null,
+    scan: {
+      running: st.scan.running, step: st.scan.step, items: st.scan.items,
+      read: st.scan.read, error: st.scan.error || null
+    }
+  });
+});
+
+// One tab's worth of the read: the rows carrying a flag, narrowed by what was
+// typed, biggest trouble first. The whole list is never sent - five thousand
+// items with their twins is not something a page should be handed.
+app.get('/api/products/rows', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  res.setHeader('Cache-Control', 'no-store');
+  const st = prodStore.get(realmId);
+  if (!st) return res.json({ rows: [], total: 0 });
+
+  const flag = String(req.query.flag || '');
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const limit = Math.min(Number(req.query.limit) || 300, 5000);
+  const sortBy = String(req.query.sort || '');
+  const active = req.query.active || '';
+
+  let rows = st.rows;
+  if (flag && flag !== 'all') rows = rows.filter(r => r.flags.includes(flag));
+  if (active === 'yes') rows = rows.filter(r => r.active);
+  if (active === 'no') rows = rows.filter(r => !r.active);
+  if (q) rows = rows.filter(r =>
+    (r.name || '').toLowerCase().indexOf(q) > -1 ||
+    (r.sku || '').toLowerCase().indexOf(q) > -1);
+
+  const by = {
+    sold:   (a, b) => b.soldAmount - a.soldAmount,
+    qty:    (a, b) => a.qty - b.qty,
+    name:   (a, b) => (a.name || '').localeCompare(b.name || ''),
+    cost:   (a, b) => (a.cost || 0) - (b.cost || 0)
+  }[sortBy] || ((a, b) => b.soldAmount - a.soldAmount || (a.name || '').localeCompare(b.name || ''));
+
+  const sorted = rows.slice().sort(by);
+
+  res.json({
+    total: rows.length,
+    shown: Math.min(sorted.length, limit),
+    rows: sorted.slice(0, limit)
+  });
+});
+
+app.post('/api/products/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = prodStore.get(realmId);
+  if (st && st.scan && st.scan.running) return res.status(400).json({ error: 'A read is still running' });
+  prodStore.delete(realmId);
+  res.json({ ok: true });
 });
 
 // ==================== Start ====================
