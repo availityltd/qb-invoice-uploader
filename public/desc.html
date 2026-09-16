@@ -825,6 +825,12 @@
     }
     $('btnScan').disabled = false;
     if(s.error) say('bad', '<b>' + esc(s.error) + '</b>');
+    // a range of the books with not one transaction in it is not a result, it is
+    // a read that did not happen - said as that, not in green
+    else if(!s.read) say('bad', '<b>QuickBooks gave back no transactions at all</b> between ' +
+      esc(s.from) + ' and ' + esc(s.to) + ' for the kinds ticked. That is not what the books ' +
+      'hold - read again, and if it says the same, the company chosen at the bottom left may ' +
+      'not be the one these are in.');
     else say('ok', '<b>' + S.groups.length + ' ' + way().label.toLowerCase() +
       (S.groups.length === 1 ? '' : 's') + '</b> on ' + s.found +
       ' transactions between ' + esc(s.from) + ' and ' + esc(s.to) +

@@ -12,7 +12,7 @@
 // as it came - payee, payment account, date, memo, amount, VAT code, class,
 // customer, billable state, attachments, the lot.
 
-import { qbQuery } from './qb.js';
+import { qbQuery, qbQueryStrict } from './qb.js';
 
 const API = 'https://quickbooks.api.intuit.com';
 
@@ -198,7 +198,9 @@ export async function readWindow(realmId, token, kind, from, to, keep) {
   let hitCap = false;
 
   while (true) {
-    const q = await qbQuery(realmId, token,
+    // strict, because a refusal that comes back looking like an empty month is
+    // how a whole scan ends up saying nothing was there
+    const q = await qbQueryStrict(realmId, token,
       `SELECT * FROM ${kind.key} WHERE TxnDate >= '${from}' AND TxnDate <= '${to}' ` +
       `STARTPOSITION ${start} MAXRESULTS 1000`);
     const arr = q[kind.key] || [];

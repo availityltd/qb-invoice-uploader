@@ -258,3 +258,34 @@ export async function qbReport(realmId, token, name, params = {}) {
     throw new Error(`Report ${name} came back unreadable: ${text.slice(0, 200)}`);
   }
 }
+
+// The same query, for the reads where an empty answer has to mean empty.
+//
+// QuickBooks does not always fail with a failing status. Throttled, or asked
+// something it will not answer, it can come back 200 with a Fault in the body and
+// no QueryResponse at all - and qbQuery hands that on as an empty list. For a
+// scan of the books that is the worst answer there is: "0 transactions read" in
+// green, over seventeen months, with the real reason thrown away. This says the
+// reason instead. qbQuery itself is left as it is, because every other page in
+// the app already leans on how it behaves.
+export async function qbQueryStrict(realmId, token, sql) {
+  const url = `${API}/v3/company/${realmId}/query?query=${encodeURIComponent(sql)}&minorversion=70`;
+  const res = await qbFetch(url, token);
+  const text = await res.text();
+
+  let json = null;
+  try { json = JSON.parse(text); } catch (e) { /* said below */ }
+
+  const fault = json && json.Fault && ((json.Fault.Error || [])[0] || {});
+  if (!res.ok || fault || !json) {
+    const why = fault
+      ? (fault.Message || 'QuickBooks refused the read') + (fault.Detail ? ' - ' + fault.Detail : '')
+      : text.slice(0, 300);
+    throw new Error(`Query failed (${res.status}) tid=${tidOf(res)}: ${why}`);
+  }
+
+  if (!json.QueryResponse) {
+    throw new Error(`QuickBooks answered without a result (${res.status}) tid=${tidOf(res)}`);
+  }
+  return json.QueryResponse;
+}
