@@ -25,6 +25,19 @@ const num = v => {
 export const looseName = s =>
   String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
 
+// The connector names its item after the SKU - 7301-490/k-15/l-653 - while the
+// one made by hand is called "Miss Rose Dream Glide Lipstick 653". Those two are
+// one product, and nothing in the name says so. What ties them together is the
+// description, the SKU, and the SKU written inside the other one's name.
+export function twinKeys(it) {
+  const keys = [];
+  const push = v => { const k = looseName(v); if (k && k.length > 2 && keys.indexOf(k) < 0) keys.push(k); };
+  push(it.name);
+  push(it.desc);
+  push(it.sku);
+  return keys;
+}
+
 /* ==================== the items ==================== */
 
 export async function readItems(realmId, token, onStep) {
@@ -33,7 +46,9 @@ export async function readItems(realmId, token, onStep) {
 
   while (true) {
     const q = await qbQuery(realmId, token,
-      `SELECT * FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
+      // QuickBooks hands back only the live ones unless both are asked for, and
+      // an item already switched off is exactly what has to be seen here
+      `SELECT * FROM Item WHERE Active IN (true, false) STARTPOSITION ${start} MAXRESULTS 1000`);
     const arr = q.Item || [];
     arr.forEach(it => {
       items.push({
@@ -234,11 +249,25 @@ export async function readPurchases(realmId, token, from, to, onStep) {
 export function buildRows(items, sales, valuation, purchases) {
   const byLoose = new Map();
   items.forEach(it => {
-    const k = looseName(it.name);
-    if (!k) return;
-    if (!byLoose.has(k)) byLoose.set(k, []);
-    byLoose.get(k).push(it);
+    twinKeys(it).forEach(k => {
+      if (!byLoose.has(k)) byLoose.set(k, []);
+      byLoose.get(k).push(it);
+    });
   });
+
+  // the same item found under two of its own keys is still one item
+  const twinsOf = it => {
+    const seen = new Set([it.id]);
+    const out = [];
+    twinKeys(it).forEach(k => {
+      (byLoose.get(k) || []).forEach(o => {
+        if (seen.has(o.id)) return;
+        seen.add(o.id);
+        out.push(o);
+      });
+    });
+    return out;
+  };
 
   return items.map(it => {
     const s = sales.get(it.id)     || { qty: 0, amount: 0, cogs: 0 };
@@ -249,7 +278,7 @@ export function buildRows(items, sales, valuation, purchases) {
     const qty = v ? v.qty : (it.qty === null ? 0 : it.qty);
     const sold = s.qty > 0 || s.amount !== 0;
     const bought = p.bills > 0;
-    const twins = (byLoose.get(looseName(it.name)) || []).filter(o => o.id !== it.id);
+    const twins = twinsOf(it);
 
     const flags = [];
     if (inventory && sold && s.cogs === 0) flags.push('zero-cogs');
@@ -292,8 +321,10 @@ export function summarise(rows) {
     inventory: rows.filter(r => r.type === 'Inventory').length,
     zeroCogs: zero.length,
     zeroCogsSales: round2(zero.reduce((s, r) => s + r.soldAmount, 0)),
-    // what those sales would have cost at the best cost known for them
+    // what those sales would have cost at the best cost known for them - which
+    // for most of them is nothing, because a cost was never anywhere to be found
     zeroCogsCost: round2(zero.reduce((s, r) => s + r.soldQty * (r.suggest || 0), 0)),
+    zeroCogsNoPrice: zero.filter(r => !r.suggest).length,
     noCost: has('no-cost').length,
     negative: neg.length,
     negativeQty: round2(neg.reduce((s, r) => s + r.qty, 0)),

@@ -235,7 +235,12 @@
       });
     });
   }
-  function iso(d){ return d.toISOString().slice(0, 10); }
+  // the date as it reads on this calendar, not in UTC - toISOString on a local
+  // midnight hands back the day before
+  function iso(d){
+    var p = function(n){ return n < 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
 
   function setSpan(which){
     var now = new Date(), from = new Date(), to = now;
@@ -323,9 +328,14 @@
 
     $('ovCards').innerHTML =
       card('bad', nf(s.zeroCogs), 'Selling at no cost',
-        'Sold ' + money(s.zeroCogsSales) +
-        ' with nothing charged against it. At the best cost known that is about <b>' +
-        money(s.zeroCogsCost) + '</b> of cost missing.', 'zero-cogs') +
+        'Sold ' + money(s.zeroCogsSales) + ' with nothing charged against it. ' +
+        (s.zeroCogsCost
+          ? 'At the best cost known that is about <b>' + money(s.zeroCogsCost) +
+            '</b> of cost missing'
+          : 'No cost is known for any of them yet') +
+        (s.zeroCogsNoPrice
+          ? ' &mdash; ' + nf(s.zeroCogsNoPrice) + ' have no cost to go on at all.'
+          : '.'), 'zero-cogs') +
       card('warn', nf(s.noCost), 'No cost anywhere',
         'Never given a cost, never bought, no average worked out.', 'no-cost') +
       card('bad', nf(s.negative), 'Stock below zero',
