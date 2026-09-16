@@ -18,7 +18,8 @@
     ]},
     { group: 'Products', items: [
       // cost, stock, duplicates and the reports behind them are tabs of one page
-      { href:'/products.html', label:'Product health',   icon:'tag' }
+      { href:'/products.html',  label:'Product health',  icon:'tag' },
+      { href:'/purchases.html', label:'Purchases',       icon:'cart' }
     ]},
     { group: 'Maintenance', items: [
       { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
@@ -41,6 +42,7 @@
     receipt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6"/>',
         search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
     swap:   '<path d="M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3"/>',
+    cart:   '<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.4 11.2a2 2 0 002 1.6h7.7a2 2 0 002-1.6L21 7H6"/>',
     tag:    '<path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0l-7-7A2 2 0 013 12.2V5a2 2 0 012-2h7.2a2 2 0 011.4.6l7 7a2 2 0 010 2.8z"/><circle cx="7.5" cy="7.5" r="1.2"/>'
   };
 

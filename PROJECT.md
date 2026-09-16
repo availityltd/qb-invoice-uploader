@@ -44,6 +44,7 @@ understand what is happening underneath.
 | Find orders | `find.html`, `finder.js` | Searches every CPR sheet for pasted order numbers |
 | Courier dashboard | `courierlive.js`, `dashdata.js`, `postex.js` | Live courier data |
 | Product health | `products.html`, `products.js` | One read of items + ItemSales + InventoryValuationSummary + bill item lines, then tabs over it: cost missing, untouched items, duplicate items, and the reports - selling at no cost, sold never bought, bought never sold, stock below zero |
+| Purchases | `purchases.html`, `purchases.js` | The purchase orders and bills already in QuickBooks, with what went onto products and what went onto an account instead; and making another - every line carrying an item, because a line on an account brings no stock in |
 | Fix duplicates | `fix.html` | Bulk rename / delete of duplicate invoices |
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |
 | Changes (Product / Category / Description) | `swap.html`, `recat.html`, `desc.html` | One rail entry, three tabs — a new kind of change is a new tab, not a new nav line |
@@ -77,6 +78,13 @@ understand what is happening underneath.
   name, qty, amount, % of sales, avg price, COGS, gross profit, margin.
 - `PurchasesByVendorDetail` answers an app with `Permission Denied (5020)`. Read
   `Bill` and `Purchase` item lines instead - that is what `readPurchases` does.
+- `InventoryAdjustment` **is** open to an app, whatever its absence from the docs
+  suggests: an empty POST comes back with "add at least one inventory item",
+  which is a validation error, not an unsupported one. Negative stock can be put
+  right from here.
+- `PurchaseOrder` and `Bill` both read and write, lines carrying
+  `ItemBasedExpenseLineDetail` with `ItemRef`, `UnitPrice`, `Qty`; a PO also
+  carries `Received` per line and a `LinkedTxn` to the bill made from it.
 - An item's `PurchaseCost` is not its cost of sales. QBO is FIFO: cost comes from
   bills and from opening quantity, and filling `PurchaseCost` in later changes
   nothing that already sold.

@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purchases</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:wrap}
+  .tabs button{padding:12px 20px;font:inherit;font-size:13.5px;color:var(--muted);
+    background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+
+  .dates{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .dates label,.fld label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);display:block;margin-bottom:4px}
+  .dates input[type=date],.fld input[type=date]{font-family:var(--mono);font-size:13px;
+    padding:8px 10px;border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+  .tally > div{flex:1;min-width:130px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:21px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+
+  .fld{margin-bottom:12px}
+  .fld input[type=text],.fld select{width:100%;font-size:13.5px;padding:8px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text);
+    font-family:var(--sans)}
+  .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .g2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  @media (max-width:820px){ .g3,.g2{grid-template-columns:1fr} }
+
+  .rowfind{width:100%;max-width:280px;font-size:13px;padding:7px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  td.doc{font-family:var(--mono)}
+  td.who{white-space:normal;max-width:260px;font-weight:600}
+  .look{border:0;background:none;font:inherit;font-size:11.5px;color:var(--qbo);
+    cursor:pointer;padding:0;text-decoration:underline}
+  tr.peek td{background:#FAFBFA;font-size:11.5px;color:var(--muted);white-space:normal}
+  tr.peek table{width:100%;border-collapse:collapse;margin:4px 0}
+  tr.peek td.in{padding:4px 8px;border-bottom:1px solid var(--line)}
+  .pill{font-size:10.5px;padding:2px 7px;border-radius:999px;background:#F1F3F2;color:var(--muted)}
+  .pill.good{background:#EFF8EC;color:var(--ok)}
+  .pill.warn{background:#FFF6E6;color:#8A5A00}
+
+  .lines table{width:100%;border-collapse:collapse}
+  .lines th{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+    text-align:left;padding:0 8px 6px 0;font-weight:500}
+  .lines td{padding:0 8px 8px 0;vertical-align:top}
+  .lines input,.lines select{width:100%;font-size:13px;padding:7px 9px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .lines input.num{text-align:right;font-family:var(--mono)}
+  .lines td.amt{font-family:var(--mono);font-size:13px;padding-top:8px;text-align:right;white-space:nowrap}
+  .lines td.x{width:28px}
+  .lines button.x{border:0;background:none;color:var(--faint);font-size:16px;cursor:pointer;
+    padding:4px 2px;line-height:1}
+  .lines button.x:hover{color:var(--neg)}
+  .sum{display:flex;justify-content:flex-end;gap:14px;align-items:baseline;
+    font-family:var(--mono);font-size:16px;margin-top:6px}
+  .sum span{font-family:var(--sans);font-size:11px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--faint)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Purchases</h1>
+        <div class="sub">The orders placed and the bills entered against them &mdash; and where another one is made. What was bought is what QuickBooks works cost of sales out of, so a missing purchase is a missing cost.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Orders, bills, suppliers and products are all read from QuickBooks.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="tabs" id="tabs"></div>
+
+        <!-- ============ what is already there ============ -->
+        <div class="tabpage" id="tabList">
+          <div class="sheet">
+            <div class="sec">
+              <h2><span class="no">01</span> The dates to look between
+                <span class="aside" id="listAside"></span></h2>
+              <div class="dates">
+                <div><label for="dFrom">From</label><input type="date" id="dFrom"></div>
+                <div><label for="dTo">To</label><input type="date" id="dTo"></div>
+                <div style="display:flex;align-items:flex-end">
+                  <button class="solid" id="btnFetch">Read them</button>
+                </div>
+              </div>
+              <div class="quick" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+                <button class="mini" data-span="ytd">This year to date</button>
+                <button class="mini" data-span="last90">Last 90 days</button>
+                <button class="mini" data-span="thismonth">This month</button>
+                <button class="mini" data-span="all">Since April 2025</button>
+              </div>
+              <div class="stat" id="statBox"></div>
+            </div>
+          </div>
+
+          <div class="sheet hide" id="listSheet">
+            <div class="sec">
+              <h2><span class="no">02</span> <span id="listTitle">What is there</span></h2>
+              <div class="tally" id="tally"></div>
+              <div class="acts">
+                <input type="text" class="rowfind" id="rowFind" placeholder="Search by number or supplier">
+                <button class="mini" id="btnCsv">Download this list</button>
+              </div>
+              <div class="tbl" style="max-height:540px;margin-top:12px">
+                <table>
+                  <thead><tr>
+                    <th>Number</th><th>Date</th><th>Supplier</th>
+                    <th class="num">Products</th><th class="num">Qty</th>
+                    <th class="num">On products</th><th class="num">Elsewhere</th>
+                    <th class="num">Total</th><th>State</th><th></th>
+                  </tr></thead>
+                  <tbody id="rows"></tbody>
+                </table>
+              </div>
+              <p class="hint" style="margin-top:10px"><b>Elsewhere</b> is what was put
+                straight onto an account instead of onto a product. That money never reaches
+                the stock, so it never becomes cost of sales &mdash; which is one of the ways
+                a product ends up selling at no cost.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ making one ============ -->
+        <div class="tabpage hide" id="tabNew">
+          <div class="sheet">
+            <div class="sec">
+              <h2><span class="no">01</span> What kind, and with whom</h2>
+              <div class="g3">
+                <div class="fld">
+                  <label for="newKind">What to make</label>
+                  <select id="newKind">
+                    <option value="PurchaseOrder">Purchase order — a promise, nothing in the ledger</option>
+                    <option value="Bill">Bill — money owed, and stock in at a cost</option>
+                  </select>
+                </div>
+                <div class="fld">
+                  <label for="vendor">Supplier</label>
+                  <select id="vendor"><option value="">— pick a supplier —</option></select>
+                </div>
+                <div class="fld">
+                  <label for="docNo">Their number — optional</label>
+                  <input type="text" id="docNo" placeholder="Bill No. 23072026">
+                </div>
+              </div>
+              <div class="g3">
+                <div class="fld"><label for="nDate">Date</label><input type="date" id="nDate"></div>
+                <div class="fld hide" id="dueWrap"><label for="nDue">Due</label><input type="date" id="nDue"></div>
+                <div class="fld hide" id="apWrap">
+                  <label for="apAcct">Owed on</label>
+                  <select id="apAcct"><option value="">QuickBooks' own choice</option></select>
+                </div>
+              </div>
+              <div class="fld">
+                <label for="memo">Note on it — optional</label>
+                <input type="text" id="memo" placeholder="Why this is being entered">
+              </div>
+            </div>
+          </div>
+
+          <div class="sheet">
+            <div class="sec">
+              <h2><span class="no">02</span> What is on it
+                <span class="aside" id="lineAside"></span></h2>
+              <p class="hint" style="margin:0 0 12px">Every line carries a product. A
+                purchase put onto an account instead brings no stock in and leaves the cost
+                of sales exactly as wrong as it was.</p>
+              <div class="lines">
+                <table>
+                  <thead><tr>
+                    <th style="width:38%">Product</th><th>Description</th>
+                    <th style="width:90px">Qty</th><th style="width:110px">Rate</th>
+                    <th style="width:120px" class="num">Amount</th><th></th>
+                  </tr></thead>
+                  <tbody id="lineRows"></tbody>
+                </table>
+              </div>
+              <div class="acts" style="margin-top:6px">
+                <button class="mini" id="btnAddLine">Add a line</button>
+              </div>
+              <div class="sum"><span>Total</span> <b id="newTotal">0.00</b></div>
+            </div>
+          </div>
+
+          <div class="sheet">
+            <div class="sec">
+              <button class="run" id="btnMake" disabled>Make it</button>
+              <p class="runhint" id="makeHint">Pick a supplier and put a product on it</p>
+              <div class="stat" id="makeBox"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  var TABS = [
+    { key:'PurchaseOrder', label:'Orders' },
+    { key:'Bill',          label:'Bills' },
+    { key:'new',           label:'Make one' }
+  ];
+
+  var S = { tab:'PurchaseOrder', docs:[], filter:'', open:{},
+            vendors:[], payables:[], products:[], lines:[], made:null };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function say(box, cls, html){
+    var b = $(box);
+    b.className = 'stat' + (cls ? ' ' + cls : '');
+    b.innerHTML = html;
+  }
+  function get(url){
+    return fetch(url, { credentials:'same-origin' }).then(function(r){
+      return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+  function post(url, body){
+    return fetch(url, { method:'POST', credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body || {}) }).then(function(r){
+      return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+  // the date as it reads on this calendar - toISOString on a local midnight
+  // hands back the day before
+  function iso(d){
+    var p = function(n){ return n < 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function setSpan(which){
+    var now = new Date(), from = new Date();
+    if(which === 'ytd') from = new Date(now.getFullYear(), 0, 1);
+    else if(which === 'last90') from = new Date(now.getTime() - 89 * 86400000);
+    else if(which === 'thismonth') from = new Date(now.getFullYear(), now.getMonth(), 1);
+    else if(which === 'all') from = new Date(2025, 3, 1);
+    $('dFrom').value = iso(from);
+    $('dTo').value = iso(now);
+  }
+
+  /* ---------- the tabs ---------- */
+
+  function drawTabs(){
+    $('tabs').innerHTML = TABS.map(function(t){
+      return '<button type="button" data-tab="' + esc(t.key) + '"' +
+             (t.key === S.tab ? ' class="on"' : '') + '>' + esc(t.label) + '</button>';
+    }).join('');
+
+    Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){
+        var k = b.getAttribute('data-tab');
+        if(k === S.tab) return;
+        S.tab = k;
+        S.open = {};
+        drawTabs();
+        $('tabList').classList.toggle('hide', k === 'new');
+        $('tabNew').classList.toggle('hide', k !== 'new');
+        if(k !== 'new'){ $('listSheet').classList.add('hide'); fetchDocs(); }
+      });
+    });
+  }
+
+  /* ---------- what is already there ---------- */
+
+  function fetchDocs(){
+    if(!$('dFrom').value || !$('dTo').value) return say('statBox', 'bad', '<b>Give both dates</b>');
+    $('btnFetch').disabled = true;
+    say('statBox', 'busy', 'Reading QuickBooks…');
+
+    get('/api/purchases/list?kind=' + encodeURIComponent(S.tab) +
+        '&from=' + $('dFrom').value + '&to=' + $('dTo').value)
+      .then(function(d){
+        $('btnFetch').disabled = false;
+        S.docs = d.docs || [];
+        say('statBox', 'ok', '<b>' + nf(d.total) + ' ' +
+          (S.tab === 'Bill' ? 'bills' : 'orders') + '</b> worth ' + money(d.value));
+        $('listSheet').classList.remove('hide');
+        drawDocs();
+      })
+      .catch(function(e){
+        $('btnFetch').disabled = false;
+        say('statBox', 'bad', '<b>' + esc(e.message) + '</b>');
+      });
+  }
+
+  function shown(){
+    var f = S.filter;
+    if(!f) return S.docs;
+    return S.docs.filter(function(d){
+      return (d.doc || '').toLowerCase().indexOf(f) > -1 ||
+             (d.vendor || '').toLowerCase().indexOf(f) > -1;
+    });
+  }
+
+  function drawDocs(){
+    var list = shown();
+    $('listTitle').textContent = S.tab === 'Bill' ? 'The bills' : 'The orders';
+
+    var itemValue = 0, otherValue = 0, qty = 0;
+    list.forEach(function(d){ itemValue += d.itemValue; otherValue += d.otherValue; qty += d.itemQty; });
+
+    $('tally').innerHTML =
+      '<div><div class="n">' + nf(list.length) + '</div><div class="l">' +
+        (S.tab === 'Bill' ? 'Bills' : 'Orders') + '</div></div>' +
+      '<div><div class="n">' + nf(qty) + '</div><div class="l">Units bought</div></div>' +
+      '<div><div class="n">' + money(itemValue) + '</div><div class="l">Onto products</div></div>' +
+      '<div><div class="n">' + money(otherValue) + '</div><div class="l">Onto accounts</div></div>';
+
+    $('rows').innerHTML = list.length ? list.map(function(d){
+      var state = d.kind === 'PurchaseOrder'
+        ? '<span class="pill' + (d.status === 'Closed' ? ' good' : ' warn') + '">' +
+          esc(d.status || 'Open') + '</span>' +
+          (d.linked.length ? ' <span class="pill good">billed</span>' : '')
+        : '<span class="pill' + (d.balance ? ' warn' : ' good') + '">' +
+          (d.balance ? 'owing ' + money(d.balance) : 'paid') + '</span>';
+
+      var row = '<tr>' +
+        '<td class="doc">' + esc(d.doc || d.id) + '</td>' +
+        '<td class="mono">' + esc(d.date) + '</td>' +
+        '<td class="who">' + esc(d.vendor) +
+          (d.memo ? '<div style="font-size:11px;color:var(--muted);font-weight:400;white-space:normal">' +
+                    esc(d.memo) + '</div>' : '') + '</td>' +
+        '<td class="num mono">' + nf(d.itemLines) + '</td>' +
+        '<td class="num mono">' + nf(d.itemQty) + '</td>' +
+        '<td class="num mono">' + money(d.itemValue) + '</td>' +
+        '<td class="num mono"' + (d.otherValue ? ' style="color:var(--warn)"' : '') + '>' +
+          money(d.otherValue) + '</td>' +
+        '<td class="num mono">' + money(d.total) + '</td>' +
+        '<td>' + state + '</td>' +
+        '<td><button class="look" data-peek="' + esc(d.id) + '">' +
+          (S.open[d.id] ? 'hide' : 'see it') + '</button></td>' +
+        '</tr>';
+
+      if(S.open[d.id]){
+        row += '<tr class="peek"><td colspan="10" id="peek-' + esc(d.id) + '">Reading…</td></tr>';
+      }
+      return row;
+    }).join('')
+      : '<tr><td colspan="10" style="color:var(--faint);padding:14px">Nothing between those dates.</td></tr>';
+
+    Array.prototype.forEach.call($('rows').querySelectorAll('button[data-peek]'), function(b){
+      b.addEventListener('click', function(){
+        var id = b.getAttribute('data-peek');
+        S.open[id] = !S.open[id];
+        drawDocs();
+      });
+    });
+    Object.keys(S.open).forEach(function(id){ if(S.open[id]) peek(id); });
+  }
+
+  function peek(id){
+    var box = $('peek-' + id);
+    if(!box) return;
+    get('/api/purchases/one?kind=' + encodeURIComponent(S.tab) + '&id=' + encodeURIComponent(id))
+      .then(function(d){
+        var rows = (d.lines || []).map(function(l){
+          return '<tr>' +
+            '<td class="in">' + esc(l.itemName || l.item) + '</td>' +
+            '<td class="in">' + esc(l.desc) + '</td>' +
+            '<td class="in num mono">' + nf(l.qty) + '</td>' +
+            '<td class="in num mono">' + money(l.rate) + '</td>' +
+            '<td class="in num mono">' + money(l.amount) + '</td>' +
+            '<td class="in">' + (l.received === null ? '' :
+              nf(l.received) + ' received') + '</td>' +
+          '</tr>';
+        }).join('');
+
+        var other = (d.other || []).map(function(l){
+          return '<tr><td class="in" colspan="4">' + esc(l.account) +
+                 (l.desc ? ' — ' + esc(l.desc) : '') +
+                 ' <b>(not on a product)</b></td>' +
+                 '<td class="in num mono">' + money(l.amount) + '</td><td class="in"></td></tr>';
+        }).join('');
+
+        box.innerHTML = (rows || other)
+          ? '<table>' + rows + other + '</table>'
+          : 'Nothing on it.';
+      })
+      .catch(function(e){ box.textContent = e.message; });
+  }
+
+  function csv(){
+    var head = ['Number','Date','Supplier','Note','Products','Qty','On products',
+                'Onto accounts','Total','State'];
+    var rows = [head].concat(shown().map(function(d){
+      return [d.doc, d.date, d.vendor, d.memo, d.itemLines, d.itemQty, d.itemValue,
+              d.otherValue, d.total,
+              d.kind === 'PurchaseOrder' ? (d.status || 'Open') : (d.balance ? 'owing' : 'paid')];
+    }));
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = (S.tab === 'Bill' ? 'bills' : 'purchase-orders') + '.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- making one ---------- */
+
+  function drawLines(){
+    if(!S.lines.length) S.lines.push({ itemId:'', desc:'', qty:'', rate:'' });
+
+    var opts = '<option value="">— pick a product —</option>' +
+      S.products.map(function(p){
+        return '<option value="' + esc(p.id) + '">' + esc(p.name) +
+               (p.sku ? ' · ' + esc(p.sku) : '') + '</option>';
+      }).join('');
+
+    $('lineRows').innerHTML = S.lines.map(function(l, i){
+      var amt = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
+      return '<tr>' +
+        '<td><select data-i="' + i + '" data-f="itemId">' + opts + '</select></td>' +
+        '<td><input type="text" data-i="' + i + '" data-f="desc" value="' + esc(l.desc) + '"></td>' +
+        '<td><input type="text" class="num" data-i="' + i + '" data-f="qty" inputmode="decimal" value="' + esc(l.qty) + '"></td>' +
+        '<td><input type="text" class="num" data-i="' + i + '" data-f="rate" inputmode="decimal" value="' + esc(l.rate) + '"></td>' +
+        '<td class="amt">' + money(amt) + '</td>' +
+        '<td class="x"><button type="button" class="x" data-drop="' + i + '" title="Take this line off">&times;</button></td>' +
+        '</tr>';
+    }).join('');
+
+    // a select's value cannot be set by markup alone when the list is this long
+    Array.prototype.forEach.call($('lineRows').querySelectorAll('select[data-f=itemId]'), function(sel){
+      sel.value = S.lines[Number(sel.getAttribute('data-i'))].itemId || '';
+    });
+
+    Array.prototype.forEach.call($('lineRows').querySelectorAll('[data-f]'), function(el){
+      var ev = el.tagName === 'SELECT' ? 'change' : 'input';
+      el.addEventListener(ev, function(){
+        var i = Number(el.getAttribute('data-i'));
+        S.lines[i][el.getAttribute('data-f')] = el.value;
+        if(el.getAttribute('data-f') === 'itemId'){
+          // the product's own name is what the line says unless something else
+          // was typed there
+          var p = S.products.filter(function(x){ return x.id === el.value; })[0];
+          if(p && !S.lines[i].desc) S.lines[i].desc = p.name;
+        }
+        drawLines();
+      });
+    });
+    Array.prototype.forEach.call($('lineRows').querySelectorAll('button[data-drop]'), function(b){
+      b.addEventListener('click', function(){
+        S.lines.splice(Number(b.getAttribute('data-drop')), 1);
+        drawLines();
+      });
+    });
+
+    var total = S.lines.reduce(function(s, l){
+      return s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
+    }, 0);
+    $('newTotal').textContent = money(total);
+
+    var ready = S.lines.filter(function(l){
+      return l.itemId && (parseFloat(l.qty) || 0) > 0;
+    }).length;
+    $('lineAside').textContent = ready + (ready === 1 ? ' line' : ' lines');
+
+    var who = $('vendor').value;
+    $('btnMake').disabled = !(who && ready);
+    $('btnMake').textContent = $('newKind').value === 'Bill' ? 'Make the bill' : 'Make the order';
+    $('makeHint').textContent = !who ? 'Pick a supplier'
+      : !ready ? 'Put a product and a quantity on at least one line'
+      : ($('newKind').value === 'Bill'
+          ? ready + (ready === 1 ? ' line' : ' lines') + ', ' + money(total) +
+            ' — this brings the stock in at these rates and is what cost of sales is worked out from'
+          : ready + (ready === 1 ? ' line' : ' lines') + ', ' + money(total) +
+            ' — an order changes nothing in the ledger until a bill is made from it');
+  }
+
+  function make(){
+    var kind = $('newKind').value;
+    var lines = S.lines.filter(function(l){ return l.itemId && (parseFloat(l.qty) || 0) > 0; })
+      .map(function(l){
+        var p = S.products.filter(function(x){ return x.id === l.itemId; })[0] || {};
+        return { itemId: l.itemId, itemName: p.name || '', sku: p.sku || '',
+                 desc: l.desc, qty: parseFloat(l.qty) || 0, rate: parseFloat(l.rate) || 0 };
+      });
+    if(!lines.length) return;
+
+    $('btnMake').disabled = true;
+    say('makeBox', 'busy', 'Sending it to QuickBooks…');
+
+    post('/api/purchases/create', {
+      kind: kind,
+      vendorId: $('vendor').value,
+      date: $('nDate').value,
+      due: $('nDue').value,
+      doc: $('docNo').value.trim(),
+      memo: $('memo').value.trim(),
+      apAccountId: $('apAcct').value,
+      lines: lines
+    }).then(function(d){
+      var m = d.made;
+      say('makeBox', 'ok', '<b>' + (kind === 'Bill' ? 'Bill' : 'Order') + ' ' +
+        esc(m.doc || m.id) + ' made</b> &mdash; ' + money(m.total) +
+        (kind === 'Bill' ? '. The stock is in at these rates now.' : '. Nothing has moved in the ledger yet.'));
+      S.lines = [{ itemId:'', desc:'', qty:'', rate:'' }];
+      $('docNo').value = '';
+      drawLines();
+    }).catch(function(e){
+      say('makeBox', 'bad', '<b>' + esc(e.message) + '</b>');
+      drawLines();
+    });
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('btnFetch').addEventListener('click', fetchDocs);
+  $('btnCsv').addEventListener('click', csv);
+  $('rowFind').addEventListener('input', function(){
+    S.filter = $('rowFind').value.trim().toLowerCase();
+    drawDocs();
+  });
+  $('btnAddLine').addEventListener('click', function(){
+    S.lines.push({ itemId:'', desc:'', qty:'', rate:'' });
+    drawLines();
+  });
+  $('btnMake').addEventListener('click', make);
+  $('vendor').addEventListener('change', drawLines);
+  $('newKind').addEventListener('change', function(){
+    var bill = $('newKind').value === 'Bill';
+    $('dueWrap').classList.toggle('hide', !bill);
+    $('apWrap').classList.toggle('hide', !bill);
+    drawLines();
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.quick button'), function(b){
+    b.addEventListener('click', function(){ setSpan(b.getAttribute('data-span')); });
+  });
+
+  setSpan('last90');
+  $('nDate').value = iso(new Date());
+  drawTabs();
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    get('/api/purchases/who').then(function(d){
+      S.vendors = d.vendors || [];
+      S.payables = d.payables || [];
+      $('vendor').innerHTML = '<option value="">— pick a supplier —</option>' +
+        S.vendors.filter(function(v){ return v.active; }).map(function(v){
+          return '<option value="' + esc(v.id) + '">' + esc(v.name) + '</option>';
+        }).join('');
+      $('apAcct').innerHTML = '<option value="">QuickBooks’ own choice</option>' +
+        S.payables.map(function(a){
+          return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>';
+        }).join('');
+    }).catch(function(e){ say('makeBox', 'bad', '<b>' + esc(e.message) + '</b>'); });
+
+    get('/api/qb-products').then(function(d){
+      S.products = (d.products || []).filter(function(p){ return p.active !== false; });
+      drawLines();
+    }).catch(function(){ drawLines(); });
+
+    fetchDocs();
+  });
+})();
+</script>
+</body>
+</html>

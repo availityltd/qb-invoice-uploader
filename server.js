@@ -25,6 +25,9 @@ import {
 import {
   initProdStore, logProductChange, listProductChanges, clearProductChanges
 } from './prodstore.js';
+import {
+  listVendors, listPayables, readDocs, readOne, createDoc
+} from './purchases.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
 import {
@@ -6787,6 +6790,107 @@ app.post('/api/products/record/clear', async (req, res) => {
     res.json({ ok: true, cleared: await clearProductChanges(realmId) });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== Purchases ====================
+//
+// The orders and bills already in QuickBooks, and a way to make another. What
+// was bought is what QuickBooks builds cost of sales out of, so this is the
+// other half of the products page: that one says the cost is missing, this one
+// is where it is put in.
+
+const purchStore = new Map();      // realmId -> { kind, from, to, docs, at }
+
+app.get('/api/purchases/who', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const token = await getAccessToken(realmId);
+    const [vendors, payables] = await Promise.all([
+      listVendors(realmId, token),
+      listPayables(realmId, token)
+    ]);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ vendors, payables });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/purchases/list', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const kind = String(req.query.kind || 'PurchaseOrder');
+    const from = String(req.query.from || '');
+    const to = String(req.query.to || '');
+    if (!from || !to) throw new Error('Give the dates to look between');
+
+    const token = await getAccessToken(realmId);
+    const docs = await readDocs(realmId, token, kind, { from, to });
+
+    purchStore.set(realmId, { kind, from, to, docs, at: Date.now() });
+
+    // the lines are what make this heavy, and the list does not show them until
+    // one is opened
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      kind, from, to,
+      total: docs.length,
+      value: Math.round(docs.reduce((s, d) => s + d.total, 0) * 100) / 100,
+      docs: docs.map(d => {
+        const light = Object.assign({}, d);
+        delete light.lines;
+        delete light.other;
+        return light;
+      })
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/purchases/one', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const token = await getAccessToken(realmId);
+    const one = await readOne(realmId, token,
+      String(req.query.kind || 'PurchaseOrder'), String(req.query.id || ''));
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(one);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/purchases/create', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const body = req.body || {};
+    const token = await getAccessToken(realmId);
+    const made = await createDoc(realmId, token, String(body.kind || 'PurchaseOrder'), body);
+
+    // one row per product, so the record says what came in at what cost rather
+    // than only that a document was made
+    for (const l of (body.lines || [])) {
+      await logProductChange(realmId, {
+        id: String(l.itemId || ''), name: l.itemName || '', sku: l.sku || '',
+        field: made.kind === 'Bill' ? 'bill' : 'order',
+        was: '', now: (made.doc || made.id) + ' — ' + l.qty + ' @ ' + l.rate,
+        ok: true
+      }).catch(e => console.error('purchase log:', e.message));
+    }
+
+    res.json({ ok: true, made });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 
