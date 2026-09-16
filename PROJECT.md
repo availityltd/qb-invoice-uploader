@@ -44,7 +44,7 @@ understand what is happening underneath.
 | Find orders | `find.html`, `finder.js` | Searches every CPR sheet for pasted order numbers |
 | Courier dashboard | `courierlive.js`, `dashdata.js`, `postex.js` | Live courier data |
 | Product health | `products.html`, `products.js` | One read of items + ItemSales + InventoryValuationSummary + bill item lines, then tabs over it: cost missing, stock put right by inventory adjustment, untouched items, duplicate items, and the reports - selling at no cost, sold never bought, bought never sold, stock below zero |
-| Purchases | `purchases.html`, `purchases.js` | The purchase orders and bills already in QuickBooks, with what went onto products and what went onto an account instead; and making another - every line carrying an item, because a line on an account brings no stock in |
+| Purchases | `purchases.html`, `purchases.js` | The purchase orders and bills already in QuickBooks, with what went onto products and what went onto an account instead; and making another - every line carrying an item, because a line on an account brings no stock in; the supplier's paper is dropped on and attached in QuickBooks (`/upload`, one file per request), and files can be added to documents already there |
 | Fix duplicates | `fix.html` | Bulk rename / delete of duplicate invoices |
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |
 | Changes (Product / Category / Description) | `swap.html`, `recat.html`, `desc.html` | One rail entry, three tabs — a new kind of change is a new tab, not a new nav line |

@@ -27,7 +27,8 @@ import {
   initProdStore, logProductChange, listProductChanges, clearProductChanges
 } from './prodstore.js';
 import {
-  listVendors, listPayables, readDocs, readOne, createDoc
+  listVendors, listPayables, readDocs, readOne, createDoc,
+  attachFile, listAttachments
 } from './purchases.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
@@ -6944,6 +6945,42 @@ app.get('/api/purchases/one', async (req, res) => {
       String(req.query.kind || 'PurchaseOrder'), String(req.query.id || ''));
     res.setHeader('Cache-Control', 'no-store');
     res.json(one);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// The supplier's own paper, kept against the transaction. One file at a time,
+// the same size limit as everything else that is uploaded here.
+app.post('/api/purchases/attach', upload.single('file'), async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const kind = String(req.body.kind || 'PurchaseOrder');
+    const id = String(req.body.id || '');
+    if (!id) throw new Error('Say which one it belongs to');
+    if (!req.file) throw new Error('No file came through');
+
+    const token = await getAccessToken(realmId);
+    const made = await attachFile(realmId, token, kind, id, req.file);
+    res.json({ ok: true, file: made });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/purchases/files', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const token = await getAccessToken(realmId);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      files: await listAttachments(realmId, token,
+        String(req.query.kind || 'PurchaseOrder'), String(req.query.id || ''))
+    });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

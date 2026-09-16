@@ -51,6 +51,7 @@
   .pill{font-size:10.5px;padding:2px 7px;border-radius:999px;background:#F1F3F2;color:var(--muted)}
   .pill.good{background:#EFF8EC;color:var(--ok)}
   .pill.warn{background:#FFF6E6;color:#8A5A00}
+  tr.peek .attach{margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 
   .lines table{width:100%;border-collapse:collapse}
   .lines th{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
@@ -209,6 +210,23 @@
 
           <div class="sheet">
             <div class="sec">
+              <h2><span class="no">03</span> The paper behind it
+                <span class="aside" id="fileAside">optional</span></h2>
+              <p class="hint" style="margin:0 0 12px">The supplier's own bill or order.
+                It goes onto the transaction in QuickBooks, so whoever looks at this in a
+                year sees the paper it came from rather than a number typed into a note.</p>
+              <div class="zone" id="zoneFile" tabindex="0" role="button">
+                <span><b>Drop the file here</b><span>PDF, photo or scan &mdash; up to 25 MB each</span></span>
+                <span class="pick">Browse</span>
+              </div>
+              <input type="file" id="fileIn" multiple
+                accept=".pdf,.png,.jpg,.jpeg,.gif,.xlsx,.xls,.csv,.doc,.docx">
+              <div id="fileList"></div>
+            </div>
+          </div>
+
+          <div class="sheet">
+            <div class="sec">
               <button class="run" id="btnMake" disabled>Make it</button>
               <p class="runhint" id="makeHint">Pick a supplier and put a product on it</p>
               <div class="stat" id="makeBox"></div>
@@ -235,7 +253,7 @@
   ];
 
   var S = { tab:'PurchaseOrder', docs:[], filter:'', open:{},
-            vendors:[], payables:[], products:[], lines:[], made:null };
+            vendors:[], payables:[], products:[], lines:[], made:null, files:[] };
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -420,11 +438,47 @@
                  '<td class="in num mono">' + money(l.amount) + '</td><td class="in"></td></tr>';
         }).join('');
 
-        box.innerHTML = (rows || other)
+        box.innerHTML = ((rows || other)
           ? '<table>' + rows + other + '</table>'
-          : 'Nothing on it.';
+          : 'Nothing on it.') +
+          '<div class="attach" id="att-' + esc(id) + '">Reading the files on it…</div>';
+        drawAttached(id);
       })
       .catch(function(e){ box.textContent = e.message; });
+  }
+
+  // the paper already on an order or bill, and a way to put more on it - the
+  // ones entered before this page existed have nothing attached
+  function drawAttached(id){
+    var box = $('att-' + id);
+    if(!box) return;
+
+    get('/api/purchases/files?kind=' + encodeURIComponent(S.tab) + '&id=' + encodeURIComponent(id))
+      .then(function(d){
+        var files = d.files || [];
+        box.innerHTML =
+          '<b>Files on it:</b> ' + (files.length
+            ? files.map(function(f){ return esc(f.name) + ' <span class="mono">(' + kb(f.size) + ')</span>'; }).join(', ')
+            : 'none') +
+          ' &nbsp; <button type="button" class="look" data-attach="' + esc(id) + '">attach a file</button>' +
+          '<input type="file" data-attach-in="' + esc(id) + '" multiple>' +
+          '<span class="attmsg"></span>';
+
+        var btn = box.querySelector('button[data-attach]');
+        var inp = box.querySelector('input[data-attach-in]');
+        var msg = box.querySelector('.attmsg');
+        btn.addEventListener('click', function(){ inp.click(); });
+        inp.addEventListener('change', function(){
+          var picked = Array.prototype.slice.call(inp.files || []);
+          if(!picked.length) return;
+          msg.textContent = ' — attaching…';
+          sendFiles(S.tab, id, picked).then(function(sent){
+            if(sent.failed.length) msg.textContent = ' — not attached: ' + sent.failed.join('; ');
+            drawAttached(id);
+          });
+        });
+      })
+      .catch(function(e){ box.textContent = 'Files: ' + e.message; });
   }
 
   function csv(){
@@ -519,6 +573,69 @@
             ' — an order changes nothing in the ledger until a bill is made from it');
   }
 
+  /* ---------- the paper behind it ---------- */
+
+  var MAX_FILE = 25 * 1024 * 1024;
+
+  function kb(n){
+    return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  }
+
+  function addFiles(list){
+    Array.prototype.forEach.call(list || [], function(f){
+      // the same file dropped twice is still one file
+      var same = S.files.some(function(x){ return x.name === f.name && x.size === f.size; });
+      if(!same) S.files.push(f);
+    });
+    drawFiles();
+  }
+
+  function drawFiles(){
+    var big = S.files.filter(function(f){ return f.size > MAX_FILE; }).length;
+    $('fileAside').textContent = S.files.length
+      ? S.files.length + (S.files.length === 1 ? ' file' : ' files')
+      : 'optional';
+
+    $('fileList').innerHTML = S.files.map(function(f, i){
+      var tooBig = f.size > MAX_FILE;
+      return '<div class="frow">' +
+        '<div><b>' + esc(f.name) + '</b><i>' + kb(f.size) +
+          (tooBig ? ' &mdash; over 25 MB, QuickBooks will not take it' : '') + '</i></div>' +
+        '<button type="button" class="mini" data-unfile="' + i + '">Take off</button>' +
+        '</div>';
+    }).join('') +
+      (big ? '<p class="hint" style="color:var(--neg)">Files over 25 MB are left behind.</p>' : '');
+
+    Array.prototype.forEach.call($('fileList').querySelectorAll('button[data-unfile]'), function(b){
+      b.addEventListener('click', function(){
+        S.files.splice(Number(b.getAttribute('data-unfile')), 1);
+        drawFiles();
+      });
+    });
+  }
+
+  // one file per request, in order, each one saying whether it took - a scan that
+  // QuickBooks refuses should not take the rest down with it
+  function sendFiles(kind, id, list){
+    var files = (list || []).filter(function(f){ return f.size <= MAX_FILE; });
+    var done = [], failed = [];
+
+    return files.reduce(function(chain, f){
+      return chain.then(function(){
+        var fd = new FormData();
+        fd.append('kind', kind);
+        fd.append('id', id);
+        fd.append('file', f, f.name);
+        return fetch('/api/purchases/attach', { method:'POST', credentials:'same-origin', body: fd })
+          .then(function(r){ return r.json().then(function(d){
+            if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+            done.push(f.name);
+          }); })
+          .catch(function(e){ failed.push(f.name + ': ' + e.message); });
+      });
+    }, Promise.resolve()).then(function(){ return { done: done, failed: failed }; });
+  }
+
   function make(){
     var kind = $('newKind').value;
     var lines = S.lines.filter(function(l){ return l.itemId && (parseFloat(l.qty) || 0) > 0; })
@@ -543,12 +660,32 @@
       lines: lines
     }).then(function(d){
       var m = d.made;
-      say('makeBox', 'ok', '<b>' + (kind === 'Bill' ? 'Bill' : 'Order') + ' ' +
+      var what = '<b>' + (kind === 'Bill' ? 'Bill' : 'Order') + ' ' +
         esc(m.doc || m.id) + ' made</b> &mdash; ' + money(m.total) +
-        (kind === 'Bill' ? '. The stock is in at these rates now.' : '. Nothing has moved in the ledger yet.'));
-      S.lines = [{ itemId:'', desc:'', qty:'', rate:'' }];
-      $('docNo').value = '';
-      drawLines();
+        (kind === 'Bill' ? '. The stock is in at these rates now.' : '. Nothing has moved in the ledger yet.');
+
+      var after = S.files.length
+        ? (say('makeBox', 'busy', what + '<br>Putting ' + S.files.length +
+               (S.files.length === 1 ? ' file' : ' files') + ' on it…'),
+           sendFiles(kind, m.id, S.files))
+        : Promise.resolve(null);
+
+      return after.then(function(sent){
+        var tail = '';
+        if(sent){
+          if(sent.done.length) tail += '<br>' + sent.done.length +
+            (sent.done.length === 1 ? ' file' : ' files') + ' attached in QuickBooks.';
+          // the document stands either way - a file that did not go is said, not hidden
+          if(sent.failed.length) tail += '<br><span style="color:var(--neg)">Not attached: ' +
+            sent.failed.map(esc).join('; ') + '</span>';
+        }
+        say('makeBox', sent && sent.failed.length ? 'bad' : 'ok', what + tail);
+        S.lines = [{ itemId:'', desc:'', qty:'', rate:'' }];
+        S.files = [];
+        $('docNo').value = '';
+        drawFiles();
+        drawLines();
+      });
     }).catch(function(e){
       say('makeBox', 'bad', '<b>' + esc(e.message) + '</b>');
       drawLines();
@@ -569,6 +706,21 @@
     drawLines();
   });
   $('btnMake').addEventListener('click', make);
+  (function(){
+    var z = $('zoneFile'), inp = $('fileIn');
+    z.addEventListener('click', function(){ inp.click(); });
+    z.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); inp.click(); }
+    });
+    ['dragenter','dragover'].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.add('hot'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.remove('hot'); });
+    });
+    z.addEventListener('drop', function(e){ addFiles(e.dataTransfer.files); });
+    inp.addEventListener('change', function(){ addFiles(inp.files); inp.value = ''; });
+  })();
   $('vendor').addEventListener('change', drawLines);
   $('newKind').addEventListener('change', function(){
     var bill = $('newKind').value === 'Bill';

@@ -215,3 +215,70 @@ export async function createDoc(realmId, token, kindKey, body) {
     total: Number(made.TotalAmt || 0)
   };
 }
+
+/* ==================== the paper behind it ==================== */
+
+// The supplier's own bill or order, kept against the transaction in QuickBooks.
+// Whoever looks at this in a year wants to see the paper it came from, and a
+// number typed into a note is not that.
+//
+// QuickBooks takes an attachment as a multipart upload: a piece of JSON saying
+// what it belongs to, and the file itself beside it.
+export async function attachFile(realmId, token, kindKey, txnId, file) {
+  const kind = kindOf(kindKey);
+  if (!file || !file.buffer) throw new Error('No file came through');
+
+  const meta = {
+    AttachableRef: [{
+      EntityRef: { value: String(txnId), type: kind.key },
+      IncludeOnSend: false
+    }],
+    FileName: file.originalname || 'attachment',
+    ContentType: file.mimetype || 'application/octet-stream'
+  };
+
+  const form = new FormData();
+  form.append('file_metadata_01', new Blob([JSON.stringify(meta)], { type: 'application/json' }),
+              'metadata.json');
+  form.append('file_content_01', new Blob([file.buffer], { type: meta.ContentType }),
+              meta.FileName);
+
+  const res = await fetch(`${API}/v3/company/${realmId}/upload?minorversion=70`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' },
+    body: form
+  });
+
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch (e) { /* left as it came */ }
+
+  if (!res.ok) {
+    const f = data.Fault && data.Fault.Error && data.Fault.Error[0];
+    throw new Error(f ? (f.Message + (f.Detail ? ' - ' + f.Detail : '')) : text.slice(0, 300));
+  }
+
+  // one file in, one answer out - and the answer says whether that one took
+  const one = ((data.AttachableResponse || [])[0]) || {};
+  if (one.Fault) {
+    const f = (one.Fault.Error || [])[0] || {};
+    throw new Error(f.Message ? (f.Message + (f.Detail ? ' - ' + f.Detail : '')) : 'QuickBooks refused the file');
+  }
+
+  const made = one.Attachable || {};
+  return { id: String(made.Id || ''), name: made.FileName || meta.FileName,
+           size: Number(made.Size || (file.buffer ? file.buffer.length : 0)) };
+}
+
+// What is already hanging off one transaction.
+export async function listAttachments(realmId, token, kindKey, txnId) {
+  const kind = kindOf(kindKey);
+  const q = await qbQuery(realmId, token,
+    `SELECT * FROM Attachable WHERE AttachableRef.EntityRef.Type = '${quote(kind.key)}'
+       AND AttachableRef.EntityRef.Value = '${quote(txnId)}' MAXRESULTS 50`);
+
+  return (q.Attachable || []).map(a => ({
+    id: String(a.Id), name: a.FileName || '', size: Number(a.Size || 0),
+    type: a.ContentType || '', at: a.MetaData ? a.MetaData.CreateTime : ''
+  }));
+}
