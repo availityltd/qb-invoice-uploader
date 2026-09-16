@@ -63,8 +63,9 @@
   td.tick{width:34px}
   td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
   tr.off{opacity:.45}
-  .keepbox{max-width:230px;font-size:12.5px;padding:6px 8px;border:1px solid var(--line-2);
-    border-radius:6px;background:#fff;color:var(--text)}
+  .keepbox{min-width:250px;max-width:340px;font-size:12.5px;padding:6px 8px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  th.keeph{min-width:260px}
   .costbox{width:96px;font-size:13px;padding:6px 8px;border:1px solid var(--line-2);
     border-radius:6px;background:#fff;color:var(--text);text-align:right}
 </style>
@@ -521,6 +522,9 @@
     });
     // a merge moves stock too, so it needs the same account and date
     $('stockBox').classList.toggle('hide', act !== 'stock' && act !== 'merge');
+    // the reports strip belongs to the reports tab and nowhere else, whichever
+    // way this list was arrived at
+    $('subways').classList.toggle('hide', S.tab !== 'reports');
 
     $('rows').innerHTML = S.rows.length ? S.rows.map(function(r){
       var on = !!S.picked[r.id];
