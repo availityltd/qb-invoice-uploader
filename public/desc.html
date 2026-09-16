@@ -827,12 +827,23 @@
     if(s.error) say('bad', '<b>' + esc(s.error) + '</b>');
     // a range of the books with not one transaction in it is not a result, it is
     // a read that did not happen - said as that, not in green
+    // every transaction read carried its lines on products, and a product line
+    // has no category of its own to move - the heading is set on the item
+    else if(s.read && !s.found && s.itemOnly) say('bad', '<b>' + s.read +
+      ' read, none with a category on its lines.</b> ' +
+      (s.itemOnly === s.read ? 'Every one' : s.itemOnly + ' of them') +
+      ' carries its lines on products instead, and a product line has no category ' +
+      'of its own to move &mdash; its heading is set on the item. Tick Expense or ' +
+      'Journal entry to find lines written straight to a category.');
     else if(!s.read) say('bad', '<b>QuickBooks gave back no transactions at all</b> between ' +
       esc(s.from) + ' and ' + esc(s.to) + ' for the kinds ticked. That is not what the books ' +
       'hold - read again, and if it says the same, the company chosen at the bottom left may ' +
       'not be the one these are in.');
-    else say('ok', '<b>' + S.groups.length + ' ' + way().label.toLowerCase() +
-      (S.groups.length === 1 ? '' : 's') + '</b> on ' + s.found +
+    else say('ok', '<b>' + S.groups.length + ' ' +
+      (way().key === 'account'
+        ? (S.groups.length === 1 ? 'category' : 'categories')
+        : way().label.toLowerCase() + (S.groups.length === 1 ? '' : 's')) +
+      '</b> on ' + s.found +
       ' transactions between ' + esc(s.from) + ' and ' + esc(s.to) +
       ' &mdash; ' + s.read + ' read in all');
   }

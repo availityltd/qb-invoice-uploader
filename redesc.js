@@ -116,6 +116,10 @@ export async function scanDescriptions(realmId, token, opts, onStep) {
   const rows = [];
   const seen = new Set();
   let read = 0;
+  // A bill whose every line is on a product has no category written on it at
+  // all - the heading comes from the item. It is read and rightly left out, and
+  // counting it is what lets the page say why a year of bills came to nothing.
+  let itemOnly = 0;
 
   for (const kind of kinds) {
     let cursor = from, windows = 0;
@@ -127,7 +131,10 @@ export async function scanDescriptions(realmId, token, opts, onStep) {
       const keep = txn => {
         read++;
         const any = planAnyTxn(kind, txn);
-        if (!any) return;
+        if (!any) {
+          if ((txn.Line || []).some(l => l.ItemBasedExpenseLineDetail)) itemOnly++;
+          return;
+        }
         const row = keepable(any, accountId);
         if (!row) return;
         const k = kind.key + '|' + row.qbId;
@@ -148,7 +155,7 @@ export async function scanDescriptions(realmId, token, opts, onStep) {
         }
       }
 
-      if (onStep) onStep({ kind: kind.key, upto: end, found: rows.length, read });
+      if (onStep) onStep({ kind: kind.key, upto: end, found: rows.length, read, itemOnly });
       cursor = shiftDays(end, 1);
       windows++;
     }
@@ -156,7 +163,7 @@ export async function scanDescriptions(realmId, token, opts, onStep) {
 
   rows.sort((a, b) => (a.date || '').localeCompare(b.date || '') ||
                       a.doc.localeCompare(b.doc));
-  return { rows, read };
+  return { rows, read, itemOnly };
 }
 
 /* ==================== one line per heading ==================== */

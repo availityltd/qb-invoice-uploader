@@ -3505,10 +3505,12 @@ app.post('/api/desc/scan', async (req, res) => {
         scan.kind = step.kind;
         scan.found = step.found;
         scan.read = step.read;
+        scan.itemOnly = step.itemOnly || 0;
       })
       .then(out => {
         st.rows = out.rows;
         scan.read = out.read;
+        scan.itemOnly = out.itemOnly || 0;
         scan.found = out.rows.length;
         scan.running = false;
         scan.finished = Date.now();
@@ -3550,7 +3552,7 @@ app.get('/api/desc/status', async (req, res) => {
     txns: st.rows.length,
     scan: s ? {
       running: s.running, from: s.from, to: s.to, upto: s.upto, kind: s.kind,
-      found: s.found, read: s.read, error: s.error || null
+      found: s.found, read: s.read, itemOnly: s.itemOnly || 0, error: s.error || null
     } : null,
     job: job ? {
       running: job.running, done: job.done, failed: job.failed,
