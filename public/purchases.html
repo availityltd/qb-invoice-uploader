@@ -216,7 +216,7 @@
                 It goes onto the transaction in QuickBooks, so whoever looks at this in a
                 year sees the paper it came from rather than a number typed into a note.</p>
               <div class="zone" id="zoneFile" tabindex="0" role="button">
-                <span><b>Drop the file here, or paste a screenshot</b><span>PDF, photo or scan &mdash; up to 25 MB each &mdash; Ctrl+V pastes</span></span>
+                <span><b>Drop the file here</b><span>PDF, photo or scan &mdash; up to 25 MB each</span></span>
                 <span class="pick">Browse</span>
               </div>
               <input type="file" id="fileIn" multiple
@@ -253,7 +253,7 @@
   ];
 
   var S = { tab:'PurchaseOrder', docs:[], filter:'', open:{},
-            vendors:[], payables:[], products:[], lines:[], made:null, files:[], pasteTo:'' };
+            vendors:[], payables:[], products:[], lines:[], made:null, files:[] };
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -461,31 +461,24 @@
             ? files.map(function(f){ return esc(f.name) + ' <span class="mono">(' + kb(f.size) + ')</span>'; }).join(', ')
             : 'none') +
           ' &nbsp; <button type="button" class="look" data-attach="' + esc(id) + '">attach a file</button>' +
-          ' <span class="mono">or Ctrl+V a screenshot</span>' +
           '<input type="file" data-attach-in="' + esc(id) + '" multiple>' +
           '<span class="attmsg"></span>';
 
         var btn = box.querySelector('button[data-attach]');
         var inp = box.querySelector('input[data-attach-in]');
         var msg = box.querySelector('.attmsg');
-        // a paste goes to the order or bill last opened or touched
-        S.pasteTo = id;
-        box.addEventListener('mousedown', function(){ S.pasteTo = id; });
         btn.addEventListener('click', function(){ inp.click(); });
         inp.addEventListener('change', function(){
-          attachNow(id, Array.prototype.slice.call(inp.files || []), msg);
+          var picked = Array.prototype.slice.call(inp.files || []);
+          if(!picked.length) return;
+          msg.textContent = ' — attaching…';
+          sendFiles(S.tab, id, picked).then(function(sent){
+            if(sent.failed.length) msg.textContent = ' — not attached: ' + sent.failed.join('; ');
+            drawAttached(id);
+          });
         });
       })
       .catch(function(e){ box.textContent = 'Files: ' + e.message; });
-  }
-
-  function attachNow(id, picked, msg){
-    if(!picked.length) return;
-    msg.textContent = ' — attaching…';
-    sendFiles(S.tab, id, picked).then(function(sent){
-      if(sent.failed.length) msg.textContent = ' — not attached: ' + sent.failed.join('; ');
-      drawAttached(id);
-    });
   }
 
   function csv(){
@@ -698,46 +691,6 @@
       drawLines();
     });
   }
-
-  // a screenshot on the clipboard comes as a file with no name worth keeping -
-  // every one is "image.png" - so it gets the time it was pasted
-  function pastedFiles(e){
-    var cd = e.clipboardData;
-    if(!cd) return [];
-    // cells copied from a sheet carry a picture of themselves too; that paste is text
-    if((cd.getData('text/plain') || '').trim()) return [];
-    var out = [];
-    Array.prototype.forEach.call(cd.items || [], function(it){
-      if(it.kind !== 'file') return;
-      var f = it.getAsFile();
-      if(!f) return;
-      if(/^image\.\w+$/i.test(f.name) || !f.name){
-        var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; };
-        var ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
-        var stamp = d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
-          p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
-        f = new File([f], 'screenshot-' + stamp + (out.length ? '-' + (out.length + 1) : '') + '.' + ext,
-          { type: f.type });
-      }
-      out.push(f);
-    });
-    return out;
-  }
-
-  document.addEventListener('paste', function(e){
-    var files = pastedFiles(e);
-    if(!files.length) return;
-    if(S.tab === 'new'){
-      e.preventDefault();
-      addFiles(files);
-      return;
-    }
-    var box = S.pasteTo && $('att-' + S.pasteTo);
-    var msg = box && box.querySelector('.attmsg');
-    if(!msg) return;
-    e.preventDefault();
-    attachNow(S.pasteTo, files, msg);
-  });
 
   /* ---------- start ---------- */
 
