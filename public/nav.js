@@ -74,7 +74,7 @@
                (it.href === '/payments.html' && path === '/merge.html') ||
                // every tab of the changes page lights up the one link
                (it.href === '/swap.html' &&
-                (path === '/recat.html' || path === '/desc.html'));
+                (path === '/recat.html' || path === '/desc.html' || path === '/replace.html'));
       html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') +
               (it.tree ? ' id="couriersLink"' : '') + '>' +
               svg(it.icon) + it.label +

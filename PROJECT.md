@@ -48,6 +48,7 @@ understand what is happening underneath.
 | Fix duplicates | `fix.html` | Bulk rename / delete of duplicate invoices |
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |
 | Changes (Product / Category / Description) | `swap.html`, `recat.html`, `desc.html` | One rail entry, three tabs — a new kind of change is a new tab, not a new nav line |
+| — Replace product | `replace.html`, `replaceitem.js` | Pasted pairs of items (old beside new, matched whole on name or SKU) swapped on every line carrying them across bills, expenses, vendor credits, purchase orders, invoices, sales receipts and credit memos in a date range; qty, rate, amount and description untouched. Invoices are read a day at a time where a month passes the 9,000 cap. Journal entries and deposits carry no item |
 | — Change category | `recat.html`, `recat.js`, `recatstore.js` | Moves transactions from one P&L heading to another, nothing else touched; every move is recorded |
 | — Change by description / name | `desc.html`, `redesc.js` | Reads a date range once and lists it by description, by payee or by the heading it is under; moves the lines under the ticked ones to another heading (a row under several categories can be narrowed to some of them by ticking the category itself); recorded alongside the category change |
 

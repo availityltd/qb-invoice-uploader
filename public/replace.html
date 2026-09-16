@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replace product</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:wrap}
+  .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs a:hover{color:var(--ink)}
+  .tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+
+  .dates{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .dates label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);display:block;margin-bottom:4px}
+  .dates input[type=date]{font-family:var(--mono);font-size:13px;padding:8px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+  .kinds{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px}
+  .kinds .grp{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .kinds .grp b{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);
+    font-weight:500;margin-right:2px}
+  .kinds label{font-size:12.5px;display:flex;align-items:center;gap:6px;cursor:pointer}
+  .kinds input{accent-color:var(--qbo);width:14px;height:14px;margin:0}
+
+  textarea.pairs{width:100%;font-family:var(--mono);font-size:12.5px;padding:10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text);resize:vertical}
+  .miss{max-height:180px;overflow:auto;font-family:var(--mono);font-size:11.5px;
+    color:var(--muted);margin-top:6px;white-space:pre-wrap}
+
+  td.nm{white-space:normal;max-width:300px;font-weight:600}
+  td.nm small{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+  td.arrow{color:var(--faint);text-align:center;width:24px}
+  td.kinds{white-space:normal;font-size:11.5px;color:var(--muted);max-width:220px}
+  .tag{font-size:10px;letter-spacing:.04em;text-transform:uppercase;
+    padding:2px 6px;border-radius:4px;background:#F1F3F2;color:var(--muted)}
+  .tag.ok{background:#EFF8EC;color:var(--ok)}
+  .tag.bad{background:#FDECEC;color:var(--neg)}
+  .tag.warn{background:#FFF6E6;color:#8A5A00}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Replace product</h1>
+        <div class="sub">Put one product in place of another on bills, expenses, vendor credits, purchase orders, invoices, sales receipts and credit memos &mdash; the quantity, the rate, the amount and the description stay as they are.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Nothing is changed until you have seen the list and pressed the button.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="tabs">
+          <a href="/swap.html">Product</a>
+          <a href="/recat.html">Category</a>
+          <a href="/desc.html">Description / Name</a>
+          <a class="on" href="/replace.html">Replace product</a>
+        </div>
+
+        <!-- ============ the pairs ============ -->
+        <div class="sheet">
+          <div class="sec">
+            <h2><span class="no">01</span> Which product becomes which
+              <span class="aside" id="pairAside"></span></h2>
+            <p class="hint" style="margin:0 0 10px">Two columns copied out of Excel &mdash; the item
+              going on the left, the item taking its place on the right &mdash; one pair to a line.
+              Each side is matched whole, on the item's name or its SKU, never on part of a name. A
+              name that matches two items is not guessed at: it is sent back to be written out in full.</p>
+            <textarea class="pairs" id="pairText" rows="8"
+              placeholder="Missrose Silk Radiance BB Cream Fair	Missrose Silk Radiance Bb Cream 7601-162/Fair&#10;Miss Rose Crystal Lip Gloss 10	Miss Rose Crystal Lip Gloss 7701-504/10"></textarea>
+            <div class="acts" style="margin-top:10px">
+              <button class="solid" id="btnPairs">Check the pairs</button>
+              <button class="ghost" id="btnReset">Start again</button>
+            </div>
+            <div class="stat" id="pairStat"></div>
+          </div>
+        </div>
+
+        <div class="sheet hide" id="pairSheet">
+          <div class="sec">
+            <h2><span class="no">02</span> The pairs, as QuickBooks knows them
+              <span class="aside" id="pairCount"></span></h2>
+            <div class="tbl" style="max-height:360px">
+              <table>
+                <thead><tr>
+                  <th>Going</th><th></th><th>Taking its place</th>
+                  <th class="num">Transactions</th><th class="num">Lines</th>
+                  <th class="num">Qty</th><th class="num">Amount</th><th>Where</th><th></th>
+                </tr></thead>
+                <tbody id="pairRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ where to look ============ -->
+        <div class="sheet hide" id="whereSheet">
+          <div class="sec">
+            <h2><span class="no">03</span> Where to look
+              <span class="aside" id="whereAside"></span></h2>
+            <div class="dates">
+              <div><label for="dFrom">From</label><input type="date" id="dFrom"></div>
+              <div><label for="dTo">To</label><input type="date" id="dTo"></div>
+            </div>
+            <div class="quick">
+              <button class="mini" data-span="ytd">This year to date</button>
+              <button class="mini" data-span="last90">Last 90 days</button>
+              <button class="mini" data-span="thismonth">This month</button>
+              <button class="mini" data-span="all">Since April 2025</button>
+            </div>
+            <div class="kinds" id="kinds"></div>
+            <p class="hint" style="margin-top:10px">The bills, expenses and credits are a short
+              read. Invoices here run to tens of thousands a month and are read a day at a time,
+              so a long range of them takes a while &mdash; the page can be closed, and the read
+              carries on. Journal entries and deposits carry no product, only an account; change
+              those on the Category tab.</p>
+            <div class="acts" style="margin-top:12px">
+              <button class="solid" id="btnScan">Find them</button>
+              <button class="ghost hide" id="btnScanStop">Stop reading</button>
+            </div>
+            <div class="stat" id="scanStat"></div>
+          </div>
+        </div>
+
+        <!-- ============ what was found ============ -->
+        <div class="sheet hide" id="foundSheet">
+          <div class="sec">
+            <h2><span class="no">04</span> What will change
+              <span class="aside" id="foundAside"></span></h2>
+            <p class="hint" style="margin:0 0 12px" id="promise"></p>
+            <div class="tbl" style="max-height:420px">
+              <table>
+                <thead><tr>
+                  <th>Type</th><th>Number</th><th>Date</th><th>With</th>
+                  <th class="num">Lines</th><th class="num">Amount on them</th><th>State</th>
+                </tr></thead>
+                <tbody id="foundRows"></tbody>
+              </table>
+            </div>
+            <div class="acts" style="margin-top:14px">
+              <button class="mini" id="btnCsv">Download this list</button>
+            </div>
+          </div>
+          <div class="sec">
+            <button class="run" id="btnRun" disabled>Replace them</button>
+            <p class="runhint" id="runHint"></p>
+          </div>
+        </div>
+
+        <div class="sheet hide" id="runSheet">
+          <div class="sec">
+            <h2><span class="no">05</span> The run
+              <span class="aside" id="runAside"></span></h2>
+            <div class="acts"><button class="ghost hide" id="btnStop">Stop after this one</button></div>
+            <div class="log" id="log"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  var $ = function(id){ return document.getElementById(id); };
+  var S = { kinds:[], pairs:[], rows:[], total:0, poller:null, logged:0 };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function say(box, cls, html){
+    var b = $(box);
+    b.className = 'stat' + (cls ? ' ' + cls : '');
+    b.innerHTML = html;
+  }
+  function get(url){
+    return fetch(url, { credentials:'same-origin' }).then(function(r){
+      return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+  function post(url, body){
+    return fetch(url, { method:'POST', credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body || {}) }).then(function(r){
+      return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+  // the date as it reads on this calendar - toISOString on a local midnight
+  // hands back the day before
+  function iso(d){
+    var p = function(n){ return n < 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function setSpan(which){
+    var now = new Date(), from = new Date();
+    if(which === 'ytd') from = new Date(now.getFullYear(), 0, 1);
+    else if(which === 'last90') from = new Date(now.getTime() - 89 * 86400000);
+    else if(which === 'thismonth') from = new Date(now.getFullYear(), now.getMonth(), 1);
+    else if(which === 'all') from = new Date(2025, 3, 1);
+    $('dFrom').value = iso(from);
+    $('dTo').value = iso(now);
+  }
+
+  /* ---------- the kinds ---------- */
+
+  function drawKinds(){
+    var group = function(side, title){
+      return '<div class="grp"><b>' + title + '</b>' + S.kinds.filter(function(k){ return k.side === side; })
+        .map(function(k){
+          // the purchase side is where the cost comes in, and it is a short read,
+          // so it starts ticked; the sales side is a long one and is chosen
+          return '<label><input type="checkbox" value="' + esc(k.key) + '"' +
+                 (side === 'buy' ? ' checked' : '') + '> ' + esc(k.label) + '</label>';
+        }).join('') + '</div>';
+    };
+    $('kinds').innerHTML = group('buy', 'Bought') + group('sell', 'Sold');
+  }
+  function pickedKinds(){
+    return Array.prototype.filter.call($('kinds').querySelectorAll('input'), function(b){ return b.checked; })
+      .map(function(b){ return b.value; });
+  }
+
+  /* ---------- the pairs ---------- */
+
+  function checkPairs(){
+    var text = $('pairText').value;
+    if(!text.trim()) return say('pairStat', 'bad', '<b>Paste the pairs first</b>');
+    $('btnPairs').disabled = true;
+    say('pairStat', 'busy', 'Reading the items from QuickBooks…');
+
+    post('/api/replace/pairs', { text: text })
+      .then(function(d){
+        $('btnPairs').disabled = false;
+        S.pairs = d.pairs || [];
+        var out = '<b>' + nf(d.pasted) + ' pasted, ' + nf(S.pairs.length) +
+                  (S.pairs.length === 1 ? ' pair' : ' pairs') + ' ready.</b>';
+        if(d.bad && d.bad.length){
+          out += '<br>' + nf(d.bad.length) + ' left out:' +
+            '<div class="miss">' + d.bad.map(function(b){
+              return 'line ' + b.line + ': ' + esc(b.raw) + '\n   → ' + esc(b.why);
+            }).join('\n') + '</div>';
+        }
+        say('pairStat', d.bad && d.bad.length ? 'bad' : 'ok', out);
+
+        $('pairSheet').classList.toggle('hide', !S.pairs.length);
+        $('whereSheet').classList.toggle('hide', !S.pairs.length);
+        $('foundSheet').classList.add('hide');
+        $('runSheet').classList.add('hide');
+        drawPairs(null);
+      })
+      .catch(function(e){
+        $('btnPairs').disabled = false;
+        say('pairStat', 'bad', '<b>' + esc(e.message) + '</b>');
+      });
+  }
+
+  function drawPairs(summary){
+    var byFrom = {};
+    (summary || []).forEach(function(g){ byFrom[g.from.id] = g; });
+    $('pairCount').textContent = nf(S.pairs.length) + (S.pairs.length === 1 ? ' pair' : ' pairs');
+
+    $('pairRows').innerHTML = S.pairs.map(function(p){
+      var g = byFrom[p.from.id];
+      var where = g ? Object.keys(g.kinds).map(function(k){ return nf(g.kinds[k]) + ' ' + esc(k.toLowerCase()); }).join(', ') : '';
+      var state = !g ? '' :
+        g.failed ? '<span class="tag bad">' + nf(g.failed) + ' refused</span>' :
+        (g.done && g.done === g.txns) ? '<span class="tag ok">done</span>' :
+        g.done ? '<span class="tag warn">' + nf(g.done) + ' of ' + nf(g.txns) + '</span>' : '';
+      return '<tr>' +
+        '<td class="nm">' + esc(p.from.name) + (p.from.sku ? '<small>' + esc(p.from.sku) + '</small>' : '') + '</td>' +
+        '<td class="arrow">&rarr;</td>' +
+        '<td class="nm">' + esc(p.to.name) + (p.to.sku ? '<small>' + esc(p.to.sku) + '</small>' : '') +
+          (p.to.active ? '' : ' <span class="tag warn">switched off</span>') + '</td>' +
+        '<td class="num mono">' + (g ? nf(g.txns) : '—') + '</td>' +
+        '<td class="num mono">' + (g ? nf(g.lines) : '—') + '</td>' +
+        '<td class="num mono">' + (g ? nf(g.qty) : '—') + '</td>' +
+        '<td class="num mono">' + (g ? money(g.amount) : '—') + '</td>' +
+        '<td class="kinds">' + (g ? (where || 'nowhere in these dates') : '') + '</td>' +
+        '<td>' + state + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  /* ---------- finding them ---------- */
+
+  function scan(){
+    var kinds = pickedKinds();
+    if(!kinds.length) return say('scanStat', 'bad', '<b>Tick at least one kind of transaction</b>');
+    if(!$('dFrom').value || !$('dTo').value) return say('scanStat', 'bad', '<b>Give both dates</b>');
+
+    $('btnScan').disabled = true;
+    say('scanStat', 'busy', 'Reading the books…');
+    post('/api/replace/scan', { from: $('dFrom').value, to: $('dTo').value, kinds: kinds })
+      .then(function(){
+        $('btnScanStop').classList.remove('hide');
+        poll();
+      })
+      .catch(function(e){
+        $('btnScan').disabled = false;
+        say('scanStat', 'bad', '<b>' + esc(e.message) + '</b>');
+      });
+  }
+
+  var LABEL = {};
+  function drawScan(s){
+    if(s.running){
+      say('scanStat', 'busy', 'Reading <b>' + esc(LABEL[s.kind] || s.kind || '…') + '</b> up to <b>' +
+        esc(s.upto) + '</b> &mdash; ' + nf(s.read) + ' read, <b>' + nf(s.found) + '</b> carrying one of the products');
+      return;
+    }
+    $('btnScan').disabled = false;
+    $('btnScanStop').classList.add('hide');
+    if(s.error){ say('scanStat', 'bad', '<b>' + esc(s.error) + '</b>'); return; }
+    if(!s.read){
+      say('scanStat', 'bad', '<b>QuickBooks gave back nothing at all</b> between ' + esc(s.from) +
+        ' and ' + esc(s.to) + ' for the kinds ticked.');
+      return;
+    }
+    say('scanStat', 'ok', '<b>' + nf(s.found) + (s.found === 1 ? ' transaction' : ' transactions') +
+      '</b> carry one of the products, out of ' + nf(s.read) + ' read between ' +
+      esc(s.from) + ' and ' + esc(s.to));
+  }
+
+  function drawFound(d){
+    S.rows = d.rows || [];
+    S.total = d.total || 0;
+    $('foundSheet').classList.toggle('hide', !d.scan || d.scan.running);
+    $('foundAside').textContent = nf(S.total) + (S.total === 1 ? ' transaction' : ' transactions') +
+      (S.rows.length < S.total ? ' — ' + nf(S.rows.length) + ' shown' : '');
+
+    // the counts below the list are for everything found, not only what is shown
+    var waiting = (d.summary || []).reduce(function(s, g){ return s + g.txns - g.done - g.failed; }, 0);
+
+    $('promise').innerHTML =
+      'On every one of these, the lines carrying the product going are given the product ' +
+      'taking its place. The quantity, the rate, the amount, the description, the customer or ' +
+      'supplier and the date go back exactly as they came. ' +
+      '<b>Moving a bill moves the stock and the cost it brought in</b>, so QuickBooks works the ' +
+      'cost of sales out again for the product that sold &mdash; and the months those sales fall ' +
+      'in change on the Profit and Loss.';
+
+    $('foundRows').innerHTML = S.rows.length ? S.rows.map(function(r){
+      return '<tr>' +
+        '<td>' + esc(r.kindLabel) + '</td>' +
+        '<td class="mono">' + esc(r.doc || r.qbId) + '</td>' +
+        '<td class="mono">' + esc(r.date) + '</td>' +
+        '<td class="nm" style="font-weight:400">' + esc(r.name) + '</td>' +
+        '<td class="num mono">' + nf(r.hits.length) + '</td>' +
+        '<td class="num mono">' + money(r.hitTotal) + '</td>' +
+        '<td>' + (r.state === 'changed' ? '<span class="tag ok">changed</span>'
+               : r.state === 'failed' ? '<span class="tag bad">refused</span><div style="font-size:11px;color:var(--muted);white-space:normal">' + esc(r.note) + '</div>'
+               : '<span class="tag">waiting</span>') + '</td>' +
+        '</tr>';
+    }).join('')
+      : '<tr><td colspan="7" style="color:var(--faint);padding:14px">None of these products is on anything in those dates.</td></tr>';
+
+    var running = d.job && d.job.running;
+    $('btnRun').disabled = !waiting || running;
+    $('btnRun').textContent = waiting
+      ? 'Replace them on ' + nf(waiting) + (waiting === 1 ? ' transaction' : ' transactions')
+      : 'Nothing waiting';
+    $('runHint').textContent = waiting
+      ? 'One transaction at a time. The page can be closed; the run carries on.'
+      : '';
+  }
+
+  function csv(){
+    var rows = [['Type','Number','Date','With','Lines','Amount on them','State','Note']];
+    S.rows.forEach(function(r){
+      rows.push([r.kindLabel, r.doc || r.qbId, r.date, r.name, r.hits.length, r.hitTotal, r.state, r.note]);
+    });
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'replace-product.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- running ---------- */
+
+  function run(){
+    $('btnRun').disabled = true;
+    $('log').innerHTML = '';
+    S.logged = 0;
+    post('/api/replace/run', { kinds: pickedKinds() })
+      .then(function(){
+        $('runSheet').classList.remove('hide');
+        $('btnStop').classList.remove('hide');
+        $('runSheet').scrollIntoView({ behavior:'smooth', block:'start' });
+        poll();
+      })
+      .catch(function(e){
+        $('btnRun').disabled = false;
+        $('runHint').textContent = e.message;
+      });
+  }
+
+  function drawJob(job){
+    $('runSheet').classList.remove('hide');
+    $('runAside').textContent = nf(job.done) + ' of ' + nf(job.total) +
+      (job.failed ? ' — ' + nf(job.failed) + ' refused' : '');
+    var box = $('log');
+    var atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
+    (job.log || []).slice(S.logged).forEach(function(l){
+      var div = document.createElement('div');
+      if(l.ok){
+        div.className = 'ok';
+        div.textContent = l.doc + ' — ' + l.lines + (l.lines === 1 ? ' line' : ' lines') + ' changed' +
+          (l.moved ? '  (total moved by ' + l.moved + ')' : '');
+      } else {
+        div.className = 'err';
+        div.textContent = l.doc + ' — ' + l.msg;
+      }
+      box.appendChild(div);
+    });
+    S.logged = (job.log || []).length;
+    if(atEnd) box.scrollTop = box.scrollHeight;
+    if(!job.running){
+      $('btnStop').classList.add('hide');
+      if(job.error) $('runHint').textContent = job.error;
+    }
+  }
+
+  function poll(){
+    clearInterval(S.poller);
+    var tick = function(){
+      get('/api/replace/status?limit=1000').then(function(d){
+        if(!d.has) return;
+        S.pairs = d.pairs || S.pairs;
+        drawPairs(d.summary);
+        if(d.scan) drawScan(d.scan);
+        if(d.scan && !d.scan.running) drawFound(d);
+        if(d.job) drawJob(d.job);
+        var busy = (d.scan && d.scan.running) || (d.job && d.job.running);
+        if(!busy){ clearInterval(S.poller); S.poller = null; }
+      }).catch(function(){ /* keep trying */ });
+    };
+    tick();
+    S.poller = setInterval(tick, 2000);
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('btnPairs').addEventListener('click', checkPairs);
+  $('btnScan').addEventListener('click', scan);
+  $('btnScanStop').addEventListener('click', function(){ post('/api/replace/stop'); });
+  $('btnRun').addEventListener('click', run);
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    post('/api/replace/stop').then(function(){ $('btnStop').disabled = false; });
+  });
+  $('btnCsv').addEventListener('click', csv);
+  $('btnReset').addEventListener('click', function(){
+    post('/api/replace/clear').then(function(){
+      clearInterval(S.poller); S.poller = null;
+      S.pairs = []; S.rows = [];
+      ['pairSheet','whereSheet','foundSheet','runSheet'].forEach(function(id){ $(id).classList.add('hide'); });
+      say('pairStat', '', ''); say('scanStat', '', '');
+    }).catch(function(e){ say('pairStat', 'bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.quick button'), function(b){
+    b.addEventListener('click', function(){ setSpan(b.getAttribute('data-span')); });
+  });
+  // a tab typed into the box would otherwise leave the box
+  $('pairText').addEventListener('keydown', function(e){
+    if(e.key !== 'Tab') return;
+    e.preventDefault();
+    var t = e.target, a = t.selectionStart, b = t.selectionEnd;
+    t.value = t.value.slice(0, a) + '\t' + t.value.slice(b);
+    t.selectionStart = t.selectionEnd = a + 1;
+  });
+
+  setSpan('all');
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    get('/api/replace/kinds').then(function(d){
+      S.kinds = d.kinds || [];
+      S.kinds.forEach(function(k){ LABEL[k.key] = k.label; });
+      drawKinds();
+      // a read or a run left going before a reload is picked back up
+      return get('/api/replace/status?limit=1000');
+    }).then(function(d){
+      if(!d || !d.has) return;
+      S.pairs = d.pairs || [];
+      if(!S.pairs.length) return;
+      $('pairSheet').classList.remove('hide');
+      $('whereSheet').classList.remove('hide');
+      if(d.scan){ $('dFrom').value = d.scan.from; $('dTo').value = d.scan.to; }
+      drawPairs(d.summary);
+      if(d.scan) drawScan(d.scan);
+      if(d.scan && !d.scan.running) drawFound(d);
+      if(d.job){ S.logged = 0; drawJob(d.job); }
+      if((d.scan && d.scan.running) || (d.job && d.job.running)) poll();
+    }).catch(function(){ /* nothing to pick up */ });
+  });
+})();
+</script>
+</body>
+</html>

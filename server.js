@@ -27,6 +27,10 @@ import {
   initProdStore, logProductChange, listProductChanges, clearProductChanges
 } from './prodstore.js';
 import {
+  KINDS as REPLACE_KINDS, parsePairs as parseReplacePairs, resolvePairs as resolveReplacePairs,
+  scanReplace, replaceOne as replaceItemOn
+} from './replaceitem.js';
+import {
   listVendors, listPayables, readDocs, readOne, createDoc,
   attachFile, listAttachments
 } from './purchases.js';
@@ -7077,6 +7081,253 @@ app.post('/api/purchases/create', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// ==================== Replace product ====================
+//
+// A pasted column of pairs - the item going, the item taking its place - found
+// across every kind of transaction that carries a product, and the old item
+// swapped for the new one on the lines that carry it. Held in memory like the
+// description change: reading it again is cheaper than keeping it.
+
+const replStore = new Map();       // realmId -> { pairs, bad, scan, rows, job, at }
+
+app.get('/api/replace/kinds', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ kinds: REPLACE_KINDS.map(k => ({ key: k.key, label: k.label, side: k.side })) });
+});
+
+// The pairs are checked against the items before anything is read, so a name
+// that matches nothing - or two things - is said up front rather than found out
+// halfway through a year of invoices.
+app.post('/api/replace/pairs', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const old = replStore.get(realmId);
+    if (old && ((old.scan && old.scan.running) || (old.job && old.job.running))) {
+      throw new Error('A read or a run is still going');
+    }
+
+    const pasted = parseReplacePairs((req.body || {}).text);
+    if (!pasted.length) throw new Error('Paste the old item and the new one, side by side, one pair to a line');
+    if (pasted.length > 3000) throw new Error('That is more than three thousand pairs - paste it in parts');
+
+    const token = await getAccessToken(realmId);
+    const items = await readItems(realmId, token);
+    const { ok, bad } = resolveReplacePairs(pasted, items);
+
+    replStore.set(realmId, { pairs: ok, bad, scan: null, rows: [], job: null, at: Date.now() });
+    res.json({ pairs: ok, bad, pasted: pasted.length });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/replace/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = replStore.get(realmId);
+    if (!st || !st.pairs.length) throw new Error('Check the pairs first');
+    if ((st.scan && st.scan.running) || (st.job && st.job.running)) throw new Error('A read or a run is still going');
+
+    const { from, to, kinds } = req.body || {};
+    if (!from || !to) throw new Error('Give the dates to look between');
+    if (from > to) throw new Error('The first date is after the last one');
+    if (!Array.isArray(kinds) || !kinds.length) throw new Error('Tick at least one kind of transaction');
+
+    const scan = {
+      running: true, stop: false, from, to, kinds,
+      kind: '', upto: from, found: 0, read: 0, error: null, started: Date.now()
+    };
+    st.scan = scan;
+    st.rows = [];
+    st.job = null;
+
+    const token = await getAccessToken(realmId);
+    scanReplace(realmId, token,
+      { from, to, kinds, pairs: st.pairs, shouldStop: () => scan.stop },
+      step => {
+        scan.kind = step.kind; scan.upto = step.upto;
+        scan.found = step.found; scan.read = step.read;
+      })
+      .then(out => {
+        st.rows = out.rows;
+        scan.found = out.rows.length;
+        scan.read = out.read;
+        scan.running = false;
+        scan.finished = Date.now();
+      })
+      .catch(e => {
+        scan.running = false;
+        scan.error = e.message === 'stopped' ? null : e.message;
+      });
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// What was found, per pair and per kind - the thing to look at before pressing
+// the button - and the transactions themselves, newest trouble first.
+app.get('/api/replace/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  res.setHeader('Cache-Control', 'no-store');
+  const st = replStore.get(realmId);
+  if (!st) return res.json({ has: false });
+
+  const byPair = new Map(st.pairs.map(p => [p.from.id, {
+    from: p.from, to: p.to, txns: 0, lines: 0, qty: 0, amount: 0, kinds: {}, done: 0, failed: 0
+  }]));
+  st.rows.forEach(r => {
+    const touched = new Set();
+    r.hits.forEach(h => {
+      const g = byPair.get(h.fromId);
+      if (!g) return;
+      g.lines++;
+      g.qty = Math.round((g.qty + h.qty) * 100) / 100;
+      g.amount = Math.round((g.amount + h.amount) * 100) / 100;
+      if (!touched.has(h.fromId)) {
+        touched.add(h.fromId);
+        g.txns++;
+        g.kinds[r.kindLabel] = (g.kinds[r.kindLabel] || 0) + 1;
+        if (r.state === 'changed') g.done++;
+        if (r.state === 'failed') g.failed++;
+      }
+    });
+  });
+
+  const limit = Math.min(Number(req.query.limit) || 400, 3000);
+  const s = st.scan, job = st.job;
+
+  res.json({
+    has: true,
+    pairs: st.pairs, bad: st.bad,
+    summary: Array.from(byPair.values()),
+    total: st.rows.length,
+    rows: st.rows.slice(0, limit),
+    scan: s ? {
+      running: s.running, from: s.from, to: s.to, kinds: s.kinds, kind: s.kind,
+      upto: s.upto, found: s.found, read: s.read, error: s.error || null
+    } : null,
+    job: job ? {
+      running: job.running, done: job.done, failed: job.failed, lines: job.lines,
+      total: job.total, error: job.error || null, log: job.log.slice(-80)
+    } : null
+  });
+});
+
+// One transaction per request, the same as every other run here - the batch API
+// times out under inventory locks, and a slow run that finishes beats a fast one
+// that does not.
+async function runReplace(realmId, st, job) {
+  const token = await getAccessToken(realmId);
+  const pairById = new Map(st.pairs.map(p => [p.from.id, p]));
+
+  for (const row of job.rows) {
+    if (job.stop) break;
+    if (row.state !== 'ready') continue;
+
+    const pairs = Array.from(new Set(row.hits.map(h => h.fromId)))
+      .map(id => pairById.get(id)).filter(Boolean);
+
+    try {
+      const out = await replaceItemOn(realmId, token, row.kind, row.qbId, pairs);
+      row.state = 'changed';
+      row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' changed';
+      job.done++;
+      job.lines += out.lines;
+      job.log.push({
+        ok: true, doc: row.kindLabel + ' ' + (out.doc || row.qbId), lines: out.lines,
+        // the total is the proof that only the product moved
+        moved: Math.round((out.total - out.before) * 100) / 100
+      });
+      for (const p of pairs) {
+        await logProductChange(realmId, {
+          id: p.from.id, name: p.from.name, sku: p.from.sku, field: 'replace',
+          was: row.kindLabel + ' ' + (out.doc || row.qbId) + ' (' + row.date + ')',
+          now: p.to.name, ok: true
+        }).catch(e => console.error('replace log:', e.message));
+      }
+    } catch (e) {
+      row.state = 'failed';
+      row.note = e.message;
+      job.done++;
+      job.failed++;
+      job.log.push({ ok: false, doc: row.kindLabel + ' ' + (row.doc || row.qbId), msg: e.message });
+      for (const p of pairs) {
+        await logProductChange(realmId, {
+          id: p.from.id, name: p.from.name, sku: p.from.sku, field: 'replace',
+          was: row.kindLabel + ' ' + (row.doc || row.qbId), now: p.to.name,
+          ok: false, message: e.message
+        }).catch(err => console.error('replace log:', err.message));
+      }
+    }
+  }
+
+  job.running = false;
+  job.finished = Date.now();
+}
+
+app.post('/api/replace/run', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = replStore.get(realmId);
+    if (!st || !st.rows.length) throw new Error('Find the transactions first');
+    if (st.scan && st.scan.running) throw new Error('The read is still running');
+    if (st.job && st.job.running) throw new Error('That is already running');
+
+    // the kinds left ticked on the page decide what is run - bills alone, say,
+    // before the invoices are touched
+    const kinds = (req.body || {}).kinds;
+    const rows = st.rows.filter(r => r.state === 'ready' &&
+      (!Array.isArray(kinds) || !kinds.length || kinds.includes(r.kind)));
+    if (!rows.length) throw new Error('Nothing is waiting to be changed');
+
+    const job = {
+      running: true, stop: false, done: 0, failed: 0, lines: 0,
+      total: rows.length, rows, log: [], started: Date.now()
+    };
+    st.job = job;
+
+    runReplace(realmId, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+    });
+
+    res.json({ ok: true, total: job.total });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/replace/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = replStore.get(realmId);
+  if (st && st.scan && st.scan.running) st.scan.stop = true;
+  if (st && st.job && st.job.running) st.job.stop = true;
+  res.json({ ok: true });
+});
+
+app.post('/api/replace/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = replStore.get(realmId);
+  if (st && ((st.scan && st.scan.running) || (st.job && st.job.running))) {
+    return res.status(400).json({ error: 'A read or a run is still going' });
+  }
+  replStore.delete(realmId);
+  res.json({ ok: true });
 });
 
 // ==================== Start ====================

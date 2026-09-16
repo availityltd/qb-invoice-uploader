@@ -937,7 +937,8 @@
                 : h.field === 'stock' ? 'Stock'
                 : h.field === 'bill' ? 'Bill'
                 : h.field === 'order' ? 'Order'
-                : h.field === 'merge' ? 'Merged' : 'Put away') + '</td>' +
+                : h.field === 'merge' ? 'Merged'
+                : h.field === 'replace' ? 'Replaced on' : 'Put away') + '</td>' +
         '<td class="mono">' + esc(h.was || '—') + '</td>' +
         '<td class="mono">' + esc(h.now || '—') + '</td>' +
         '<td>' + (h.status === 'done'
