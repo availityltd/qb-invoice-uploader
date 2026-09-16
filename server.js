@@ -19,8 +19,12 @@ import {
 } from './qb.js';
 import {
   readItems, readItemSales, readValuation, readPurchases,
-  buildRows as buildProductRows, summarise as summariseProducts
+  buildRows as buildProductRows, summarise as summariseProducts,
+  updateItem as updateProductItem
 } from './products.js';
+import {
+  initProdStore, logProductChange, listProductChanges, clearProductChanges
+} from './prodstore.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
 import {
@@ -6502,7 +6506,12 @@ app.get('/api/products/status', async (req, res) => {
     scan: {
       running: st.scan.running, step: st.scan.step, items: st.scan.items,
       read: st.scan.read, error: st.scan.error || null
-    }
+    },
+    job: st.job ? {
+      running: st.job.running, field: st.job.field, done: st.job.done,
+      failed: st.job.failed, total: st.job.total,
+      error: st.job.error || null, log: st.job.log.slice(-80)
+    } : null
   });
 });
 
@@ -6556,6 +6565,144 @@ app.post('/api/products/clear', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Putting a cost on the items that never had one.
+//
+// The cost on an item is not what a sale already carried - QuickBooks works that
+// out from the bills, and nothing typed here changes a sale that has happened.
+// What it does change is everything from here on: a bill opens at the right
+// rate, and a report that reads the item rather than the ledger stops saying
+// nothing at all. What was already sold at no cost is put right by the purchases
+// behind it, not by this.
+//
+// One item per request, the way every other run in this app works, with what was
+// done written down as it goes.
+async function runProductJob(realmId, st, job) {
+  const token = await getAccessToken(realmId);
+
+  for (const one of job.items) {
+    if (job.stop) break;
+
+    const row = st.rows.filter(r => r.id === one.id)[0] || { id: one.id, name: '', sku: '' };
+
+    try {
+      let patch = null;
+      let was = '';
+      let now = '';
+
+      if (job.field === 'cost') {
+        const cost = Number(one.value);
+        if (!(cost > 0)) throw new Error('A cost has to be more than nothing');
+        patch = { PurchaseCost: cost };
+        was = row.cost === null || row.cost === undefined ? '' : row.cost;
+        now = cost;
+      } else if (job.field === 'active') {
+        // an item holding stock is not switched off here: QuickBooks answers that
+        // by writing its own adjustment, which moves cost of sales on a date
+        // nobody chose
+        if (Number(row.qty || 0) !== 0) {
+          throw new Error('This one still holds ' + row.qty + ' in stock - put the stock right first');
+        }
+        patch = { Active: false };
+        was = 'in use';
+        now = 'put away';
+      } else {
+        throw new Error('Unknown change ' + job.field);
+      }
+
+      const out = await updateProductItem(realmId, token, one.id, patch);
+
+      // the list on screen is what the page reads back, so it is told what
+      // happened rather than left saying what used to be true
+      if (job.field === 'cost') row.cost = Number(one.value);
+      if (job.field === 'active') row.active = false;
+
+      job.done++;
+      job.log.push({ ok: true, name: row.name || out.Name || one.id, was, now });
+      await logProductChange(realmId, {
+        id: one.id, name: row.name || out.Name || '', sku: row.sku || '',
+        field: job.field, was, now, ok: true
+      }).catch(e => console.error('product log:', e.message));
+    } catch (e) {
+      job.done++;
+      job.failed++;
+      job.log.push({ ok: false, name: row.name || one.id, msg: e.message });
+      await logProductChange(realmId, {
+        id: one.id, name: row.name || '', sku: row.sku || '',
+        field: job.field, was: '', now: '', ok: false, message: e.message
+      }).catch(err => console.error('product log:', err.message));
+    }
+  }
+
+  job.running = false;
+  job.finished = Date.now();
+  if (st.rows.length) st.summary = summariseProducts(st.rows);
+}
+
+app.post('/api/products/apply', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = prodStore.get(realmId);
+    if (!st) throw new Error('Read the books first');
+    if (st.scan && st.scan.running) throw new Error('The read is still running');
+    if (st.job && st.job.running) throw new Error('That is already running');
+
+    const body = req.body || {};
+    const field = String(body.field || '');
+    if (['cost', 'active'].indexOf(field) < 0) throw new Error('Unknown change');
+
+    const items = (Array.isArray(body.items) ? body.items : [])
+      .map(i => ({ id: String(i.id || ''), value: i.value }))
+      .filter(i => i.id);
+    if (!items.length) throw new Error('Tick at least one of them');
+
+    const job = {
+      running: true, stop: false, field, done: 0, failed: 0,
+      total: items.length, items, log: [], started: Date.now()
+    };
+    st.job = job;
+
+    runProductJob(realmId, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+    });
+
+    res.json({ ok: true, total: job.total });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/products/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = prodStore.get(realmId);
+  if (st && st.job) st.job.stop = true;
+  res.json({ ok: true });
+});
+
+app.get('/api/products/record', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    res.json({ changes: await listProductChanges(realmId, Number(req.query.limit) || 300) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/products/record/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.json({ ok: true, cleared: await clearProductChanges(realmId) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== Start ====================
 const PORT = process.env.PORT || 3000;
 
@@ -6567,6 +6714,7 @@ initDb()
   .then(() => initCouriers())
     .then(() => import('./jobstore.js').then(m => m.initJobStore()))
   .then(() => initRecatStore())
+  .then(() => initProdStore())
   .then(() => app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startKeeper();

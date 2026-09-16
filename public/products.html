@@ -56,6 +56,12 @@
   .subways button:hover{color:var(--ink)}
   .subways button.on{background:#fff;color:var(--ink);font-weight:600;
     box-shadow:0 1px 2px rgba(0,0,0,.07)}
+
+  td.tick{width:34px}
+  td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
+  tr.off{opacity:.45}
+  .costbox{width:96px;font-size:13px;padding:6px 8px;border:1px solid var(--line-2);
+    border-radius:6px;background:#fff;color:var(--text);text-align:right}
 </style>
 </head>
 <body>
@@ -131,9 +137,19 @@
                 <input type="text" class="rowfind" id="rowFind" placeholder="Search by name or SKU">
                 <button class="mini" id="btnCsv">Download this list</button>
               </div>
+              <div class="acts hide" id="applyBar" style="margin-top:12px">
+                <button class="mini" id="btnAll">Tick all shown</button>
+                <button class="mini" id="btnNone">Untick all</button>
+                <button class="solid" id="btnApply" disabled>Nothing ticked</button>
+                <button class="ghost hide" id="btnStop">Stop</button>
+              </div>
+              <p class="hint hide" id="applyHint" style="margin:8px 0 0"></p>
+
               <div class="tbl" style="max-height:560px;margin-top:12px">
                 <table>
                   <thead><tr>
+                    <th class="tickh hide"></th>
+                    <th class="costh hide">Cost to put on</th>
                     <th>Product</th>
                     <th>Type</th>
                     <th class="num">Stock</th>
@@ -148,6 +164,41 @@
                   </tr></thead>
                   <tbody id="rows"></tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============ what is being done, and what was done ============ -->
+          <div class="sheet hide" id="runSheet">
+            <div class="sec">
+              <h2><span class="no">03</span> What is being done
+                <span class="aside" id="runAside"></span></h2>
+              <div class="log" id="log"></div>
+            </div>
+          </div>
+
+          <div class="sheet" id="recordSheet">
+            <div class="sec">
+              <h2><span class="no">04</span> What has been changed
+                <span class="aside" id="recWhen"></span></h2>
+              <p class="hint" style="margin:0 0 12px">QuickBooks' own history says an item
+                was edited. It does not say what the cost was before, or which items were
+                put away together. This does.</p>
+              <div class="acts">
+                <button class="mini" id="btnRec">Refresh</button>
+                <button class="mini" id="btnRecCsv">Download the record</button>
+              </div>
+              <div class="tbl" style="max-height:300px;margin-top:12px">
+                <table>
+                  <thead><tr>
+                    <th>Changed on</th><th>Product</th><th>SKU</th><th>What</th>
+                    <th>Was</th><th>Is now</th><th>State</th>
+                  </tr></thead>
+                  <tbody id="recRows"></tbody>
+                </table>
+              </div>
+              <div class="acts" style="margin-top:12px">
+                <button class="mini" id="btnRecClear">Clear log</button>
               </div>
             </div>
           </div>
@@ -199,8 +250,18 @@
       hint:'These sell as a service or a non-inventory item, so no cost of sales is worked out for them at all, whatever cost is written on them.' }
   ];
 
+  // picked: which rows are ticked, by item id. costs: what is typed in the cost
+  // box, which starts at what the read suggests and is the operator's after that
   var S = { tab:'overview', report:'zero-cogs', rows:[], total:0,
-            summary:null, filter:'', poller:null, from:'', to:'' };
+            summary:null, filter:'', poller:null, from:'', to:'',
+            picked:{}, costs:{}, record:[], logged:0 };
+
+  // the two tabs that write. Everything else only reads
+  function acts(){
+    if(S.tab === 'no-cost') return 'cost';
+    if(S.tab === 'unused')  return 'active';
+    return '';
+  }
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -290,6 +351,7 @@
   function goTab(key){
     S.tab = key;
     S.filter = '';
+    S.picked = {};
     $('rowFind').value = '';
     drawTabs();
 
@@ -406,11 +468,29 @@
   }
 
   function drawRows(){
+    var act = acts();
     $('listAside').textContent = nf(S.total) + (S.total === 1 ? ' item' : ' items') +
       (S.rows.length < S.total ? ' — ' + nf(S.rows.length) + ' shown' : '');
 
+    $('applyBar').classList.toggle('hide', !act);
+    $('applyHint').classList.toggle('hide', !act);
+    Array.prototype.forEach.call(document.querySelectorAll('.tickh'), function(th){
+      th.classList.toggle('hide', !act);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.costh'), function(th){
+      th.classList.toggle('hide', act !== 'cost');
+    });
+
     $('rows').innerHTML = S.rows.length ? S.rows.map(function(r){
-      return '<tr>' +
+      var on = !!S.picked[r.id];
+      var cost = S.costs[r.id] !== undefined ? S.costs[r.id] : (r.suggest || '');
+      return '<tr' + (act && !on ? ' class="off"' : '') + '>' +
+        (act ? '<td class="tick"><input type="checkbox" data-id="' + esc(r.id) + '"' +
+               (on ? ' checked' : '') + '></td>' : '') +
+        (act === 'cost'
+          ? '<td><input type="text" class="costbox mono" data-cost="' + esc(r.id) + '" value="' +
+            esc(cost) + '" inputmode="decimal" placeholder="—"></td>'
+          : '') +
         '<td class="pname">' + esc(r.name) +
           (r.sku ? '<small>' + esc(r.sku) + '</small>' : '') + tags(r) + '</td>' +
         '<td>' + esc(r.type) + '</td>' +
@@ -432,8 +512,58 @@
           }).join('<br>') + '</td>' +
         '</tr>';
     }).join('')
-      : '<tr><td colspan="11" style="color:var(--faint);padding:14px">Nothing here. ' +
+      : '<tr><td colspan="13" style="color:var(--faint);padding:14px">Nothing here. ' +
         'That is the good answer.</td></tr>';
+
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[data-id]'), function(b){
+      b.addEventListener('change', function(){
+        S.picked[b.getAttribute('data-id')] = b.checked;
+        drawRows();
+      });
+    });
+    Array.prototype.forEach.call($('rows').querySelectorAll('input[data-cost]'), function(b){
+      b.addEventListener('input', function(){
+        S.costs[b.getAttribute('data-cost')] = b.value;
+        drawApply();
+      });
+    });
+    drawApply();
+  }
+
+  // what the button is about to do, said before it is pressed
+  function drawApply(){
+    var act = acts();
+    if(!act) return;
+
+    var picked = S.rows.filter(function(r){ return S.picked[r.id]; });
+    var n = picked.length;
+
+    if(act === 'cost'){
+      var withCost = picked.filter(function(r){
+        var v = parseFloat(S.costs[r.id] !== undefined ? S.costs[r.id] : r.suggest);
+        return v > 0;
+      }).length;
+      $('btnApply').disabled = !withCost;
+      $('btnApply').textContent = withCost
+        ? 'Put the cost on ' + nf(withCost) + (withCost === 1 ? ' item' : ' items')
+        : 'Nothing ticked';
+      $('applyHint').innerHTML = n
+        ? nf(n) + ' ticked' + (n > withCost ? ', ' + nf(n - withCost) + ' of them with no cost typed in — those are left alone' : '') +
+          '. This does not change a sale that has already happened: QuickBooks works that out from the bills. ' +
+          'It is what a new bill opens at, and what the reports read.'
+        : 'Tick the items to put a cost on. The suggested cost is what the item was last bought for, ' +
+          'what QuickBooks averages it at, or what its twin cost — whichever was found first.';
+    } else {
+      var holding = picked.filter(function(r){ return Number(r.qty || 0) !== 0; }).length;
+      $('btnApply').disabled = !n || n === holding;
+      $('btnApply').textContent = n
+        ? 'Put away ' + nf(n - holding) + (n - holding === 1 ? ' item' : ' items')
+        : 'Nothing ticked';
+      $('applyHint').textContent = n
+        ? nf(n) + ' ticked' + (holding ? ', ' + nf(holding) + ' of them still hold stock and will be refused — put the stock right first' : '') +
+          '. An item put away stops appearing on new invoices and bills. Nothing that has already happened moves.'
+        : 'Tick the items to put away. Nothing has ever been sold or bought against these.';
+    }
   }
 
   function csv(){
@@ -456,6 +586,122 @@
     var a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
     a.download = 'products-' + flagNow() + '.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- doing it ---------- */
+
+  function apply(){
+    var act = acts();
+    if(!act) return;
+
+    var items = [];
+    S.rows.forEach(function(r){
+      if(!S.picked[r.id]) return;
+      if(act === 'cost'){
+        var v = parseFloat(S.costs[r.id] !== undefined ? S.costs[r.id] : r.suggest);
+        if(!(v > 0)) return;
+        items.push({ id: r.id, value: v });
+      } else {
+        if(Number(r.qty || 0) !== 0) return;
+        items.push({ id: r.id });
+      }
+    });
+    if(!items.length) return;
+
+    $('btnApply').disabled = true;
+    $('log').innerHTML = '';
+    S.logged = 0;
+
+    post('/api/products/apply', { field: act, items: items })
+      .then(function(){
+        $('runSheet').classList.remove('hide');
+        $('btnStop').classList.remove('hide');
+        $('runSheet').scrollIntoView({ behavior:'smooth', block:'start' });
+        poll();
+      })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        drawApply();
+      });
+  }
+
+  function drawJob(job){
+    $('runAside').textContent = job.done + ' of ' + job.total +
+      (job.failed ? ' — ' + job.failed + ' refused' : '');
+
+    var box = $('log');
+    var atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
+    (job.log || []).slice(S.logged).forEach(function(l){
+      var div = document.createElement('div');
+      if(l.ok){
+        div.className = 'ok';
+        div.textContent = l.name + ' — ' + (l.was === '' ? 'no cost' : l.was) + ' → ' + l.now;
+      } else {
+        div.className = 'err';
+        div.textContent = l.name + ' — ' + l.msg;
+      }
+      box.appendChild(div);
+    });
+    S.logged = (job.log || []).length;
+    if(atEnd) box.scrollTop = box.scrollHeight;
+
+    if(!job.running){
+      $('btnStop').classList.add('hide');
+      if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');
+      drawApply();
+    }
+  }
+
+  /* ---------- the record ---------- */
+
+  function drawRecord(){
+    var list = S.record;
+    $('recWhen').textContent = list.length
+      ? list.length + (list.length === 1 ? ' change' : ' changes')
+      : '';
+
+    $('recRows').innerHTML = list.length ? list.map(function(h){
+      return '<tr>' +
+        '<td class="mono">' + esc(String(h.at || '').slice(0, 16).replace('T', ' ')) + '</td>' +
+        '<td class="pname">' + esc(h.name) + '</td>' +
+        '<td class="mono">' + esc(h.sku) + '</td>' +
+        '<td>' + (h.field === 'cost' ? 'Cost' : 'Put away') + '</td>' +
+        '<td class="mono">' + esc(h.was || '—') + '</td>' +
+        '<td class="mono">' + esc(h.now || '—') + '</td>' +
+        '<td>' + (h.status === 'done'
+          ? '<span class="tag ok">done</span>'
+          : '<span class="tag bad">refused</span>') +
+          (h.message ? '<div style="font-size:11px;color:var(--muted);white-space:normal">' +
+                       esc(h.message) + '</div>' : '') +
+        '</td></tr>';
+    }).join('')
+      : '<tr><td colspan="7" style="color:var(--faint);padding:14px">' +
+        'Nothing has been changed on this company yet.</td></tr>';
+  }
+
+  function loadRecord(){
+    return get('/api/products/record').then(function(d){
+      S.record = d.changes || [];
+      drawRecord();
+    }).catch(function(){ /* the record is not worth an error on screen */ });
+  }
+
+  function recCsv(){
+    var rows = [['Changed on','Product','SKU','What','Was','Is now','State','Message']];
+    S.record.forEach(function(h){
+      rows.push([h.at, h.name, h.sku, h.field, h.was, h.now, h.status, h.message]);
+    });
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'product-changes.csv';
     a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
   }
@@ -505,7 +751,13 @@
       get('/api/products/status').then(function(d){
         if(!d.has) return;
         drawScan(d);
-        if(!d.scan.running){ clearInterval(S.poller); S.poller = null; }
+        if(d.job) drawJob(d.job);
+        var busy = d.scan.running || (d.job && d.job.running);
+        if(!busy){
+          clearInterval(S.poller); S.poller = null;
+          // what was just changed is in the record now
+          if(d.job) loadRecord();
+        }
       }).catch(function(){ /* keep trying */ });
     };
     tick();
@@ -517,6 +769,25 @@
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
   $('btnScan').addEventListener('click', scan);
   $('btnCsv').addEventListener('click', csv);
+  $('btnApply').addEventListener('click', apply);
+  $('btnStop').addEventListener('click', function(){
+    $('btnStop').disabled = true;
+    post('/api/products/stop').then(function(){ $('btnStop').disabled = false; });
+  });
+  $('btnAll').addEventListener('click', function(){
+    S.rows.forEach(function(r){ S.picked[r.id] = true; });
+    drawRows();
+  });
+  $('btnNone').addEventListener('click', function(){ S.picked = {}; drawRows(); });
+  $('btnRec').addEventListener('click', loadRecord);
+  $('btnRecCsv').addEventListener('click', recCsv);
+  $('btnRecClear').addEventListener('click', function(){
+    $('btnRecClear').disabled = true;
+    post('/api/products/record/clear')
+      .then(function(){ $('log').innerHTML = ''; S.logged = 0; return loadRecord(); })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); })
+      .then(function(){ $('btnRecClear').disabled = false; });
+  });
   $('rowFind').addEventListener('input', function(){
     S.filter = $('rowFind').value.trim().toLowerCase();
     clearTimeout(S.findTimer);
@@ -540,13 +811,15 @@
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
+    loadRecord();
 
     // a read left going in another tab, or before a reload, is picked back up
     get('/api/products/status').then(function(d){
       if(!d || !d.has) return;
       $('dFrom').value = d.from; $('dTo').value = d.to;
       drawScan(d);
-      if(d.scan.running) poll();
+      if(d.job){ S.logged = 0; $('runSheet').classList.remove('hide'); drawJob(d.job); }
+      if(d.scan.running || (d.job && d.job.running)) poll();
     }).catch(function(){ /* nothing to pick up */ });
   });
 })();

@@ -13,6 +13,8 @@
 
 import { qbQuery, qbReport } from './qb.js';
 
+const API = 'https://quickbooks.api.intuit.com';
+
 const round2 = n => Math.round(n * 100) / 100;
 
 const num = v => {
@@ -334,4 +336,39 @@ export function summarise(rows) {
     twins: has('twin').length,
     unused: has('unused').length
   };
+}
+
+/* ==================== changing one ==================== */
+
+// The item is read again so the sync token is current, and only the field being
+// changed is sent. A sparse update leaves everything else on the item exactly as
+// QuickBooks has it - which matters on an inventory item, where the income and
+// asset accounts must not be rewritten by accident.
+export async function updateItem(realmId, token, id, patch) {
+  const q = await qbQuery(realmId, token, `SELECT * FROM Item WHERE Id = '${String(id).replace(/'/g, "\'")}'`);
+  const item = (q.Item || [])[0];
+  if (!item) throw new Error('Item ' + id + ' is not in QuickBooks any more');
+
+  const body = Object.assign({ Id: item.Id, SyncToken: item.SyncToken, sparse: true }, patch);
+
+  const res = await fetch(`${API}/v3/company/${realmId}/item?minorversion=70`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch (e) { /* left as it came */ }
+
+  if (!res.ok) {
+    const f = data.Fault && data.Fault.Error && data.Fault.Error[0];
+    throw new Error(f ? (f.Message + (f.Detail ? ' - ' + f.Detail : '')) : text.slice(0, 200));
+  }
+
+  return data.Item || {};
 }
