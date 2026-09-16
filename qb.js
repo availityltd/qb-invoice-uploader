@@ -236,3 +236,25 @@ export async function postInvoiceBatch(realmId, token, payloads) {
 
   return out;
 }
+
+// QuickBooks' own reports, read as they come. The books hold things a query
+// cannot reach - what a sale cost, what stock is worth - and those only come out
+// of a report. Read-only: a report is asked for, nothing is written.
+export async function qbReport(realmId, token, name, params = {}) {
+  const q = new URLSearchParams({ minorversion: '70' });
+  Object.keys(params).forEach(k => {
+    if (params[k] !== undefined && params[k] !== null && params[k] !== '') q.set(k, params[k]);
+  });
+
+  const url = `${API}/v3/company/${realmId}/reports/${name}?${q}`;
+  const res = await qbFetch(url, token);
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Report ${name} failed (${res.status}) tid=${tidOf(res)}: ${text.slice(0, 300)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error(`Report ${name} came back unreadable: ${text.slice(0, 200)}`);
+  }
+}

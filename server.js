@@ -15,7 +15,7 @@ import {
 } from './users.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
-  getOrCreateCustomer, postInvoice, qbQuery
+  getOrCreateCustomer, postInvoice, qbQuery, qbReport
 } from './qb.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
@@ -502,6 +502,57 @@ app.get('/api/qb-products', async (req, res) => {
     res.json({ count: products.length, products });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// A QuickBooks report, read as it comes. What a sale cost and what stock is
+// worth are not in any query - they are only in the reports - so this is the way
+// in for the product work. Only the reports named here can be asked for, and
+// nothing is written.
+const QB_REPORTS = [
+  'ItemSales',                  // Sales by Product/Service Summary - has COGS
+  'InventoryValuationSummary',
+  'InventoryValuationDetail',
+  'PurchasesByVendorDetail',
+  'ProfitAndLoss'
+];
+
+app.get('/api/qb-report', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const name = String(req.query.name || '');
+    if (!QB_REPORTS.includes(name)) {
+      throw new Error('Unknown report. One of: ' + QB_REPORTS.join(', '));
+    }
+
+    const token = await getAccessToken(realmId);
+    const out = await qbReport(realmId, token, name, {
+      start_date: req.query.from,
+      end_date: req.query.to,
+      summarize_column_by: req.query.summarize,
+      accounting_method: req.query.method
+    });
+
+    // the whole report is heavy, so what comes back first is its shape: the
+    // columns it carries and how many rows - enough to see whether it is the
+    // report the work needs
+    const cols = ((out.Columns || {}).Column || []).map(c => c.ColTitle || c.ColType || '');
+    const rows = ((out.Rows || {}).Row || []);
+    if (req.query.full === '1') return res.json(out);
+
+    res.json({
+      report: (out.Header || {}).ReportName || name,
+      time: (out.Header || {}).Time || '',
+      from: (out.Header || {}).StartPeriod || '',
+      to: (out.Header || {}).EndPeriod || '',
+      columns: cols,
+      topRows: rows.length,
+      sample: rows.slice(0, 3)
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 
