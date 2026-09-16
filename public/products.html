@@ -228,7 +228,7 @@
       hint:'Active, never sold, never bought, no stock. These are the ones safe to put away - but check them here before anything is switched off.' },
     { key:'twin',     label:'Duplicates',
       title:'One product, two items',
-      hint:'The same name on more than one item, usually one made by the connector against a SKU and one made by hand. Bills go to one and sales to the other, which is how stock goes negative on one while the other sits full.' },
+      hint:'The same product on more than one item, matched on name, description or SKU - usually one made by the connector against a SKU and one made by hand. Bills go to one and sales to the other, which is how stock goes negative on one while the other sits full. Where one of a pair has a cost and the other has none, the cost box is already filled with it: tick and put it across. Stock cannot be moved between them from here, and QuickBooks will not merge two inventory items at all.' },
     { key:'reports',  label:'Reports' }
   ];
 
@@ -258,7 +258,9 @@
 
   // the two tabs that write. Everything else only reads
   function acts(){
-    if(S.tab === 'no-cost') return 'cost';
+    // the duplicates tab writes the same field: where one of a pair carries a
+    // cost and the other does not, the cost is copied across rather than typed
+    if(S.tab === 'no-cost' || S.tab === 'twin') return 'cost';
     if(S.tab === 'unused')  return 'active';
     return '';
   }
@@ -508,7 +510,8 @@
           '</td>' +
         '<td class="twins">' + (r.twins || []).map(function(t){
             return esc(t.name) + (t.sku ? ' <span class="mono">' + esc(t.sku) + '</span>' : '') +
-                   ' · ' + nf(t.qty || 0);
+                   ' · ' + nf(t.qty || 0) + ' in stock · ' +
+                   (t.cost ? 'cost ' + money(t.cost) : '<b>no cost</b>');
           }).join('<br>') + '</td>' +
         '</tr>';
     }).join('')
@@ -547,8 +550,11 @@
       $('btnApply').textContent = withCost
         ? 'Put the cost on ' + nf(withCost) + (withCost === 1 ? ' item' : ' items')
         : 'Nothing ticked';
+      var already = picked.filter(function(r){ return r.cost; }).length;
       $('applyHint').innerHTML = n
-        ? nf(n) + ' ticked' + (n > withCost ? ', ' + nf(n - withCost) + ' of them with no cost typed in — those are left alone' : '') +
+        ? nf(n) + ' ticked' +
+          (already ? ', ' + nf(already) + ' of them already carry a cost that will be written over' : '') +
+          (n > withCost ? ', ' + nf(n - withCost) + ' with no cost typed in — those are left alone' : '') +
           '. This does not change a sale that has already happened: QuickBooks works that out from the bills. ' +
           'It is what a new bill opens at, and what the reports read.'
         : 'Tick the items to put a cost on. The suggested cost is what the item was last bought for, ' +

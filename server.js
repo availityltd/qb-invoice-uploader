@@ -564,6 +564,41 @@ app.get('/api/qb-report', async (req, res) => {
   }
 });
 
+// Whether this company can be written to in a particular way is not a thing to
+// guess at. This asks QuickBooks for one row of an entity and says what came
+// back - an inventory adjustment cannot be made through the API at all, and a
+// purchase order can, and the difference decides what the products work is able
+// to offer. Read-only, and only the entities named here.
+const QB_ENTITIES = [
+  'InventoryAdjustment', 'PurchaseOrder', 'Bill', 'Purchase', 'Item', 'Vendor'
+];
+
+app.get('/api/qb-entity', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const name = String(req.query.name || '');
+    if (!QB_ENTITIES.includes(name)) {
+      throw new Error('Unknown entity. One of: ' + QB_ENTITIES.join(', '));
+    }
+
+    const token = await getAccessToken(realmId);
+    const q = await qbQuery(realmId, token, `SELECT * FROM ${name} MAXRESULTS 1`);
+    const one = (q[name] || [])[0] || null;
+
+    res.json({
+      entity: name,
+      supported: true,
+      found: (q[name] || []).length,
+      fields: one ? Object.keys(one) : [],
+      sample: one
+    });
+  } catch (e) {
+    res.status(400).json({ entity: String(req.query.name || ''), supported: false, error: e.message });
+  }
+});
+
 // ==================== Item mappings ====================
 app.get('/api/mappings', async (req, res) => {
   const realmId = await requireCompany(req, res);
