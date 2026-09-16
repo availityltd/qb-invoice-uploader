@@ -43,6 +43,7 @@ understand what is happening underneath.
 | Delivery charges | `journal.js`, `traxsheet.js` | Courier fees and taxes as journal entries |
 | Find orders | `find.html`, `finder.js` | Searches every CPR sheet for pasted order numbers |
 | Courier dashboard | `courierlive.js`, `dashdata.js`, `postex.js` | Live courier data |
+| Product health | `products.html`, `products.js` | One read of items + ItemSales + InventoryValuationSummary + bill item lines, then tabs over it: cost missing, untouched items, duplicate items, and the reports - selling at no cost, sold never bought, bought never sold, stock below zero |
 | Fix duplicates | `fix.html` | Bulk rename / delete of duplicate invoices |
 | Void invoices | `voidjobs.js`, `voidsheet.js` | Voids returned orders |
 | Changes (Product / Category / Description) | `swap.html`, `recat.html`, `desc.html` | One rail entry, three tabs — a new kind of change is a new tab, not a new nav line |
@@ -68,6 +69,17 @@ understand what is happening underneath.
   needs a `-D` copy.
 - Nested field filters like `Line.LinkedTxn.TxnId IN (...)` do not work. Read
   the invoice's own `LinkedTxn` and query payments by `Id` instead.
+
+**QuickBooks reports**
+
+- Qty and cost of sales are not in any query. `ItemSales` (Sales by Product/
+  Service) carries both; its column titles come back empty, so the cell order is
+  name, qty, amount, % of sales, avg price, COGS, gross profit, margin.
+- `PurchasesByVendorDetail` answers an app with `Permission Denied (5020)`. Read
+  `Bill` and `Purchase` item lines instead - that is what `readPurchases` does.
+- An item's `PurchaseCost` is not its cost of sales. QBO is FIFO: cost comes from
+  bills and from opening quantity, and filling `PurchaseCost` in later changes
+  nothing that already sold.
 
 **Google Sheets**
 
