@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Products</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px;flex-wrap:wrap}
+  .tabs button{padding:12px 20px;font:inherit;font-size:13.5px;color:var(--muted);
+    background:none;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+
+  .dates{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .dates label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);display:block;margin-bottom:4px}
+  .dates input[type=date]{font-family:var(--mono);font-size:13px;padding:8px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+  .cards{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 6px}
+  .cards button{flex:1;min-width:170px;border:1px solid var(--line);border-radius:8px;
+    padding:13px 15px;background:#fff;text-align:left;font:inherit;cursor:pointer}
+  .cards button:hover{border-color:var(--qbo)}
+  .cards .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .cards .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .cards .s{font-size:11.5px;color:var(--muted);margin-top:6px;white-space:normal}
+  .cards .warn .n{color:var(--warn)}
+  .cards .bad .n{color:var(--neg)}
+  .cards .ok .n{color:var(--ok)}
+
+  .rowfind{width:100%;max-width:280px;font-size:13px;padding:7px 10px;
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  td.pname{white-space:normal;max-width:320px;font-weight:600}
+  td.pname small{display:block;font-family:var(--mono);font-size:11px;
+    color:var(--muted);font-weight:400;margin-top:2px}
+  td.twins{white-space:normal;font-size:11.5px;color:var(--muted);max-width:280px}
+  .tagline{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+  .tag{font-size:10px;letter-spacing:.04em;text-transform:uppercase;
+    padding:2px 6px;border-radius:4px;background:#F1F3F2;color:var(--muted)}
+  .tag.bad{background:#FDECEC;color:var(--neg)}
+  .tag.warn{background:#FFF6E6;color:#8A5A00}
+  .tag.ok{background:#EFF8EC;color:var(--ok)}
+  .subways{display:flex;gap:2px;margin:0 0 14px;border:1px solid var(--line-2);
+    border-radius:8px;padding:3px;background:#F7F8F7;width:max-content;max-width:100%;flex-wrap:wrap}
+  .subways button{border:0;background:none;font:inherit;font-size:12.5px;padding:7px 15px;
+    border-radius:6px;cursor:pointer;color:var(--muted)}
+  .subways button:hover{color:var(--ink)}
+  .subways button.on{background:#fff;color:var(--ink);font-weight:600;
+    box-shadow:0 1px 2px rgba(0,0,0,.07)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Products</h1>
+        <div class="sub">What the books say about the products themselves &mdash; the cost that was never put on them, the stock gone below zero, one product living as two items, and what is selling at no cost at all.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>The items, what they sold and what the stock is worth are all read from QuickBooks.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="sheet">
+          <div class="sec">
+            <h2><span class="no">01</span> The dates to look between
+              <span class="aside" id="whenAside"></span></h2>
+            <p class="hint" style="margin:0 0 10px">Sales and purchases are counted inside
+              these dates. The items and what the stock is worth are read as they stand
+              today, whatever the dates say.</p>
+            <div class="dates">
+              <div><label for="dFrom">From</label><input type="date" id="dFrom"></div>
+              <div><label for="dTo">To</label><input type="date" id="dTo"></div>
+            </div>
+            <div class="quick">
+              <button class="mini" data-span="ytd">This year to date</button>
+              <button class="mini" data-span="last90">Last 90 days</button>
+              <button class="mini" data-span="thismonth">This month</button>
+              <button class="mini" data-span="all">Since April 2025</button>
+            </div>
+            <div class="acts" style="margin-top:14px">
+              <button class="solid" id="btnScan">Read the books</button>
+              <button class="ghost" id="btnReset">Start again</button>
+            </div>
+            <div class="stat" id="statBox"></div>
+          </div>
+        </div>
+
+        <div id="work" class="hide">
+          <div class="tabs" id="tabs"></div>
+
+          <!-- ============ overview ============ -->
+          <div class="sheet tabpage" id="tabOverview">
+            <div class="sec">
+              <h2><span class="no">02</span> What is wrong
+                <span class="aside" id="ovAside"></span></h2>
+              <div class="cards" id="ovCards"></div>
+              <p class="hint">Every one of these opens the list behind it.</p>
+            </div>
+          </div>
+
+          <!-- ============ one list, whatever is being looked at ============ -->
+          <div class="sheet tabpage hide" id="tabList">
+            <div class="sec">
+              <h2><span class="no">02</span> <span id="listTitle">The items</span>
+                <span class="aside" id="listAside"></span></h2>
+              <p class="hint" id="listHint" style="margin:0 0 12px"></p>
+              <div class="subways hide" id="subways"></div>
+              <div class="acts">
+                <input type="text" class="rowfind" id="rowFind" placeholder="Search by name or SKU">
+                <button class="mini" id="btnCsv">Download this list</button>
+              </div>
+              <div class="tbl" style="max-height:560px;margin-top:12px">
+                <table>
+                  <thead><tr>
+                    <th>Product</th>
+                    <th>Type</th>
+                    <th class="num">Stock</th>
+                    <th class="num">Cost on item</th>
+                    <th class="num">Average cost</th>
+                    <th class="num">Sold</th>
+                    <th class="num">Sales</th>
+                    <th class="num">Cost of sales</th>
+                    <th class="num">Bought</th>
+                    <th>Last bought</th>
+                    <th>Same product</th>
+                  </tr></thead>
+                  <tbody id="rows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  // Every tab but the first is the same table read a different way, so a tab is
+  // little more than a flag and the words that explain it.
+  var TABS = [
+    { key:'overview', label:'Overview' },
+    { key:'no-cost',  label:'Cost',
+      title:'Items with no cost anywhere',
+      hint:'These were set up without a cost, were never bought on a bill, and QuickBooks has worked out no average for them. Anything they sell carries no cost at all.' },
+    { key:'unused',   label:'Active',
+      title:'Items nothing has ever happened to',
+      hint:'Active, never sold, never bought, no stock. These are the ones safe to put away - but check them here before anything is switched off.' },
+    { key:'twin',     label:'Duplicates',
+      title:'One product, two items',
+      hint:'The same name on more than one item, usually one made by the connector against a SKU and one made by hand. Bills go to one and sales to the other, which is how stock goes negative on one while the other sits full.' },
+    { key:'reports',  label:'Reports' }
+  ];
+
+  var REPORTS = [
+    { key:'zero-cogs', label:'Selling at no cost',
+      title:'Sold, with nothing charged against it',
+      hint:'These sold inside the dates and QuickBooks put no cost of sales against them. This is what leaves the gross profit too high.' },
+    { key:'sold-not-bought', label:'Sold, never bought',
+      title:'Sold although it was never bought',
+      hint:'No bill and no card purchase has ever carried this item, so there is no cost layer for a sale to draw on.' },
+    { key:'bought-not-sold', label:'Bought, never sold',
+      title:'Bought but not sold in the dates',
+      hint:'Money went out on these and nothing came back inside the dates. Stock sitting still, or a product that has stopped moving.' },
+    { key:'negative', label:'Stock below zero',
+      title:'Stock gone below zero',
+      hint:'More was sold than was ever brought in. QuickBooks charges nothing for a sale out of nothing, so these carry wrong cost until the purchases behind them are put in.' },
+    { key:'not-inventory', label:'Not an inventory item',
+      title:'Sold, but not held as stock',
+      hint:'These sell as a service or a non-inventory item, so no cost of sales is worked out for them at all, whatever cost is written on them.' }
+  ];
+
+  var S = { tab:'overview', report:'zero-cogs', rows:[], total:0,
+            summary:null, filter:'', poller:null, from:'', to:'' };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function say(cls, html){
+    var b = $('statBox');
+    b.className = 'stat' + (cls ? ' ' + cls : '');
+    b.innerHTML = html;
+  }
+  function get(url){
+    return fetch(url, { credentials:'same-origin' }).then(function(r){
+      return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+  function post(url, body){
+    return fetch(url, { method:'POST', credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body || {}) }).then(function(r){
+      return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      });
+    });
+  }
+  function iso(d){ return d.toISOString().slice(0, 10); }
+
+  function setSpan(which){
+    var now = new Date(), from = new Date(), to = now;
+    if(which === 'ytd') from = new Date(now.getFullYear(), 0, 1);
+    else if(which === 'last90') from = new Date(now.getTime() - 89 * 86400000);
+    else if(which === 'thismonth') from = new Date(now.getFullYear(), now.getMonth(), 1);
+    else if(which === 'all') from = new Date(2025, 3, 1);
+    $('dFrom').value = iso(from);
+    $('dTo').value = iso(to);
+  }
+
+  /* ---------- the tabs ---------- */
+
+  function tabOf(key){
+    for(var i = 0; i < TABS.length; i++) if(TABS[i].key === key) return TABS[i];
+    return TABS[0];
+  }
+  function reportOf(key){
+    for(var i = 0; i < REPORTS.length; i++) if(REPORTS[i].key === key) return REPORTS[i];
+    return REPORTS[0];
+  }
+
+  function drawTabs(){
+    $('tabs').innerHTML = TABS.map(function(t){
+      return '<button type="button" data-tab="' + esc(t.key) + '"' +
+             (t.key === S.tab ? ' class="on"' : '') + '>' + esc(t.label) + '</button>';
+    }).join('');
+
+    Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){ goTab(b.getAttribute('data-tab')); });
+    });
+
+    $('subways').innerHTML = REPORTS.map(function(r){
+      return '<button type="button" data-rep="' + esc(r.key) + '"' +
+             (r.key === S.report ? ' class="on"' : '') + '>' + esc(r.label) + '</button>';
+    }).join('');
+
+    Array.prototype.forEach.call($('subways').querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){
+        S.report = b.getAttribute('data-rep');
+        drawTabs();
+        loadRows();
+      });
+    });
+  }
+
+  function goTab(key){
+    S.tab = key;
+    S.filter = '';
+    $('rowFind').value = '';
+    drawTabs();
+
+    var overview = key === 'overview';
+    $('tabOverview').classList.toggle('hide', !overview);
+    $('tabList').classList.toggle('hide', overview);
+    $('subways').classList.toggle('hide', key !== 'reports');
+
+    if(overview){ drawOverview(); return; }
+    loadRows();
+  }
+
+  // which flag the table is filtered on, whichever tab is open
+  function flagNow(){
+    return S.tab === 'reports' ? S.report : S.tab;
+  }
+  function wordsNow(){
+    return S.tab === 'reports' ? reportOf(S.report) : tabOf(S.tab);
+  }
+
+  /* ---------- the headline ---------- */
+
+  function card(cls, n, label, sub, flag){
+    return '<button type="button" class="' + cls + '" data-go="' + esc(flag || '') + '">' +
+      '<div class="n">' + n + '</div>' +
+      '<div class="l">' + esc(label) + '</div>' +
+      (sub ? '<div class="s">' + sub + '</div>' : '') +
+      '</button>';
+  }
+
+  function drawOverview(){
+    var s = S.summary;
+    if(!s) return;
+
+    $('ovAside').textContent = nf(s.items) + ' items, ' + nf(s.active) + ' of them in use';
+
+    $('ovCards').innerHTML =
+      card('bad', nf(s.zeroCogs), 'Selling at no cost',
+        'Sold ' + money(s.zeroCogsSales) +
+        ' with nothing charged against it. At the best cost known that is about <b>' +
+        money(s.zeroCogsCost) + '</b> of cost missing.', 'zero-cogs') +
+      card('warn', nf(s.noCost), 'No cost anywhere',
+        'Never given a cost, never bought, no average worked out.', 'no-cost') +
+      card('bad', nf(s.negative), 'Stock below zero',
+        nf(s.negativeQty) + ' units short in all.', 'negative') +
+      card('warn', nf(s.twins), 'One product, two items',
+        'The same name on more than one item.', 'twin') +
+      card('warn', nf(s.soldNotBought), 'Sold, never bought',
+        'Nothing was ever bought for these to sell out of.', 'sold-not-bought') +
+      card('', nf(s.boughtNotSold), 'Bought, never sold',
+        'Money went out, nothing came back in these dates.', 'bought-not-sold') +
+      card('', nf(s.notInventory), 'Not held as stock',
+        'Sold as a service or non-inventory item, so no cost is worked out.', 'not-inventory') +
+      card('ok', nf(s.unused), 'Nothing ever happened',
+        'Active, never sold, never bought, no stock.', 'unused');
+
+    Array.prototype.forEach.call($('ovCards').querySelectorAll('button'), function(b){
+      b.addEventListener('click', function(){
+        var f = b.getAttribute('data-go');
+        if(!f) return;
+        // a card opens its own tab where it has one, and the reports tab otherwise
+        var own = ['no-cost','unused','twin'];
+        if(own.indexOf(f) > -1){ goTab(f); return; }
+        S.report = f;
+        goTab('reports');
+      });
+    });
+  }
+
+  /* ---------- the list ---------- */
+
+  function loadRows(){
+    var flag = flagNow(), w = wordsNow();
+    $('listTitle').textContent = w.title || w.label;
+    $('listHint').textContent = w.hint || '';
+    $('rows').innerHTML = '<tr><td colspan="11" style="color:var(--faint);padding:14px">Reading…</td></tr>';
+
+    return get('/api/products/rows?flag=' + encodeURIComponent(flag) +
+               '&q=' + encodeURIComponent(S.filter) + '&limit=1000')
+      .then(function(d){
+        S.rows = d.rows || [];
+        S.total = d.total || 0;
+        drawRows();
+      })
+      .catch(function(e){
+        $('rows').innerHTML = '<tr><td colspan="11" style="color:var(--neg);padding:14px">' +
+          esc(e.message) + '</td></tr>';
+      });
+  }
+
+  var TAGS = {
+    'zero-cogs':      { cls:'bad',  text:'no cost charged' },
+    'no-cost':        { cls:'warn', text:'no cost' },
+    'negative':       { cls:'bad',  text:'below zero' },
+    'sold-not-bought':{ cls:'warn', text:'never bought' },
+    'bought-not-sold':{ cls:'',     text:'not sold' },
+    'not-inventory':  { cls:'warn', text:'not stock' },
+    'twin':           { cls:'warn', text:'twin' },
+    'unused':         { cls:'',     text:'untouched' }
+  };
+
+  function tags(r){
+    var out = (r.flags || []).map(function(f){
+      var t = TAGS[f];
+      return t ? '<span class="tag ' + t.cls + '">' + t.text + '</span>' : '';
+    }).join('');
+    if(!r.active) out += '<span class="tag">off</span>';
+    return out ? '<div class="tagline">' + out + '</div>' : '';
+  }
+
+  function drawRows(){
+    $('listAside').textContent = nf(S.total) + (S.total === 1 ? ' item' : ' items') +
+      (S.rows.length < S.total ? ' — ' + nf(S.rows.length) + ' shown' : '');
+
+    $('rows').innerHTML = S.rows.length ? S.rows.map(function(r){
+      return '<tr>' +
+        '<td class="pname">' + esc(r.name) +
+          (r.sku ? '<small>' + esc(r.sku) + '</small>' : '') + tags(r) + '</td>' +
+        '<td>' + esc(r.type) + '</td>' +
+        '<td class="num mono"' + (r.qty < 0 ? ' style="color:var(--neg)"' : '') + '>' +
+          nf(r.qty) + '</td>' +
+        '<td class="num mono">' + (r.cost ? money(r.cost) : '—') + '</td>' +
+        '<td class="num mono">' + (r.avg ? money(r.avg) : '—') + '</td>' +
+        '<td class="num mono">' + nf(r.soldQty) + '</td>' +
+        '<td class="num mono">' + money(r.soldAmount) + '</td>' +
+        '<td class="num mono"' + (r.soldQty && !r.cogs ? ' style="color:var(--neg)"' : '') + '>' +
+          money(r.cogs) + '</td>' +
+        '<td class="num mono">' + nf(r.boughtQty) + '</td>' +
+        '<td class="mono">' + esc(r.lastBought || '—') +
+          (r.lastRate ? '<small style="color:var(--muted)"> @ ' + money(r.lastRate) + '</small>' : '') +
+          '</td>' +
+        '<td class="twins">' + (r.twins || []).map(function(t){
+            return esc(t.name) + (t.sku ? ' <span class="mono">' + esc(t.sku) + '</span>' : '') +
+                   ' · ' + nf(t.qty || 0);
+          }).join('<br>') + '</td>' +
+        '</tr>';
+    }).join('')
+      : '<tr><td colspan="11" style="color:var(--faint);padding:14px">Nothing here. ' +
+        'That is the good answer.</td></tr>';
+  }
+
+  function csv(){
+    var head = ['Product','SKU','Type','Active','Stock','Cost on item','Average cost',
+                'Sold qty','Sales','Cost of sales','Bought qty','Bought value','Bills',
+                'Last bought','Last rate','Suggested cost','Same product','What is wrong'];
+    var rows = [head].concat(S.rows.map(function(r){
+      return [r.name, r.sku, r.type, r.active ? 'yes' : 'no', r.qty, r.cost, r.avg,
+              r.soldQty, r.soldAmount, r.cogs, r.boughtQty, r.boughtAmount, r.bills,
+              r.lastBought, r.lastRate, r.suggest,
+              (r.twins || []).map(function(t){ return t.name; }).join(' | '),
+              (r.flags || []).join(' ')];
+    }));
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'products-' + flagNow() + '.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  /* ---------- reading the books ---------- */
+
+  function scan(){
+    if(!$('dFrom').value || !$('dTo').value) return say('bad', '<b>Give both dates</b>');
+    $('btnScan').disabled = true;
+    say('busy', 'Reading the books…');
+
+    post('/api/products/scan', { from: $('dFrom').value, to: $('dTo').value })
+      .then(function(){ poll(); })
+      .catch(function(e){
+        say('bad', '<b>' + esc(e.message) + '</b>');
+        $('btnScan').disabled = false;
+      });
+  }
+
+  function drawScan(d){
+    var s = d.scan;
+    if(s.running){
+      say('busy', 'Reading <b>' + esc(s.step) + '</b> &mdash; ' +
+        nf(s.items) + ' items, ' + nf(s.read) + ' bills read');
+      return;
+    }
+    $('btnScan').disabled = false;
+    if(s.error){ say('bad', '<b>' + esc(s.error) + '</b>'); return; }
+
+    S.summary = d.summary;
+    S.from = d.from; S.to = d.to;
+    if(!S.summary) return;
+
+    $('whenAside').textContent = d.from + ' to ' + d.to;
+    say('ok', '<b>' + nf(S.summary.items) + ' items read</b> &mdash; ' +
+      nf(S.summary.zeroCogs) + ' selling at no cost, ' +
+      nf(S.summary.negative) + ' below zero, ' +
+      nf(S.summary.twins) + ' with a twin');
+    $('work').classList.remove('hide');
+    drawTabs();
+    if(S.tab === 'overview') drawOverview(); else loadRows();
+  }
+
+  function poll(){
+    clearInterval(S.poller);
+    var tick = function(){
+      get('/api/products/status').then(function(d){
+        if(!d.has) return;
+        drawScan(d);
+        if(!d.scan.running){ clearInterval(S.poller); S.poller = null; }
+      }).catch(function(){ /* keep trying */ });
+    };
+    tick();
+    S.poller = setInterval(tick, 2000);
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+  $('btnScan').addEventListener('click', scan);
+  $('btnCsv').addEventListener('click', csv);
+  $('rowFind').addEventListener('input', function(){
+    S.filter = $('rowFind').value.trim().toLowerCase();
+    clearTimeout(S.findTimer);
+    S.findTimer = setTimeout(loadRows, 250);
+  });
+  $('btnReset').addEventListener('click', function(){
+    post('/api/products/clear').then(function(){
+      clearInterval(S.poller); S.poller = null;
+      S.summary = null; S.rows = []; S.tab = 'overview';
+      $('work').classList.add('hide');
+      say('', '');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.quick button'), function(b){
+    b.addEventListener('click', function(){ setSpan(b.getAttribute('data-span')); });
+  });
+
+  setSpan('ytd');
+  drawTabs();
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    // a read left going in another tab, or before a reload, is picked back up
+    get('/api/products/status').then(function(d){
+      if(!d || !d.has) return;
+      $('dFrom').value = d.from; $('dTo').value = d.to;
+      drawScan(d);
+      if(d.scan.running) poll();
+    }).catch(function(){ /* nothing to pick up */ });
+  });
+})();
+</script>
+</body>
+</html>

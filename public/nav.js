@@ -16,6 +16,10 @@
             { href:'/find.html',     label:'Find orders',      icon:'search' },
       { href:'/couriers.html', label:'Couriers',         icon:'truck', tree:true }
     ]},
+    { group: 'Products', items: [
+      // cost, stock, duplicates and the reports behind them are tabs of one page
+      { href:'/products.html', label:'Product health',   icon:'tag' }
+    ]},
     { group: 'Maintenance', items: [
       { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
       // Product, Category and Description are tabs of one page, not three
