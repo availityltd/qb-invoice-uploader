@@ -333,6 +333,14 @@ export function buildRows(items, sales, valuation, purchases) {
     // only ever a suggestion - the page lets it be overruled.
     if (r.twins.length) {
       const all = [r].concat(r.twins);
+
+      // A pair where neither one has a cost, a bill or a sale between them has
+      // nothing to merge on: whichever is kept, the answer is still no cost.
+      // Those are to be filled in first, so they are kept apart from the pairs
+      // where one of the two is carrying something worth moving across.
+      const carries = t => !!(t.cost || t.bills || t.soldQty || t.qty);
+      r.flags.push(all.some(carries) ? 'twin-ready' : 'twin-bare');
+
       const best = all.slice().sort((a, b) =>
         (b.soldAmount || 0) - (a.soldAmount || 0) ||
         (b.bills || 0) - (a.bills || 0) ||
@@ -369,6 +377,8 @@ export function summarise(rows) {
     boughtNotSold: has('bought-not-sold').length,
     notInventory: has('not-inventory').length,
     twins: has('twin').length,
+    twinsReady: has('twin-ready').length,
+    twinsBare: has('twin-bare').length,
     unused: has('unused').length
   };
 }

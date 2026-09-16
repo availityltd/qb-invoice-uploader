@@ -262,6 +262,19 @@
     { key:'reports',  label:'Reports' }
   ];
 
+  // The duplicates split in two. A pair with nothing on either side has nothing
+  // to merge on - whichever is kept, the answer is still no cost - so those are
+  // to be filled in first and are kept apart from the pairs where one of the two
+  // is already carrying the trade.
+  var TWINS = [
+    { key:'twin-ready', label:'One of them has something',
+      title:'Duplicates where one side carries the trade',
+      hint:'One of the pair has the sales, or the bills, or the cost, and the other is the empty copy. These are the ones to merge: pick the item to keep - the list says what each has sold, what it has in stock and whether it has a cost - and the other hands its stock over, gives up its cost if the kept one has none, and is switched off.' },
+    { key:'twin-bare',  label:'Neither has anything yet',
+      title:'Duplicates with nothing on either side',
+      hint:'Neither of these has a cost, a bill or a sale between them, so merging settles nothing - the answer would still be no cost. Put the cost on them first, or enter the purchase behind them on the Purchases page, and they move into the other half on the next read.' }
+  ];
+
   var REPORTS = [
     { key:'zero-cogs', label:'Selling at no cost',
       title:'Sold, with nothing charged against it',
@@ -282,7 +295,7 @@
 
   // picked: which rows are ticked, by item id. costs: what is typed in the cost
   // box, which starts at what the read suggests and is the operator's after that
-  var S = { tab:'overview', report:'zero-cogs', rows:[], total:0,
+  var S = { tab:'overview', report:'zero-cogs', twinSub:'twin-ready', rows:[], total:0,
             summary:null, filter:'', poller:null, from:'', to:'',
             picked:{}, costs:{}, stock:{}, keep:{}, adjust:[], record:[], logged:0 };
 
@@ -291,7 +304,9 @@
     // the duplicates tab writes the same field: where one of a pair carries a
     // cost and the other does not, the cost is copied across rather than typed
     if(S.tab === 'no-cost') return 'cost';
-    if(S.tab === 'twin')    return 'merge';
+    // only the half where one side carries something is worth merging; the other
+    // half needs its cost and its bills first, so it is left to be read
+    if(S.tab === 'twin')    return S.twinSub === 'twin-ready' ? 'merge' : '';
     if(S.tab === 'unused')   return 'active';
     if(S.tab === 'negative') return 'stock';
     return '';
@@ -368,14 +383,23 @@
       b.addEventListener('click', function(){ goTab(b.getAttribute('data-tab')); });
     });
 
-    $('subways').innerHTML = REPORTS.map(function(r){
+    // the strip under the tabs belongs to whichever tab has halves of its own
+    var subs = subsOf(S.tab) || [];
+    var on = S.tab === 'reports' ? S.report : S.twinSub;
+
+    $('subways').innerHTML = subs.map(function(r){
+      var count = S.summary ? (r.key === 'twin-ready' ? S.summary.twinsReady
+                             : r.key === 'twin-bare'  ? S.summary.twinsBare : null) : null;
       return '<button type="button" data-rep="' + esc(r.key) + '"' +
-             (r.key === S.report ? ' class="on"' : '') + '>' + esc(r.label) + '</button>';
+             (r.key === on ? ' class="on"' : '') + '>' + esc(r.label) +
+             (count === null || count === undefined ? '' : ' · ' + nf(count)) + '</button>';
     }).join('');
 
     Array.prototype.forEach.call($('subways').querySelectorAll('button'), function(b){
       b.addEventListener('click', function(){
-        S.report = b.getAttribute('data-rep');
+        var k = b.getAttribute('data-rep');
+        if(S.tab === 'reports') S.report = k; else S.twinSub = k;
+        S.picked = {};
         drawTabs();
         loadRows();
       });
@@ -392,7 +416,7 @@
     var overview = key === 'overview';
     $('tabOverview').classList.toggle('hide', !overview);
     $('tabList').classList.toggle('hide', overview);
-    $('subways').classList.toggle('hide', key !== 'reports');
+    $('subways').classList.toggle('hide', !subsOf(key));
 
     if(overview){ drawOverview(); return; }
     loadRows();
@@ -400,10 +424,19 @@
 
   // which flag the table is filtered on, whichever tab is open
   function flagNow(){
-    return S.tab === 'reports' ? S.report : S.tab;
+    if(S.tab === 'reports') return S.report;
+    if(S.tab === 'twin')    return S.twinSub;
+    return S.tab;
+  }
+  function subsOf(tab){
+    return tab === 'reports' ? REPORTS : tab === 'twin' ? TWINS : null;
   }
   function wordsNow(){
-    return S.tab === 'reports' ? reportOf(S.report) : tabOf(S.tab);
+    var list = subsOf(S.tab);
+    if(!list) return tabOf(S.tab);
+    var want = S.tab === 'reports' ? S.report : S.twinSub;
+    for(var i = 0; i < list.length; i++) if(list[i].key === want) return list[i];
+    return list[0];
   }
 
   /* ---------- the headline ---------- */
@@ -437,7 +470,8 @@
       card('bad', nf(s.negative), 'Stock below zero',
         nf(s.negativeQty) + ' units short in all.', 'negative') +
       card('warn', nf(s.twins), 'One product, two items',
-        'The same name on more than one item.', 'twin') +
+        nf(s.twinsReady) + ' where one side carries the sales, the bills or the cost — ' +
+        'those are the ones to merge. ' + nf(s.twinsBare) + ' have nothing on either side yet.', 'twin') +
       card('warn', nf(s.soldNotBought), 'Sold, never bought',
         'Nothing was ever bought for these to sell out of.', 'sold-not-bought') +
       card('', nf(s.boughtNotSold), 'Bought, never sold',
@@ -524,7 +558,7 @@
     $('stockBox').classList.toggle('hide', act !== 'stock' && act !== 'merge');
     // the reports strip belongs to the reports tab and nowhere else, whichever
     // way this list was arrived at
-    $('subways').classList.toggle('hide', S.tab !== 'reports');
+    $('subways').classList.toggle('hide', !subsOf(S.tab));
 
     $('rows').innerHTML = S.rows.length ? S.rows.map(function(r){
       var on = !!S.picked[r.id];
