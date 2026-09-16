@@ -271,7 +271,7 @@ export function buildRows(items, sales, valuation, purchases) {
     return out;
   };
 
-  return items.map(it => {
+  const rows = items.map(it => {
     const s = sales.get(it.id)     || { qty: 0, amount: 0, cogs: 0 };
     const v = valuation.get(it.id) || null;
     const p = purchases.get(it.id) || { qty: 0, amount: 0, bills: 0, lastDate: '', lastRate: 0 };
@@ -304,10 +304,45 @@ export function buildRows(items, sales, valuation, purchases) {
       // what its twin was last bought for, what the item itself already says
       suggest: round2(p.lastRate || (v && v.avg) ||
                (twins.map(t => t.cost).filter(Boolean)[0]) || it.cost || 0),
-      twins: twins.map(t => ({ id: t.id, name: t.name, sku: t.sku, qty: t.qty, cost: t.cost })),
+      twinIds: twins.map(t => t.id),
+      twins: [],
       flags
     };
   });
+
+  // Which of a pair to keep is decided by what is hanging off it - the invoices
+  // written against it above all - so each twin is listed with its own trade
+  // rather than only its name. That cannot be done in the pass above, because a
+  // twin's row does not exist yet while it is being written.
+  const byId = new Map(rows.map(r => [r.id, r]));
+
+  rows.forEach(r => {
+    r.twins = r.twinIds.map(id => {
+      const t = byId.get(id);
+      if (!t) return null;
+      return {
+        id: t.id, name: t.name, sku: t.sku, active: t.active,
+        qty: t.qty, cost: t.cost, avg: t.avg,
+        soldQty: t.soldQty, soldAmount: t.soldAmount, cogs: t.cogs,
+        bills: t.bills, boughtQty: t.boughtQty
+      };
+    }).filter(Boolean);
+
+    // the one worth keeping, on the evidence: what has been sold against it
+    // first, then what has been bought, then which one carries a cost. It is
+    // only ever a suggestion - the page lets it be overruled.
+    if (r.twins.length) {
+      const all = [r].concat(r.twins);
+      const best = all.slice().sort((a, b) =>
+        (b.soldAmount || 0) - (a.soldAmount || 0) ||
+        (b.bills || 0) - (a.bills || 0) ||
+        (b.cost ? 1 : 0) - (a.cost ? 1 : 0) ||
+        (b.qty || 0) - (a.qty || 0))[0];
+      r.keepSuggest = best.id === r.id ? '' : best.id;
+    }
+  });
+
+  return rows;
 }
 
 // The headline: how many items are in each kind of trouble, and what the trouble

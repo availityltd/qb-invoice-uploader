@@ -42,7 +42,10 @@
   td.pname{white-space:normal;max-width:320px;font-weight:600}
   td.pname small{display:block;font-family:var(--mono);font-size:11px;
     color:var(--muted);font-weight:400;margin-top:2px}
-  td.twins{white-space:normal;font-size:11.5px;color:var(--muted);max-width:280px}
+  td.twins{white-space:normal;font-size:11.5px;color:var(--muted);max-width:320px}
+  td.twins .twin{padding:4px 0;border-bottom:1px solid var(--line)}
+  td.twins .twin:last-child{border-bottom:0}
+  td.twins .twin > div{color:var(--faint)}
   .tagline{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
   .tag{font-size:10px;letter-spacing:.04em;text-transform:uppercase;
     padding:2px 6px;border-radius:4px;background:#F1F3F2;color:var(--muted)}
@@ -539,7 +542,12 @@
             (r.twins || []).map(function(t){
               return '<option value="' + esc(t.id) + '"' +
                      (S.keep[r.id] === t.id ? ' selected' : '') + '>' +
-                     esc(t.name) + (t.cost ? ' · cost ' + money(t.cost) : ' · no cost') + '</option>';
+                     esc(t.name) +
+                     ' · ' + nf(t.soldQty || 0) + ' sold' +
+                     ' · ' + nf(t.qty || 0) + ' in stock' +
+                     (t.cost ? ' · cost ' + money(t.cost) : ' · no cost') +
+                     (t.id === r.keepSuggest ? '  ← the one carrying the trade' : '') +
+                     '</option>';
             }).join('') + '</select></td>'
           : '') +
         '<td class="pname">' + esc(r.name) +
@@ -558,10 +566,17 @@
           (r.lastRate ? '<small style="color:var(--muted)"> @ ' + money(r.lastRate) + '</small>' : '') +
           '</td>' +
         '<td class="twins">' + (r.twins || []).map(function(t){
-            return esc(t.name) + (t.sku ? ' <span class="mono">' + esc(t.sku) + '</span>' : '') +
-                   ' · ' + nf(t.qty || 0) + ' in stock · ' +
-                   (t.cost ? 'cost ' + money(t.cost) : '<b>no cost</b>');
-          }).join('<br>') + '</td>' +
+            return '<div class="twin">' + esc(t.name) +
+              (t.sku ? ' <span class="mono">' + esc(t.sku) + '</span>' : '') +
+              (t.active ? '' : ' <span class="tag">off</span>') +
+              '<div>' + nf(t.qty || 0) + ' in stock · ' +
+              (t.cost ? 'cost ' + money(t.cost) : '<b>no cost</b>') + '</div>' +
+              '<div>' + (t.soldQty
+                ? '<b>' + nf(t.soldQty) + ' sold</b> · ' + money(t.soldAmount) +
+                  (t.cogs ? '' : ' · <b style="color:var(--neg)">no cost charged</b>')
+                : 'nothing sold') +
+              ' · ' + (t.bills ? nf(t.bills) + ' bought' : 'never bought') + '</div></div>';
+          }).join('') + '</td>' +
         '</tr>';
     }).join('')
       : '<tr><td colspan="13" style="color:var(--faint);padding:14px">Nothing here. ' +
