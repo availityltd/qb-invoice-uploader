@@ -557,24 +557,49 @@
   }
 
   var LABEL = {};
+
+  function wireCarryOn(){
+    var b = document.getElementById('btnCarryOn');
+    if(!b) return;
+    b.addEventListener('click', function(){
+      b.disabled = true;
+      say('scanStat', 'busy', 'Carrying on…');
+      post('/api/replace/scan', { carryOn: true })
+        .then(function(){ poll(); })
+        .catch(function(e){ say('scanStat', 'bad', '<b>' + esc(e.message) + '</b>'); });
+    });
+  }
   function drawScan(s){
     // the stop follows the read on the server, not the click that began it - a
     // read started on another computer, or before a reload, can always be stopped
     $('btnScanStop').classList.toggle('hide', !s.running);
     $('btnScan').disabled = !!s.running;
     if(s.running){
-      say('scanStat', 'busy', 'Reading <b>' + esc(LABEL[s.kind] || s.kind || '…') + '</b> up to <b>' +
+      say('scanStat', 'busy', (s.carriedOn ? 'Carrying on &mdash; ' : '') +
+        'Reading <b>' + esc(LABEL[s.kind] || s.kind || '…') + '</b> up to <b>' +
         esc(s.upto) + '</b> &mdash; ' + nf(s.read) + ' read, <b>' + nf(s.found) + '</b> carrying one of the products');
       return;
     }
     $('btnScan').disabled = false;
     $('btnScanStop').classList.add('hide');
     $('btnScanStop').disabled = false;
+    var carry = s.canCarryOn
+      ? '<br><button class="solid" id="btnCarryOn" style="margin-top:8px">Carry on from ' + esc(s.upto) + '</button> ' +
+        '<span style="font-size:12px;color:var(--muted)">' + nf(s.read) + ' already read, ' + nf(s.found) +
+        ' found so far &mdash; kept</span>'
+      : '';
     if(s.stopped){
-      say('scanStat', 'bad', '<b>Stopped.</b> Change the dates or what is ticked, and press Find them again.');
+      say('scanStat', 'bad', '<b>Stopped.</b> Change the dates or what is ticked and press Find them to start again' +
+        (s.canCarryOn ? ', or carry on the same read.' : '.') + carry);
+      wireCarryOn();
       return;
     }
-    if(s.error){ say('scanStat', 'bad', '<b>' + esc(s.error) + '</b>'); return; }
+    if(s.error){
+      say('scanStat', 'bad', '<b>The read stopped on an error QuickBooks would not let go of:</b><br>' + esc(s.error) +
+        (s.canCarryOn ? '<br>Everything found before it is kept.' : '') + carry);
+      wireCarryOn();
+      return;
+    }
     if(!s.read){
       say('scanStat', 'bad', '<b>QuickBooks gave back nothing at all</b> between ' + esc(s.from) +
         ' and ' + esc(s.to) + ' for the kinds ticked.');

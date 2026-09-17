@@ -29,7 +29,7 @@ import {
 import {
   KINDS as REPLACE_KINDS, parsePairs as parseReplacePairs, resolvePairs as resolveReplacePairs,
   scanReplace, replaceOne as replaceItemOn, itemById as replaceItemById,
-  shopifyVariants, pairsFromShopify
+  shopifyVariants, pairsFromShopify, tokenKeeper, newScanState
 } from './replaceitem.js';
 import {
   initReplaceStore, saveReplace, clearReplace, unfinishedReplace
@@ -7369,24 +7369,33 @@ app.post('/api/replace/scan', async (req, res) => {
     if (!st || !st.pairs.length) throw new Error('Check the pairs first');
     if ((st.scan && st.scan.running) || (st.job && st.job.running)) throw new Error('A read or a run is still going');
 
-    const { from, to, kinds } = req.body || {};
+    const body = req.body || {};
+    // carrying on picks up the read that stopped - its dates, its kinds, what it
+    // had found and how far each kind had got - rather than starting over
+    const carryOn = !!body.carryOn && st.scan && st.scanState && !st.scan.running;
+    const from = carryOn ? st.scan.from : body.from;
+    const to = carryOn ? st.scan.to : body.to;
+    const kinds = carryOn ? st.scan.kinds : body.kinds;
     if (!from || !to) throw new Error('Give the dates to look between');
     if (from > to) throw new Error('The first date is after the last one');
     if (!Array.isArray(kinds) || !kinds.length) throw new Error('Tick at least one kind of transaction');
 
+    const state = carryOn ? st.scanState : newScanState(st.pairs);
     const scan = {
-      running: true, stop: false, from, to, kinds,
-      kind: '', upto: from, found: 0, read: 0, error: null, started: Date.now()
+      running: true, stop: false, from, to, kinds, carriedOn: carryOn,
+      kind: carryOn ? st.scan.kind : '', upto: carryOn ? st.scan.upto : from,
+      found: state.rows.length, read: state.read, error: null, started: Date.now()
     };
     st.scan = scan;
+    st.scanState = state;
     st.rows = [];
     st.onNew = {};
     st.job = null;
     clearReplace(realmId).catch(() => {});
 
-    const token = await getAccessToken(realmId);
-    scanReplace(realmId, token,
-      { from, to, kinds, pairs: st.pairs, shouldStop: () => scan.stop },
+    const getToken = tokenKeeper(() => getAccessToken(realmId), await getAccessToken(realmId));
+    scanReplace(realmId, getToken,
+      { from, to, kinds, pairs: st.pairs, state, shouldStop: () => scan.stop },
       step => {
         scan.kind = step.kind; scan.upto = step.upto;
         scan.found = step.found; scan.read = step.read;
@@ -7394,6 +7403,7 @@ app.post('/api/replace/scan', async (req, res) => {
       .then(out => {
         st.rows = out.rows;
         st.onNew = out.onNew || {};
+        st.scanState = null;
         scan.found = out.rows.length;
         scan.read = out.read;
         scan.running = false;
@@ -7405,9 +7415,13 @@ app.post('/api/replace/scan', async (req, res) => {
         // change and the read to start again
         scan.stopped = e.message === 'stopped';
         scan.error = scan.stopped ? null : e.message;
+        // what was found before it stopped is kept, to be carried on from
+        scan.canCarryOn = !!(st.scanState && (st.scanState.read || st.scanState.rows.length));
+        scan.found = state.rows.length;
+        scan.read = state.read;
       });
 
-    res.json({ ok: true });
+    res.json({ ok: true, carriedOn: carryOn });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -7462,7 +7476,8 @@ app.get('/api/replace/status', async (req, res) => {
     rows: st.rows.slice(0, limit),
     scan: s ? {
       running: s.running, from: s.from, to: s.to, kinds: s.kinds, kind: s.kind,
-      upto: s.upto, found: s.found, read: s.read, stopped: !!s.stopped, error: s.error || null
+      upto: s.upto, found: s.found, read: s.read, stopped: !!s.stopped, error: s.error || null,
+      canCarryOn: !!s.canCarryOn && !!st.scanState, carriedOn: !!s.carriedOn
     } : null,
     job: job ? {
       running: job.running, done: job.done, failed: job.failed, lines: job.lines,
@@ -7478,7 +7493,7 @@ app.get('/api/replace/status', async (req, res) => {
 // times out under inventory locks, and a slow run that finishes beats a fast one
 // that does not.
 async function runReplace(realmId, st, job) {
-  let token = await getAccessToken(realmId);
+  const getToken = tokenKeeper(() => getAccessToken(realmId), await getAccessToken(realmId));
   const pairById = new Map(st.pairs.map(p => [p.from.id, p]));
   const pause = ms => new Promise(r => setTimeout(r, ms));
 
@@ -7503,10 +7518,10 @@ async function runReplace(realmId, st, job) {
     if (job.round > 1) {
       job.log.push({ ok: true, note: true, doc: 'Trying the ' + todo.length + ' refused again (round ' + job.round + ')', lines: 0 });
       await pause(4000);
-      token = await getAccessToken(realmId);
+      await getToken(true);
       job.retried += job.round === 2 ? todo.length : 0;
     }
-    await replacePass(realmId, token, job, todo, pairById);
+    await replacePass(realmId, getToken, job, todo, pairById);
     if (job.stop) { job.stopped = true; break; }
   }
 
@@ -7518,7 +7533,7 @@ async function runReplace(realmId, st, job) {
   await clearReplace(realmId).catch(e => console.error('replace clear:', e.message));
 }
 
-async function replacePass(realmId, token, job, todo, pairById) {
+async function replacePass(realmId, getToken, job, todo, pairById) {
   let sinceSave = 0, savedAt = Date.now();
   const saveNow = async (force) => {
     if (!force && sinceSave < 5 && Date.now() - savedAt < 20000) return;
@@ -7536,7 +7551,14 @@ async function replacePass(realmId, token, job, todo, pairById) {
 
     const started = Date.now();
     try {
-      const out = await replaceItemOn(realmId, token, row.kind, row.qbId, pairs);
+      let out;
+      try {
+        out = await replaceItemOn(realmId, await getToken(false), row.kind, row.qbId, pairs);
+      } catch (e) {
+        // the token ran out mid-run: fetch another and ask once more
+        if (!/\(401\)|authenticat|unauthori|token/i.test(e.message)) throw e;
+        out = await replaceItemOn(realmId, await getToken(true), row.kind, row.qbId, pairs);
+      }
       row.state = 'changed';
       row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' changed' + (again ? ' on another try' : '');
       if (again) { job.failed--; job.recovered++; } else job.done++;

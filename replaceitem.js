@@ -160,18 +160,64 @@ function whoOf(kind, txn) {
   return ref ? (ref.name || '') : '';
 }
 
-// One window of one kind. QuickBooks stops handing rows over past 9,000 in a
-// query, so a window that reaches it is said to have, and is read again in
-// smaller pieces - which for a month of invoices here means a day at a time.
-async function readSpan(realmId, token, kind, from, to, keep, onRead, shouldStop) {
+// A read of the books from April 2025 is over half a million invoices and well
+// over an hour of asking QuickBooks. Three things end a read that long if nothing
+// stands in their way, and each is met here:
+//
+//   - the access token lasts an hour. It is fetched again before it runs out, and
+//     once more if QuickBooks says it has, and the read goes on.
+//   - QuickBooks says no for a moment - too many requests, a gateway timing out,
+//     a dropped connection. The same read is asked again after a pause, a few
+//     times, before it counts as a failure.
+//   - it fails anyway, or is stopped, or the server restarts. What was found is
+//     kept, with how far each kind got, and the read carries on from there.
+//
+// It is also made shorter. A month that runs past QuickBooks' 9,000-row cap is
+// read again in weeks, and a week in days - so once a kind has shown it needs
+// days, the months after it go straight to days instead of reading 9,000 rows
+// twice to find out again. Days are read four at a time; reading does not lock
+// anything in QuickBooks, so they do not get in each other's way.
+
+const pauseMs = ms => new Promise(r => setTimeout(r, ms));
+
+// an access token that is fetched again before it runs out
+export function tokenKeeper(fetchToken, first) {
+  let token = first || null, at = first ? Date.now() : 0;
+  return async (force) => {
+    if (force || !token || Date.now() - at > 40 * 60 * 1000) {
+      token = await fetchToken();
+      at = Date.now();
+    }
+    return token;
+  };
+}
+
+const AUTH = /\(401\)|authenticat|token.*(expired|invalid)|unauthori/i;
+const PASSING = /\(429\)|\(5\d\d\)|throttl|too many|timeout|timed out|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket|fetch failed|network|stream|unavailable|answered without a result/i;
+
+// one query, asked again where the failure was QuickBooks' moment and not the query
+async function askPatiently(realmId, getToken, sql, shouldStop) {
+  const waits = [2000, 5000, 10000, 20000, 40000];
+  for (let attempt = 0; ; attempt++) {
+    if (shouldStop && shouldStop()) throw new Error('stopped');
+    try {
+      return await qbQueryStrict(realmId, await getToken(false), sql);
+    } catch (e) {
+      if (attempt >= waits.length) throw e;
+      if (AUTH.test(e.message)) { await getToken(true); continue; }
+      if (PASSING.test(e.message)) { await pauseMs(waits[attempt]); continue; }
+      throw e;
+    }
+  }
+}
+
+// One window of one kind, all of it. Says whether it reached the cap.
+async function readSpan(realmId, getToken, kind, from, to, keep, onRead, shouldStop) {
   let start = 1;
   while (true) {
-    // a month of invoices is dozens of reads, so stopping is looked at before
-    // every one of them rather than only between months
-    if (shouldStop && shouldStop()) throw new Error('stopped');
-    const q = await qbQueryStrict(realmId, token,
+    const q = await askPatiently(realmId, getToken,
       `SELECT * FROM ${kind.key} WHERE TxnDate >= '${quote(from)}' AND TxnDate <= '${quote(to)}' ` +
-      `STARTPOSITION ${start} MAXRESULTS 1000`);
+      `STARTPOSITION ${start} MAXRESULTS 1000`, shouldStop);
     const arr = q[kind.key] || [];
     arr.forEach(keep);
     if (onRead) onRead(arr.length);
@@ -181,31 +227,37 @@ async function readSpan(realmId, token, kind, from, to, keep, onRead, shouldStop
   }
 }
 
-export async function scanReplace(realmId, token, opts, onStep) {
+// `state` holds everything found so far and how far each kind has got. Passed in
+// again, the read carries on from there instead of starting over.
+export function newScanState(pairs) {
+  return {
+    rows: [], seen: new Set(), seenNew: new Set(), read: 0,
+    onNew: new Map(pairs.filter(p => p.to).map(p => [p.to.id, { txns: 0, lines: 0, qty: 0, kinds: {} }])),
+    doneKinds: [], upto: {}, mode: {}
+  };
+}
+
+export async function scanReplace(realmId, getToken, opts, onStep) {
   const { from, to, pairs } = opts;
   const kinds = KINDS.filter(k => (opts.kinds || []).includes(k.key));
   if (!kinds.length) throw new Error('Tick at least one kind of transaction');
 
   const map = new Map(pairs.map(p => [p.from.id, p.to]));
-  const rows = [];
-  const seen = new Set();
-  let read = 0;
-
-  // Where the item taking the place is already in use. Nothing is changed on
-  // these; they are counted because "none found" on its own does not say
-  // whether the old item was never there or the transactions were already on
-  // the new one - and those call for different things.
-  const onNew = new Map(pairs.filter(p => p.to).map(p => [p.to.id, { txns: 0, lines: 0, qty: 0, kinds: {} }]));
-  const seenNew = new Set();
+  const st = opts.state || newScanState(pairs);
+  const stop = opts.shouldStop;
 
   const keepFor = kind => txn => {
     const k = kind.key + '|' + txn.Id;
-    if (!seenNew.has(k)) {
+    // Where the item taking the place is already in use. Nothing is changed on
+    // these; they are counted because "none found" on its own does not say
+    // whether the old item was never there or the transactions were already on
+    // the new one - and those call for different things.
+    if (!st.seenNew.has(k)) {
       const touched = new Set();
       (txn.Line || []).forEach(l => {
         const d = l[kind.detail];
         const id = d && d.ItemRef ? String(d.ItemRef.value) : '';
-        const g = id && onNew.get(id);
+        const g = id && st.onNew.get(id);
         if (!g) return;
         g.lines++;
         g.qty = round2(g.qty + Number(d.Qty || 0));
@@ -215,14 +267,14 @@ export async function scanReplace(realmId, token, opts, onStep) {
           g.kinds[kind.label] = (g.kinds[kind.label] || 0) + 1;
         }
       });
-      if (touched.size) seenNew.add(k);
+      if (touched.size) st.seenNew.add(k);
     }
 
-    if (seen.has(k)) return;
+    if (st.seen.has(k)) return;
     const hits = hitsOf(kind, txn, map);
     if (!hits.length) return;
-    seen.add(k);
-    rows.push({
+    st.seen.add(k);
+    st.rows.push({
       kind: kind.key, kindLabel: kind.label, qbId: String(txn.Id),
       doc: String(txn.DocNumber || ''), date: txn.TxnDate || '', name: whoOf(kind, txn),
       total: Number(txn.TotalAmt || 0), hits,
@@ -230,48 +282,72 @@ export async function scanReplace(realmId, token, opts, onStep) {
       state: 'ready', note: ''
     });
   };
-  const counted = n => { read += n; };
+  const counted = n => { st.read += n; };
+  const step = (kind, upto) => {
+    st.upto[kind.key] = upto;
+    if (onStep) onStep({ kind: kind.key, upto, found: st.rows.length, read: st.read });
+  };
 
   for (const kind of kinds) {
+    if (st.doneKinds.includes(kind.key)) continue;
     const keep = keepFor(kind);
-    let cursor = from;
+    // carry on the day after the last window this kind finished
+    let cursor = st.upto[kind.key] ? addDays(st.upto[kind.key], 1) : from;
+    let mode = st.mode[kind.key] || 'month';
 
     while (cursor <= to) {
-      if (opts.shouldStop && opts.shouldStop()) throw new Error('stopped');
+      if (stop && stop()) throw new Error('stopped');
       let end = monthEnd(cursor);
       if (end > to) end = to;
 
-      // a month first; a week where the month is too full; a day where the week is
-      const monthFull = await readSpan(realmId, token, kind, cursor, end, keep, counted, opts.shouldStop);
-      if (monthFull) {
-        let w = cursor;
+      if (mode === 'month') {
+        const full = await readSpan(realmId, getToken, kind, cursor, end, keep, counted, stop);
+        if (!full) { step(kind, end); cursor = addDays(end, 1); continue; }
+        mode = st.mode[kind.key] = 'week';
+      }
+
+      if (mode === 'week') {
+        let w = cursor, fell = false;
         while (w <= end) {
           let wEnd = addDays(w, 6);
           if (wEnd > end) wEnd = end;
-          const weekFull = await readSpan(realmId, token, kind, w, wEnd, keep, counted, opts.shouldStop);
-          if (weekFull) {
-            let d = w;
-            while (d <= wEnd) {
-              const dayFull = await readSpan(realmId, token, kind, d, d, keep, counted, opts.shouldStop);
-              if (dayFull) {
-                throw new Error('More than 9,000 ' + kind.label.toLowerCase() + 's on ' + d +
-                                ' - QuickBooks will not hand over that many from one day');
-              }
-              d = addDays(d, 1);
-            }
+          const full = await readSpan(realmId, getToken, kind, w, wEnd, keep, counted, stop);
+          if (full) {
+            // this week needs days, and so will the rest of this kind
+            mode = st.mode[kind.key] = 'day';
+            cursor = w;
+            fell = true;
+            break;
           }
+          step(kind, wEnd);
           w = addDays(wEnd, 1);
-          if (onStep) onStep({ kind: kind.key, upto: wEnd, found: rows.length, read });
         }
+        if (!fell) { cursor = addDays(end, 1); continue; }
       }
 
-      if (onStep) onStep({ kind: kind.key, upto: end, found: rows.length, read });
+      // day by day, four at a time, up to the end of this month
+      let d = cursor;
+      while (d <= end) {
+        const batch = [];
+        for (let i = 0; i < 4 && d <= end; i++) { batch.push(d); d = addDays(d, 1); }
+        const capped = await Promise.all(batch.map(day =>
+          readSpan(realmId, getToken, kind, day, day, keep, counted, stop)));
+        const over = batch.filter((day, i) => capped[i]);
+        if (over.length) {
+          throw new Error('More than 9,000 ' + kind.label.toLowerCase() + 's on ' + over[0] +
+                          ' - QuickBooks will not hand over that many from one day');
+        }
+        step(kind, batch[batch.length - 1]);
+      }
       cursor = addDays(end, 1);
     }
+
+    st.doneKinds.push(kind.key);
   }
 
-  rows.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.doc.localeCompare(b.doc));
-  return { rows, read, onNew: Object.fromEntries(onNew) };
+  const rows = st.rows.slice().sort((a, b) =>
+    (a.date || '').localeCompare(b.date || '') || a.doc.localeCompare(b.doc));
+  return { rows, read: st.read, onNew: Object.fromEntries(st.onNew) };
 }
 
 /* ==================== changing one ==================== */

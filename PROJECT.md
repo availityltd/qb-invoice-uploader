@@ -140,6 +140,14 @@ Postgres as they go and carried on after a restart. The others - description
 change, product health cost/stock/merge runs, swap by pasted invoices - still live
 in memory only, and a deploy stops them.
 
+**A read of a year of invoices outlives an access token.** Tokens last an hour
+and such a read takes longer. `tokenKeeper` in `replaceitem.js` fetches a fresh
+one before it runs out and again on a 401; `askPatiently` asks again after a pause
+on 429, 5xx, timeouts and dropped connections. A read that still fails keeps what
+it found and how far each kind got, and carries on from there on request. Once a
+kind has shown it needs day windows, later months go straight to days, read four
+at a time.
+
 **Replacing a product on an invoice is slow in QuickBooks itself.** The write makes
 QuickBooks work the stock cost of the product out again for everything dated
 after it - tens of seconds an invoice on a busy product. Runs go newest first so
