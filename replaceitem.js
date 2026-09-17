@@ -18,7 +18,7 @@
 // not here; the category change covers those.
 
 import { qbQueryStrict } from './qb.js';
-import { looseName } from './products.js';
+import { looseName, variantsOf } from './products.js';
 
 const API = 'https://quickbooks.api.intuit.com';
 const quote = s => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -490,8 +490,7 @@ export function shopifyVariants(rows) {
 // both once case, spaces and punctuation are set aside. Which of them matched,
 // and what the shade came to on each side, is the difference between a match
 // worth running and one worth looking at first.
-export function matchWhy(keep, dup, helpers) {
-  const { variantsOf } = helpers;
+export function matchWhy(keep, dup) {
   const fields = it => [['name', it.name], ['SKU', it.sku], ['description', it.desc]];
   const found = [];
 
@@ -596,7 +595,7 @@ export function pairsFromShopify(variants, items, helpers) {
         from: { id: o.id, name: o.name, sku: o.sku, type: o.type, active: o.active },
         to: { id: keep.id, name: keep.name, sku: keep.sku, type: keep.type, active: keep.active,
               shopCost: v.cost, shopSku: v.sku, shopTitle: v.title },
-        why: matchWhy(keep, o, helpers)
+        why: matchWhy(keep, o)
       });
     }));
   });
