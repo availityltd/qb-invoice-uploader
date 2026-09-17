@@ -28,8 +28,9 @@ import {
 } from './prodstore.js';
 import {
   KINDS as REPLACE_KINDS, parsePairs as parseReplacePairs, resolvePairs as resolveReplacePairs,
-  scanReplace, replaceOne as replaceItemOn
+  scanReplace, replaceOne as replaceItemOn, itemById as replaceItemById
 } from './replaceitem.js';
+import { sameVariant } from './products.js';
 import {
   listVendors, listPayables, readDocs, readOne, createDoc,
   attachFile, listAttachments
@@ -509,7 +510,7 @@ app.get('/api/qb-products', async (req, res) => {
         `SELECT * FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
       const arr = q.Item || [];
       arr.forEach(it => {
-        products.push({ id: it.Id, name: it.Name, sku: it.Sku || '', active: it.Active !== false });
+        products.push({ id: it.Id, name: it.Name, sku: it.Sku || '', active: it.Active !== false, type: it.Type || '' });
       });
       if (arr.length < 1000) break;
       start += 1000;
@@ -7126,6 +7127,83 @@ app.post('/api/replace/pairs', async (req, res) => {
   }
 });
 
+// Every item, switched off ones included - a product already put away is often
+// exactly the one whose transactions still need moving.
+app.get('/api/replace/items', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const token = await getAccessToken(realmId);
+    const items = await readItems(realmId, token);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      items: items.map(it => ({ id: it.id, name: it.name, sku: it.sku, type: it.type, active: it.active, qty: it.qty }))
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// One product picked from the list, to be looked for on its own. The product
+// taking its place is chosen after the read, once it is plain where this one is.
+app.post('/api/replace/pick', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const old = replStore.get(realmId);
+    if (old && ((old.scan && old.scan.running) || (old.job && old.job.running))) {
+      throw new Error('A read or a run is still going');
+    }
+    const id = String((req.body || {}).id || '');
+    if (!id) throw new Error('Pick the product to look for');
+
+    const token = await getAccessToken(realmId);
+    const from = await replaceItemById(realmId, token, id);
+    replStore.set(realmId, { pairs: [{ line: 1, from, to: null }], bad: [], scan: null, rows: [], job: null, at: Date.now() });
+    res.json({ pair: { from, to: null } });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// The product that goes on in its place, with what to be careful of said before
+// anything moves: a different shade, or stock moving onto an item that does not
+// hold stock.
+app.post('/api/replace/target', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = replStore.get(realmId);
+    if (!st || st.pairs.length !== 1) throw new Error('Pick the product to replace first');
+    if (st.job && st.job.running) throw new Error('A run is still going');
+    const id = String((req.body || {}).id || '');
+    if (!id) throw new Error('Pick the product to put on instead');
+
+    const token = await getAccessToken(realmId);
+    const to = await replaceItemById(realmId, token, id);
+    const from = st.pairs[0].from;
+    if (to.id === from.id) throw new Error('That is the same product');
+
+    const warnings = [];
+    if (!sameVariant(from, to)) {
+      warnings.push('These read as different shades or numbers - check this is really the same product before replacing.');
+    }
+    if (from.type === 'Inventory' && to.type !== 'Inventory') {
+      warnings.push('The product going holds stock and this one does not: moved onto it, those bills bring no stock in and those sales carry no cost of sales.');
+    }
+    if (!to.active) warnings.push('This product is switched off in QuickBooks.');
+
+    st.pairs[0].to = to;
+    // what was already counted on the new one belonged to a pair with no target
+    st.pairs[0].warnings = warnings;
+    res.json({ pair: st.pairs[0], warnings });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post('/api/replace/scan', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -7189,8 +7267,9 @@ app.get('/api/replace/status', async (req, res) => {
   if (!st) return res.json({ has: false });
 
   const byPair = new Map(st.pairs.map(p => [p.from.id, {
-    from: p.from, to: p.to, txns: 0, lines: 0, qty: 0, amount: 0, kinds: {}, done: 0, failed: 0,
-    onNew: (st.onNew || {})[p.to.id] || null
+    from: p.from, to: p.to, warnings: p.warnings || [],
+    txns: 0, lines: 0, qty: 0, amount: 0, kinds: {}, byKind: {}, done: 0, failed: 0,
+    onNew: p.to ? ((st.onNew || {})[p.to.id] || null) : null
   }]));
   st.rows.forEach(r => {
     const touched = new Set();
@@ -7200,6 +7279,11 @@ app.get('/api/replace/status', async (req, res) => {
       g.lines++;
       g.qty = Math.round((g.qty + h.qty) * 100) / 100;
       g.amount = Math.round((g.amount + h.amount) * 100) / 100;
+      const k = g.byKind[r.kindLabel] || (g.byKind[r.kindLabel] = { txns: 0, lines: 0, qty: 0, amount: 0 });
+      k.lines++;
+      k.qty = Math.round((k.qty + h.qty) * 100) / 100;
+      k.amount = Math.round((k.amount + h.amount) * 100) / 100;
+      if (!touched.has(h.fromId)) k.txns++;
       if (!touched.has(h.fromId)) {
         touched.add(h.fromId);
         g.txns++;
@@ -7327,6 +7411,7 @@ app.post('/api/replace/run', async (req, res) => {
     const rows = st.rows.filter(r => r.state === 'ready' &&
       (!Array.isArray(kinds) || !kinds.length || kinds.includes(r.kind)));
     if (!rows.length) throw new Error('Nothing is waiting to be changed');
+    if (st.pairs.some(p => !p.to)) throw new Error('Pick the product to put on instead first');
 
     const job = {
       running: true, stop: false, done: 0, failed: 0, lines: 0,

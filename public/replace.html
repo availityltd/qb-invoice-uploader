@@ -46,6 +46,24 @@
   .tag.ok{background:#EFF8EC;color:var(--ok)}
   .tag.bad{background:#FDECEC;color:var(--neg)}
   .tag.warn{background:#FFF6E6;color:#8A5A00}
+
+  .picker{border:1px solid var(--line-2);border-radius:7px;background:#fff;overflow:hidden}
+  .picker .find{width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;
+    font-family:var(--sans);font-size:13.5px;padding:9px 12px}
+  .picker .list{max-height:240px;overflow:auto}
+  .picker .list button{display:block;width:100%;text-align:left;border:0;background:none;
+    font:inherit;font-size:13px;padding:8px 12px;cursor:pointer;border-bottom:1px solid #EFF1F3;color:var(--text)}
+  .picker .list button:hover{background:var(--accent-soft)}
+  .picker .list button small{display:block;font-family:var(--mono);font-size:11px;
+    color:var(--muted);margin-top:2px}
+  .picker .none{padding:12px;font-size:12.5px;color:var(--faint)}
+  .chosen{border:1px solid var(--qbo);background:#F2FAF0;border-radius:7px;padding:11px 14px;
+    margin-bottom:10px;font-size:13.5px;font-weight:600}
+  .chosen small{display:block;font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:400;margin-top:2px}
+  .many{margin-top:14px;border:1px solid var(--line);border-radius:8px;background:#FAFBFA;padding:0 14px}
+  .many summary{font-size:13px;font-weight:600;cursor:pointer;padding:11px 0;user-select:none}
+  .many[open] summary{border-bottom:1px solid var(--line);margin-bottom:12px}
+  .many .inner{padding-bottom:14px}
 </style>
 </head>
 <body>
@@ -79,19 +97,35 @@
           <a class="on" href="/replace.html">Replace product</a>
         </div>
 
-        <!-- ============ the pairs ============ -->
+        <!-- ============ the product going ============ -->
         <div class="sheet">
           <div class="sec">
-            <h2><span class="no">01</span> Which product becomes which
+            <h2><span class="no">01</span> The product to replace
               <span class="aside" id="pairAside"></span></h2>
-            <p class="hint" style="margin:0 0 10px">Two columns copied out of Excel &mdash; the item
-              going on the left, the item taking its place on the right &mdash; one pair to a line.
-              Each side is matched whole, on the item's name or its SKU, never on part of a name. A
-              name that matches two items is not guessed at: it is sent back to be written out in full.</p>
-            <textarea class="pairs" id="pairText" rows="8"
-              placeholder="Missrose Silk Radiance BB Cream Fair	Missrose Silk Radiance Bb Cream 7601-162/Fair&#10;Miss Rose Crystal Lip Gloss 10	Miss Rose Crystal Lip Gloss 7701-504/10"></textarea>
-            <div class="acts" style="margin-top:10px">
-              <button class="solid" id="btnPairs">Check the pairs</button>
+            <p class="hint" style="margin:0 0 10px">Search for it by name or SKU and pick it. Switched-off
+              products are in the list too. Nothing changes yet &mdash; the next step shows where it is.</p>
+            <div id="fromChosen"></div>
+            <div class="picker">
+              <input type="text" class="find" id="fromFind" placeholder="Search by name or SKU">
+              <div class="list" id="fromList"><div class="none">Reading the products…</div></div>
+            </div>
+
+            <details class="many">
+              <summary>Many products at once &mdash; paste the pairs</summary>
+              <div class="inner">
+                <p class="hint" style="margin:0 0 10px">Two columns copied out of Excel &mdash; the item
+                  going on the left, the item taking its place on the right &mdash; one pair to a line.
+                  Each side is matched whole, on the item's name or its SKU, never on part of a name. A
+                  name that matches two items is not guessed at: it is sent back to be written out in full.</p>
+                <textarea class="pairs" id="pairText" rows="8"
+                  placeholder="Missrose Silk Radiance BB Cream Fair	Missrose Silk Radiance Bb Cream 7601-162/Fair&#10;Miss Rose Crystal Lip Gloss 10	Miss Rose Crystal Lip Gloss 7701-504/10"></textarea>
+                <div class="acts" style="margin-top:10px">
+                  <button class="solid" id="btnPairs">Check the pairs</button>
+                </div>
+              </div>
+            </details>
+
+            <div class="acts" style="margin-top:12px">
               <button class="ghost" id="btnReset">Start again</button>
             </div>
             <div class="stat" id="pairStat"></div>
@@ -150,12 +184,21 @@
           <div class="sec">
             <h2><span class="no">04</span> What will change
               <span class="aside" id="foundAside"></span></h2>
-            <p class="hint" style="margin:0 0 12px" id="promise"></p>
+            <div class="tbl" style="margin-bottom:14px">
+              <table>
+                <thead><tr>
+                  <th>Where</th><th class="num">Transactions</th><th class="num">Lines</th>
+                  <th class="num">Qty</th><th class="num">Average rate</th><th class="num">Amount</th>
+                </tr></thead>
+                <tbody id="kindRows"></tbody>
+              </table>
+            </div>
             <div class="tbl" style="max-height:420px">
               <table>
                 <thead><tr>
                   <th>Type</th><th>Number</th><th>Date</th><th>With</th>
-                  <th class="num">Lines</th><th class="num">Amount on them</th><th>State</th>
+                  <th class="num">Lines</th><th class="num">Qty</th><th class="num">Rate</th>
+                  <th class="num">Amount on them</th><th>State</th>
                 </tr></thead>
                 <tbody id="foundRows"></tbody>
               </table>
@@ -164,7 +207,20 @@
               <button class="mini" id="btnCsv">Download this list</button>
             </div>
           </div>
+
+          <!-- the product taking its place, picked once it is plain where the old one is -->
+          <div class="sec" id="toSec">
+            <h2><span class="no">05</span> The product to put on instead</h2>
+            <div id="toChosen"></div>
+            <div class="picker">
+              <input type="text" class="find" id="toFind" placeholder="Search by name or SKU">
+              <div class="list" id="toList"></div>
+            </div>
+            <div class="stat" id="toStat"></div>
+          </div>
+
           <div class="sec">
+            <p class="hint" style="margin:0 0 12px" id="promise"></p>
             <button class="run" id="btnRun" disabled>Replace them</button>
             <p class="runhint" id="runHint"></p>
           </div>
@@ -191,7 +247,7 @@
   "use strict";
 
   var $ = function(id){ return document.getElementById(id); };
-  var S = { kinds:[], pairs:[], rows:[], total:0, poller:null, logged:0 };
+  var S = { kinds:[], pairs:[], rows:[], total:0, poller:null, logged:0, items:[] };
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -261,6 +317,90 @@
       .map(function(b){ return b.value; });
   }
 
+  /* ---------- picking a product ---------- */
+
+  // what is typed is looked for in the name and the SKU; every word has to be
+  // there, in any order, so "blush 02" finds "Beauty Gate Blush - 02"
+  function matches(it, q){
+    if(!q) return true;
+    var hay = (it.name + ' ' + (it.sku || '')).toLowerCase();
+    return q.split(/\s+/).every(function(w){ return hay.indexOf(w) > -1; });
+  }
+
+  function drawPicker(which){
+    var q = $(which + 'Find').value.trim().toLowerCase();
+    var exclude = which === 'to' && S.pairs[0] ? S.pairs[0].from.id : '';
+    var list = S.items.filter(function(it){ return it.id !== exclude && matches(it, q); });
+    var shown = list.slice(0, 60);
+
+    $(which + 'List').innerHTML = shown.length
+      ? shown.map(function(it){
+          return '<button type="button" data-id="' + esc(it.id) + '">' + esc(it.name) +
+            '<small>' + (it.sku ? 'SKU ' + esc(it.sku) + ' · ' : '') + esc(it.type || '') +
+            (it.qty === null || it.qty === undefined ? '' : ' · ' + nf(it.qty) + ' in stock') +
+            (it.active ? '' : ' · switched off') + '</small></button>';
+        }).join('') +
+        (list.length > shown.length
+          ? '<div class="none">' + nf(list.length - shown.length) + ' more &mdash; type more of the name to narrow it</div>' : '')
+      : '<div class="none">' + (S.items.length ? 'Nothing matches that.' : 'Reading the products…') + '</div>';
+
+    Array.prototype.forEach.call($(which + 'List').querySelectorAll('button[data-id]'), function(b){
+      b.addEventListener('click', function(){
+        if(which === 'from') pickFrom(b.getAttribute('data-id'));
+        else pickTo(b.getAttribute('data-id'));
+      });
+    });
+  }
+
+  function chosenCard(it, label){
+    return '<div class="chosen">' + esc(label) + ': ' + esc(it.name) +
+      '<small>' + (it.sku ? 'SKU ' + esc(it.sku) + ' · ' : '') + esc(it.type || '') +
+      (it.active === false ? ' · switched off' : '') + '</small></div>';
+  }
+
+  function pickFrom(id){
+    say('pairStat', 'busy', 'Reading it from QuickBooks…');
+    post('/api/replace/pick', { id: id }).then(function(d){
+      S.pairs = [d.pair];
+      S.rows = [];
+      $('fromChosen').innerHTML = chosenCard(d.pair.from, 'Replacing');
+      $('fromFind').value = '';
+      drawPicker('from');
+      $('toChosen').innerHTML = '';
+      $('toStat').className = 'stat'; $('toStat').innerHTML = '';
+      say('pairStat', 'ok', '<b>Picked.</b> Now choose the dates and what to look in, and press Find them.');
+      $('pairSheet').classList.remove('hide');
+      $('whereSheet').classList.remove('hide');
+      $('foundSheet').classList.add('hide');
+      $('runSheet').classList.add('hide');
+      drawPairs(null);
+      $('whereSheet').scrollIntoView({ behavior:'smooth', block:'start' });
+    }).catch(function(e){ say('pairStat', 'bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  function pickTo(id){
+    $('toStat').className = 'stat busy';
+    $('toStat').textContent = 'Checking it…';
+    post('/api/replace/target', { id: id }).then(function(d){
+      S.pairs = [d.pair];
+      $('toChosen').innerHTML = chosenCard(d.pair.to, 'Putting on instead');
+      $('toFind').value = '';
+      drawPicker('to');
+      var w = d.warnings || [];
+      $('toStat').className = 'stat ' + (w.length ? 'bad' : 'ok');
+      $('toStat').innerHTML = w.length
+        ? '<b>Look before replacing:</b><br>' + w.map(esc).join('<br>')
+        : '<b>Same shade, both hold stock the same way.</b> Ready to replace.';
+      return get('/api/replace/status?limit=1000').then(function(s){
+        drawPairs(s.summary);
+        drawFound(s);
+      });
+    }).catch(function(e){
+      $('toStat').className = 'stat bad';
+      $('toStat').innerHTML = '<b>' + esc(e.message) + '</b>';
+    });
+  }
+
   /* ---------- the pairs ---------- */
 
   function checkPairs(){
@@ -273,6 +413,8 @@
       .then(function(d){
         $('btnPairs').disabled = false;
         S.pairs = d.pairs || [];
+        // pasted pairs replace whatever was picked from the list
+        $('fromChosen').innerHTML = ''; $('toChosen').innerHTML = '';
         var out = '<b>' + nf(d.pasted) + ' pasted, ' + nf(S.pairs.length) +
                   (S.pairs.length === 1 ? ' pair' : ' pairs') + ' ready.</b>';
         if(d.bad && d.bad.length){
@@ -310,8 +452,10 @@
       return '<tr>' +
         '<td class="nm">' + esc(p.from.name) + (p.from.sku ? '<small>' + esc(p.from.sku) + '</small>' : '') + '</td>' +
         '<td class="arrow">&rarr;</td>' +
-        '<td class="nm">' + esc(p.to.name) + (p.to.sku ? '<small>' + esc(p.to.sku) + '</small>' : '') +
-          (p.to.active ? '' : ' <span class="tag warn">switched off</span>') + '</td>' +
+        (p.to
+          ? '<td class="nm">' + esc(p.to.name) + (p.to.sku ? '<small>' + esc(p.to.sku) + '</small>' : '') +
+            (p.to.active ? '' : ' <span class="tag warn">switched off</span>') + '</td>'
+          : '<td class="nm" style="color:var(--faint);font-weight:400">picked after the read</td>') +
         '<td class="num mono">' + (g ? nf(g.txns) : '—') + '</td>' +
         '<td class="num mono">' + (g ? nf(g.lines) : '—') + '</td>' +
         '<td class="num mono">' + (g ? nf(g.qty) : '—') + '</td>' +
@@ -387,6 +531,35 @@
     // the counts below the list are for everything found, not only what is shown
     var waiting = (d.summary || []).reduce(function(s, g){ return s + g.txns - g.done - g.failed; }, 0);
 
+    // where the product is, kind by kind, with the quantity and the rate it went at
+    var sum = (d.summary || [])[0];
+    var byKind = {};
+    (d.summary || []).forEach(function(g){
+      Object.keys(g.byKind || {}).forEach(function(k){
+        var t = byKind[k] || (byKind[k] = { txns:0, lines:0, qty:0, amount:0 });
+        var x = g.byKind[k];
+        t.txns += x.txns; t.lines += x.lines; t.qty += x.qty; t.amount += x.amount;
+      });
+    });
+    var kinds = Object.keys(byKind);
+    $('kindRows').innerHTML = kinds.length ? kinds.map(function(k){
+      var t = byKind[k];
+      return '<tr><td>' + esc(k) + '</td>' +
+        '<td class="num mono">' + nf(t.txns) + '</td>' +
+        '<td class="num mono">' + nf(t.lines) + '</td>' +
+        '<td class="num mono">' + nf(t.qty) + '</td>' +
+        '<td class="num mono">' + (t.qty ? money(t.amount / t.qty) : '—') + '</td>' +
+        '<td class="num mono">' + money(t.amount) + '</td></tr>';
+    }).join('')
+      : '<tr><td colspan="6" style="color:var(--faint);padding:12px">Not on anything that was ticked, in these dates.</td></tr>';
+
+    // one product picked from the list has its replacement chosen here; pasted
+    // pairs came with theirs
+    var single = S.pairs.length === 1 && !!sum;
+    var noTarget = S.pairs.some(function(p){ return !p.to; });
+    $('toSec').classList.toggle('hide', !single);
+    if(single && sum.to && !$('toChosen').innerHTML) $('toChosen').innerHTML = chosenCard(sum.to, 'Putting on instead');
+
     $('promise').innerHTML =
       'On every one of these, the lines carrying the product going are given the product ' +
       'taking its place. The quantity, the rate, the amount, the description, the customer or ' +
@@ -402,28 +575,36 @@
         '<td class="mono">' + esc(r.date) + '</td>' +
         '<td class="nm" style="font-weight:400">' + esc(r.name) + '</td>' +
         '<td class="num mono">' + nf(r.hits.length) + '</td>' +
+        '<td class="num mono">' + nf(qtyOf(r)) + '</td>' +
+        '<td class="num mono">' + (qtyOf(r) ? money(r.hitTotal / qtyOf(r)) : '—') + '</td>' +
         '<td class="num mono">' + money(r.hitTotal) + '</td>' +
         '<td>' + (r.state === 'changed' ? '<span class="tag ok">changed</span>'
                : r.state === 'failed' ? '<span class="tag bad">refused</span><div style="font-size:11px;color:var(--muted);white-space:normal">' + esc(r.note) + '</div>'
                : '<span class="tag">waiting</span>') + '</td>' +
         '</tr>';
     }).join('')
-      : '<tr><td colspan="7" style="color:var(--faint);padding:14px">None of these products is on anything in those dates.</td></tr>';
+      : '<tr><td colspan="9" style="color:var(--faint);padding:14px">None of these products is on anything in those dates.</td></tr>';
 
     var running = d.job && d.job.running;
-    $('btnRun').disabled = !waiting || running;
+    $('btnRun').disabled = !waiting || running || noTarget;
     $('btnRun').textContent = waiting
       ? 'Replace them on ' + nf(waiting) + (waiting === 1 ? ' transaction' : ' transactions')
       : 'Nothing waiting';
-    $('runHint').textContent = waiting
-      ? 'One transaction at a time. The page can be closed; the run carries on.'
-      : '';
+    $('runHint').textContent = !waiting ? ''
+      : noTarget ? 'Pick the product to put on instead, above.'
+      : 'One transaction at a time. The page can be closed; the run carries on.';
+  }
+
+  function qtyOf(r){
+    return (r.hits || []).reduce(function(s, h){ return s + (Number(h.qty) || 0); }, 0);
   }
 
   function csv(){
-    var rows = [['Type','Number','Date','With','Lines','Amount on them','State','Note']];
+    var rows = [['Type','Number','Date','With','Lines','Qty','Rate','Amount on them','State','Note']];
     S.rows.forEach(function(r){
-      rows.push([r.kindLabel, r.doc || r.qbId, r.date, r.name, r.hits.length, r.hitTotal, r.state, r.note]);
+      var q = qtyOf(r);
+      rows.push([r.kindLabel, r.doc || r.qbId, r.date, r.name, r.hits.length, q,
+                 q ? Math.round(r.hitTotal / q * 100) / 100 : '', r.hitTotal, r.state, r.note]);
     });
     var text = rows.map(function(r){
       return r.map(function(c){
@@ -548,6 +729,9 @@
     post('/api/replace/clear').then(function(){
       clearInterval(S.poller); S.poller = null;
       S.pairs = []; S.rows = [];
+      $('fromChosen').innerHTML = ''; $('toChosen').innerHTML = '';
+      $('toStat').className = 'stat'; $('toStat').innerHTML = '';
+      $('pairText').value = '';
       ['pairSheet','whereSheet','foundSheet','runSheet'].forEach(function(id){ $(id).classList.add('hide'); });
       say('pairStat', '', ''); say('scanStat', '', '');
     }).catch(function(e){ say('pairStat', 'bad', '<b>' + esc(e.message) + '</b>'); });
@@ -570,6 +754,17 @@
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
 
+    get('/api/replace/items').then(function(d){
+      S.items = (d.items || []).sort(function(a, b){ return a.name.localeCompare(b.name); });
+      drawPicker('from');
+      drawPicker('to');
+    }).catch(function(e){
+      $('fromList').innerHTML = '<div class="none">' + esc(e.message) + '</div>';
+    });
+    ['from','to'].forEach(function(w){
+      $(w + 'Find').addEventListener('input', function(){ drawPicker(w); });
+    });
+
     get('/api/replace/kinds').then(function(d){
       S.kinds = d.kinds || [];
       S.kinds.forEach(function(k){ LABEL[k.key] = k.label; });
@@ -580,6 +775,10 @@
       if(!d || !d.has) return;
       S.pairs = d.pairs || [];
       if(!S.pairs.length) return;
+      if(S.pairs.length === 1){
+        $('fromChosen').innerHTML = chosenCard(S.pairs[0].from, 'Replacing');
+        if(S.pairs[0].to) $('toChosen').innerHTML = chosenCard(S.pairs[0].to, 'Putting on instead');
+      }
       $('pairSheet').classList.remove('hide');
       $('whereSheet').classList.remove('hide');
       if(d.scan){ $('dFrom').value = d.scan.from; $('dTo').value = d.scan.to; }

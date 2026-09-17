@@ -115,6 +115,19 @@ export function resolvePairs(pairs, items) {
   return { ok, bad };
 }
 
+// One item, as the pages show it, read by its id.
+export async function itemById(realmId, token, id) {
+  const q = await qbQueryStrict(realmId, token, `SELECT * FROM Item WHERE Id = '${quote(id)}'`);
+  const it = (q.Item || [])[0];
+  if (!it) throw new Error('That product is not in QuickBooks any more');
+  return {
+    id: String(it.Id), name: it.FullyQualifiedName || it.Name || '', sku: it.Sku || '',
+    type: it.Type || '', active: it.Active !== false,
+    qty: it.QtyOnHand === undefined ? null : Number(it.QtyOnHand),
+    cost: it.PurchaseCost === undefined ? null : Number(it.PurchaseCost)
+  };
+}
+
 /* ==================== finding them ==================== */
 
 function iso(d) { return d.toISOString().slice(0, 10); }
@@ -133,7 +146,9 @@ function hitsOf(kind, txn, map) {
       return {
         lineId: String(l.Id || ''),
         fromId: String(d.ItemRef.value),
-        toId: map.get(String(d.ItemRef.value)).id,
+        // the item taking its place can be chosen after the read, once it is
+        // clear where the old one is
+        toId: (map.get(String(d.ItemRef.value)) || {}).id || '',
         qty: Number(d.Qty || 0),
         amount: Number(l.Amount || 0)
       };
@@ -180,7 +195,7 @@ export async function scanReplace(realmId, token, opts, onStep) {
   // these; they are counted because "none found" on its own does not say
   // whether the old item was never there or the transactions were already on
   // the new one - and those call for different things.
-  const onNew = new Map(pairs.map(p => [p.to.id, { txns: 0, lines: 0, qty: 0, kinds: {} }]));
+  const onNew = new Map(pairs.filter(p => p.to).map(p => [p.to.id, { txns: 0, lines: 0, qty: 0, kinds: {} }]));
   const seenNew = new Set();
 
   const keepFor = kind => txn => {
@@ -267,6 +282,7 @@ export async function scanReplace(realmId, token, opts, onStep) {
 export async function replaceOne(realmId, token, kindKey, txnId, pairs) {
   const kind = kindOf(kindKey);
   if (!kind) throw new Error('Unknown transaction type ' + kindKey);
+  if (pairs.some(p => !p.to)) throw new Error('Pick the product to put on it first');
   const map = new Map(pairs.map(p => [p.from.id, p.to]));
 
   const q = await qbQueryStrict(realmId, token,
