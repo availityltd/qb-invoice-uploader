@@ -64,6 +64,12 @@
   .many summary{font-size:13px;font-weight:600;cursor:pointer;padding:11px 0;user-select:none}
   .many[open] summary{border-bottom:1px solid var(--line);margin-bottom:12px}
   .many .inner{padding-bottom:14px}
+
+  .subtabs{display:flex;gap:2px;margin:-8px 0 20px;border:1px solid var(--line-2);border-radius:8px;
+    padding:3px;background:#F7F8F7;width:max-content;max-width:100%;flex-wrap:wrap}
+  .subtabs a{font-size:12.5px;padding:7px 15px;border-radius:6px;color:var(--muted);text-decoration:none}
+  .subtabs a:hover{color:var(--ink)}
+  .subtabs a.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.07)}
 </style>
 </head>
 <body>
@@ -91,10 +97,14 @@
       <div id="body" class="hide">
 
         <div class="tabs">
-          <a href="/swap.html">Product</a>
+          <a class="on" href="/replace.html">Product</a>
           <a href="/recat.html">Category</a>
           <a href="/desc.html">Description / Name</a>
-          <a class="on" href="/replace.html">Replace product</a>
+        </div>
+
+        <div class="subtabs">
+          <a class="on" href="/replace.html">In bills, expenses and every other transaction</a>
+          <a href="/swap.html">On invoices pasted by number</a>
         </div>
 
         <!-- ============ the product going ============ -->

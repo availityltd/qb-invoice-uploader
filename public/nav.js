@@ -25,7 +25,7 @@
       { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
       // Product, Category and Description are tabs of one page, not three
       // lines in the rail - a new kind of change is a new tab, not a new link
-      { href:'/swap.html',     label:'Changes',          icon:'swap' },
+      { href:'/replace.html',  label:'Changes',          icon:'swap' },
       { href:'/void.html',     label:'Void invoices',    icon:'ban' }
     ]}
   ];
@@ -73,8 +73,8 @@
       var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0) ||
                (it.href === '/payments.html' && path === '/merge.html') ||
                // every tab of the changes page lights up the one link
-               (it.href === '/swap.html' &&
-                (path === '/recat.html' || path === '/desc.html' || path === '/replace.html'));
+               (it.href === '/replace.html' &&
+                (path === '/swap.html' || path === '/recat.html' || path === '/desc.html'));
       html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') +
               (it.tree ? ' id="couriersLink"' : '') + '>' +
               svg(it.icon) + it.label +
