@@ -46,6 +46,16 @@
   td.twins .twin{padding:4px 0;border-bottom:1px solid var(--line)}
   td.twins .twin:last-child{border-bottom:0}
   td.twins .twin > div{color:var(--faint)}
+  .docs{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;font-weight:400}
+  .docs span{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:4px;
+    background:#EEF3F8;color:#2C4A63;white-space:nowrap}
+  .docs span i{font-style:normal;color:var(--muted)}
+  .docs span.moved{background:#EFF8EC;color:var(--ok);text-decoration:line-through}
+  .docs span.more{background:none;color:var(--muted)}
+  .docs.none{font-size:11px;color:var(--faint);display:block}
+  .merged{margin-top:6px;padding:6px 8px;border-radius:6px;font-size:11.5px;font-weight:400;line-height:1.5}
+  .merged.ok{background:#EFF8EC;color:var(--ok)}
+  .merged.bad{background:#FDECEC;color:var(--neg)}
   .tagline{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
   .tag{font-size:10px;letter-spacing:.04em;text-transform:uppercase;
     padding:2px 6px;border-radius:4px;background:#F1F3F2;color:var(--muted)}
@@ -709,7 +719,8 @@
             }).join('') + '</select></td>'
           : '') +
         '<td class="pname">' + esc(r.name) +
-          (r.sku ? '<small>' + esc(r.sku) + '</small>' : '') + tags(r) + '</td>' +
+          (r.sku ? '<small>' + esc(r.sku) + '</small>' : '') + tags(r) +
+          (S.tab === 'twin' ? docList(r.docs, r.docCount) : '') + mergeReport(r) + '</td>' +
         '<td>' + esc(r.type) + '</td>' +
         '<td class="num mono"' + (r.qty < 0 ? ' style="color:var(--neg)"' : '') + '>' +
           nf(r.qty) + '</td>' +
@@ -733,7 +744,8 @@
                 ? '<b>' + nf(t.soldQty) + ' sold</b> · ' + money(t.soldAmount) +
                   (t.cogs ? '' : ' · <b style="color:var(--neg)">no cost charged</b>')
                 : 'nothing sold') +
-              ' · ' + (t.bills ? nf(t.bills) + ' bought' : 'never bought') + '</div></div>';
+              ' · ' + (t.bills ? nf(t.bills) + ' bought' : 'never bought') + '</div>' +
+              docList(t.docs, t.docCount) + '</div>';
           }).join('') + '</td>' +
         '</tr>';
     }).join('')
@@ -799,15 +811,17 @@
     } else if(act === 'merge'){
       var pairs = picked.filter(function(r){ return S.keep[r.id]; });
       var mAcct = $('adjAcct').value;
-      $('btnApply').disabled = !pairs.length || !mAcct;
+      $('btnApply').disabled = !pairs.length;
       $('btnApply').textContent = pairs.length
         ? 'Merge ' + nf(pairs.length) + (pairs.length === 1 ? ' item' : ' items') + ' into the kept one'
         : 'Nothing chosen';
       $('applyHint').textContent = !pairs.length
-        ? 'For each pair, choose which item to keep. The other one hands its stock over and is put away.'
-        : nf(pairs.length) + ' to merge' +
-          (mAcct ? '. The stock moves across on the date above, the cost goes with it where the kept one has none, and the emptied item is switched off. Invoices already written stay where they are.'
-                 : '. Pick the account the stock difference is written off to first.');
+        ? 'For each pair, choose which item to keep.'
+        : nf(pairs.length) + ' to merge. First every bill, expense, order and vendor credit listed on the item going is put onto the item kept - ' +
+          'which takes its stock and its cost with it. Whatever stock is still left is then moved across' +
+          (mAcct ? ' on the date above' : ' (pick the account above if any is left - the merge stops and says so if it is needed)') +
+          ', the cost goes with it where the kept one has none, and only once nothing is left on it is the item going switched off. ' +
+          'Invoices already written stay where they are.';
     } else if(act === 'stock'){
       var moving = picked.filter(function(r){
         var to = parseFloat(S.stock[r.id] !== undefined ? S.stock[r.id] : 0);
@@ -912,6 +926,42 @@
       });
   }
 
+  // which bills, expenses, orders and credits an item is on - the numbers, so what
+  // is where can be checked against QuickBooks and seen to have moved
+  function docList(docs, count){
+    docs = docs || [];
+    if(!docs.length) return '<div class="docs none">on no bill, expense or order in these dates</div>';
+    var shown = docs.slice(0, 6);
+    return '<div class="docs">' + shown.map(function(d){
+      return '<span class="' + (d.moved ? 'moved' : '') + '">' + esc(d.kindLabel) + ' ' +
+        esc(d.doc || d.id) + ' <i>' + esc(d.date) + ' · ' + nf(d.qty) + ' @ ' + money(d.rate) + '</i></span>';
+    }).join('') +
+      ((count || docs.length) > shown.length
+        ? '<span class="more">and ' + nf((count || docs.length) - shown.length) + ' more</span>' : '') +
+      '</div>';
+  }
+
+  // what a merge did, step by step, and whether it finished
+  function mergeReport(r){
+    var m = r.merge;
+    if(!m) return '';
+    var steps = [
+      nf(m.docsMoved) + ' of ' + nf(m.docsTotal) + ' documents moved',
+      m.stockMoved ? nf(m.stockMoved) + ' stock moved' : 'no stock left to move',
+      m.costCopied ? 'cost copied' : '',
+      m.putAway ? 'put away' : 'not put away'
+    ].filter(Boolean);
+    return '<div class="merged ' + (m.complete ? 'ok' : 'bad') + '">' +
+      '<b>' + (m.complete ? 'Merged into ' : 'Not finished merging into ') + esc(m.into) + '</b><br>' +
+      steps.join(' · ') +
+      (m.docsFailed && m.docsFailed.length
+        ? '<br>Refused: ' + m.docsFailed.map(function(f){
+            return esc(f.kind + ' ' + f.doc) + ' — ' + esc(f.why);
+          }).join('; ') : '') +
+      (m.moreDocs ? '<br>' + nf(m.moreDocs) + ' more documents than were read &mdash; merge again to take them.' : '') +
+      '</div>';
+  }
+
   function drawJob(job){
     $('runAside').textContent = job.done + ' of ' + job.total +
       (job.failed ? ' — ' + job.failed + ' refused' : '');
@@ -925,7 +975,7 @@
         div.textContent = l.name + ' — ' + (l.was === '' ? 'no cost' : l.was) + ' → ' + l.now;
       } else {
         div.className = 'err';
-        div.textContent = l.name + ' — ' + l.msg;
+        div.textContent = l.name + ' — ' + (l.now ? l.was + ' → ' + l.now + (l.msg ? ': ' : '') : '') + (l.msg || '');
       }
       box.appendChild(div);
     });

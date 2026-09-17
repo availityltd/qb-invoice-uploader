@@ -6741,7 +6741,7 @@ app.post('/api/products/clear', async (req, res) => {
 // One item per request, the way every other run in this app works, with what was
 // done written down as it goes.
 async function runProductJob(realmId, st, job) {
-  const token = await getAccessToken(realmId);
+  let token = await getAccessToken(realmId);
 
   for (const one of job.items) {
     if (job.stop) break;
@@ -6770,48 +6770,112 @@ async function runProductJob(realmId, st, job) {
         was = 'in use';
         now = 'put away';
       } else if (job.field === 'merge') {
-        // Two items that are one product. QuickBooks will not merge them and the
-        // invoices already written stay where they are - what they cost has been
-        // charged already, and rewriting a year of them would move months that
-        // are closed. What can be put right is the stock: the one being kept
-        // holds what the other one sold, so the shortfall is carried across and
-        // the empty one is put away.
+        // Two items that are one product, made into one - in this order, and each
+        // step said as it goes so the row shows what moved and what did not:
+        //
+        //   1. every bill, expense, order and vendor credit found on the item going
+        //      is put onto the item kept - which moves the stock and the cost those
+        //      bills brought in, so QuickBooks works cost of sales out of them
+        //   2. what stock the item going still reads is carried across
+        //   3. the cost goes with it where the one kept has none
+        //   4. the item going is put away - but only once nothing is left on it,
+        //      so a half-done merge is never hidden behind a switched-off item
+        //
+        // The invoices already written stay where they are. What they cost has
+        // been charged; moving a year of them belongs on the Product tab of
+        // Changes, where it is chosen on purpose.
         const keepId = String(one.value || '');
         const keep = st.rows.filter(r => r.id === keepId)[0];
         if (!keep) throw new Error('The item to keep is not in this read');
         if (keepId === one.id) throw new Error('That is the same item');
-
-        const had = Number(row.qty || 0);
-        if (had !== 0) {
-          await adjustStock(realmId, token, {
-            accountId: job.accountId, date: job.date,
-            memo: (job.memo || 'Stock moved to ' + keep.name),
-            itemId: one.id, from: had, to: 0
-          });
-          await adjustStock(realmId, token, {
-            accountId: job.accountId, date: job.date,
-            memo: (job.memo || 'Stock taken over from ' + row.name),
-            itemId: keepId, from: Number(keep.qty || 0), to: Number(keep.qty || 0) + had
-          });
-          row.qty = 0;
-          keep.qty = Number(keep.qty || 0) + had;
+        if (!sameVariant(row, keep)) {
+          throw new Error('These read as different shades - ' + row.name + ' and ' + keep.name + ' - so they are not merged');
+        }
+        if (row.type === 'Inventory' && keep.type !== 'Inventory') {
+          throw new Error('The item kept does not hold stock and this one does - keep the inventory item instead');
         }
 
-        // the cost travels with it where the one being kept has none
+        const report = row.merge = {
+          into: keep.name, docsTotal: (row.docs || []).length, docsMoved: 0, docsFailed: [],
+          stockMoved: 0, costCopied: false, putAway: false, complete: false,
+          moreDocs: Math.max(0, (row.docCount || 0) - (row.docs || []).length)
+        };
+        const pause = ms => new Promise(r => setTimeout(r, ms));
+        const pair = [{ from: { id: row.id, name: row.name }, to: { id: keep.id, name: keep.name } }];
+
+        // 1 - the documents, each tried a second time before it is called refused
+        let waiting = (row.docs || []).slice();
+        for (let round = 1; round <= 2 && waiting.length; round++) {
+          if (round === 2) { await pause(4000); token = await getAccessToken(realmId); }
+          const again = [];
+          for (const d of waiting) {
+            if (job.stop) break;
+            try {
+              await replaceItemOn(realmId, token, d.kind, d.id, pair);
+              d.moved = true;
+              report.docsMoved++;
+            } catch (e) {
+              // already moved by an earlier run counts as moved
+              if (/no longer|any more|None of those products/i.test(e.message)) { d.moved = true; report.docsMoved++; }
+              else { d.why = e.message; again.push(d); }
+            }
+          }
+          waiting = again;
+        }
+        report.docsFailed = waiting.map(d => ({ kind: d.kindLabel, doc: d.doc || d.id, date: d.date, why: d.why }));
+
+        // 2 - what stock is left, read fresh now the bills have moved
+        const nowGoing = await replaceItemById(realmId, token, row.id);
+        const nowKeep = await replaceItemById(realmId, token, keep.id);
+        const had = Number(nowGoing.qty || 0);
+        if (had !== 0 && row.type === 'Inventory') {
+          if (!job.accountId) throw new Error('Stock is left to move - pick the account to write the difference off to');
+          await adjustStock(realmId, token, {
+            accountId: job.accountId, date: job.date,
+            memo: 'Stock moved to ' + keep.name, itemId: row.id, from: had, to: 0
+          });
+          await adjustStock(realmId, token, {
+            accountId: job.accountId, date: job.date,
+            memo: 'Stock taken over from ' + row.name, itemId: keep.id,
+            from: Number(nowKeep.qty || 0), to: Number(nowKeep.qty || 0) + had
+          });
+          report.stockMoved = had;
+        }
+        row.qty = 0;
+        keep.qty = Number(nowKeep.qty || 0) + (report.stockMoved || 0);
+
+        // 3 - the cost
         if (!keep.cost && row.cost) {
           await updateProductItem(realmId, token, keepId, { PurchaseCost: Number(row.cost) });
           keep.cost = Number(row.cost);
+          report.costCopied = true;
         }
 
-        await updateProductItem(realmId, token, one.id, { Active: false });
-        row.active = false;
+        // 4 - put away only when nothing is left behind on it
+        if (!report.docsFailed.length && !report.moreDocs) {
+          await updateProductItem(realmId, token, one.id, { Active: false });
+          row.active = false;
+          report.putAway = true;
+          report.complete = true;
+        }
 
         job.done++;
-        job.log.push({ ok: true, name: row.name || one.id,
-                       was: had + ' in stock', now: 'moved to ' + keep.name + ', put away' });
+        if (!report.complete) job.failed++;
+        job.log.push({
+          ok: report.complete, name: row.name || one.id,
+          was: report.docsMoved + ' of ' + report.docsTotal + ' documents moved' +
+               (report.stockMoved ? ', ' + report.stockMoved + ' stock moved' : ''),
+          now: report.complete ? 'merged into ' + keep.name + ', put away'
+                               : 'not finished - ' + (report.docsFailed.length
+                                   ? report.docsFailed.length + ' document(s) refused'
+                                   : report.moreDocs + ' more documents than were read'),
+          msg: report.complete ? '' : report.docsFailed.map(f => f.kind + ' ' + f.doc + ': ' + f.why).join('; ')
+        });
         await logProductChange(realmId, {
-          id: one.id, name: row.name || '', sku: row.sku || '',
-          field: 'merge', was: had, now: keep.name, ok: true
+          id: one.id, name: row.name || '', sku: row.sku || '', field: 'merge',
+          was: report.docsMoved + '/' + report.docsTotal + ' documents, ' + (report.stockMoved || 0) + ' stock',
+          now: keep.name + (report.complete ? '' : ' (not finished)'), ok: report.complete,
+          message: report.complete ? '' : report.docsFailed.map(f => f.kind + ' ' + f.doc + ': ' + f.why).join('; ')
         }).catch(e => console.error('product log:', e.message));
         continue;
       } else if (job.field === 'stock') {
@@ -6879,7 +6943,7 @@ app.post('/api/products/apply', async (req, res) => {
     const body = req.body || {};
     const field = String(body.field || '');
     if (['cost', 'active', 'stock', 'merge'].indexOf(field) < 0) throw new Error('Unknown change');
-    if ((field === 'stock' || field === 'merge') && !body.accountId) {
+    if (field === 'stock' && !body.accountId) {
       throw new Error('Pick the account to write the difference off to');
     }
 

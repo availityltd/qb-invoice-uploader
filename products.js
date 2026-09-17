@@ -226,9 +226,15 @@ export async function readValuation(realmId, token, asOf) {
 // bought at all, and what it was last bought for: the cost to put on the items
 // that never had one.
 export async function readPurchases(realmId, token, from, to, onStep) {
+  // Bills and expenses bring stock in, and are what the cost is read from. Orders
+  // and vendor credits do not, but they carry the item all the same - and a merge
+  // that left them on the item being put away would not be a merge - so they are
+  // read for the list of documents only.
   const KINDS = [
-    { key: 'Bill',     detail: 'ItemBasedExpenseLineDetail' },
-    { key: 'Purchase', detail: 'ItemBasedExpenseLineDetail' }
+    { key: 'Bill',          label: 'Bill',           detail: 'ItemBasedExpenseLineDetail', stock: true },
+    { key: 'Purchase',      label: 'Expense',        detail: 'ItemBasedExpenseLineDetail', stock: true },
+    { key: 'PurchaseOrder', label: 'Purchase order', detail: 'ItemBasedExpenseLineDetail', stock: false },
+    { key: 'VendorCredit',  label: 'Vendor credit',  detail: 'ItemBasedExpenseLineDetail', stock: false }
   ];
 
   const by = new Map();
@@ -247,6 +253,7 @@ export async function readPurchases(realmId, token, from, to, onStep) {
 
       arr.forEach(txn => {
         read++;
+        const onThis = new Map();                  // item -> this document's lines of it
         (txn.Line || []).forEach(l => {
           const d = l[kind.detail];
           if (!d || !d.ItemRef) return;
@@ -256,13 +263,33 @@ export async function readPurchases(realmId, token, from, to, onStep) {
           const rate = Number(d.UnitPrice || (qty ? amount / qty : 0)) || 0;
 
           const was = by.get(id) ||
-            { qty: 0, amount: 0, bills: 0, lastDate: '', lastRate: 0 };
-          was.qty = round2(was.qty + qty);
-          was.amount = round2(was.amount + amount);
-          was.bills++;
-          const when = txn.TxnDate || '';
-          if (when >= was.lastDate) { was.lastDate = when; was.lastRate = round2(rate); }
+            { qty: 0, amount: 0, bills: 0, lastDate: '', lastRate: 0, docs: [], docCount: 0 };
+          if (kind.stock) {
+            was.qty = round2(was.qty + qty);
+            was.amount = round2(was.amount + amount);
+            was.bills++;
+            const when = txn.TxnDate || '';
+            if (when >= was.lastDate) { was.lastDate = when; was.lastRate = round2(rate); }
+          }
           by.set(id, was);
+
+          const doc = onThis.get(id) || { qty: 0, amount: 0 };
+          doc.qty = round2(doc.qty + qty);
+          doc.amount = round2(doc.amount + amount);
+          onThis.set(id, doc);
+        });
+
+        // one entry per document per item, saying which it is and what is on it
+        onThis.forEach((d, id) => {
+          const was = by.get(id);
+          was.docCount++;
+          if (was.docs.length < 60) {
+            was.docs.push({
+              kind: kind.key, kindLabel: kind.label, id: String(txn.Id),
+              doc: String(txn.DocNumber || ''), date: txn.TxnDate || '',
+              qty: d.qty, rate: d.qty ? round2(d.amount / d.qty) : 0, amount: d.amount
+            });
+          }
         });
       });
 
@@ -333,6 +360,7 @@ export function buildRows(items, sales, valuation, purchases) {
       soldQty: s.qty, soldAmount: s.amount, cogs: s.cogs,
       boughtQty: p.qty, boughtAmount: p.amount, bills: p.bills,
       lastBought: p.lastDate, lastRate: p.lastRate,
+      docs: p.docs || [], docCount: p.docCount || 0,
       // what the cost would be set to, in the order the evidence is worth
       // trusting: what it was last bought for, what QuickBooks averages it at,
       // what its twin was last bought for, what the item itself already says
@@ -358,7 +386,8 @@ export function buildRows(items, sales, valuation, purchases) {
         id: t.id, name: t.name, sku: t.sku, active: t.active, type: t.type,
         qty: t.qty, cost: t.cost, avg: t.avg,
         soldQty: t.soldQty, soldAmount: t.soldAmount, cogs: t.cogs,
-        bills: t.bills, boughtQty: t.boughtQty
+        bills: t.bills, boughtQty: t.boughtQty,
+        docs: (t.docs || []).slice(0, 12), docCount: t.docCount || 0
       };
     }).filter(Boolean);
 
@@ -372,7 +401,7 @@ export function buildRows(items, sales, valuation, purchases) {
       // nothing to merge on: whichever is kept, the answer is still no cost.
       // Those are to be filled in first, so they are kept apart from the pairs
       // where one of the two is carrying something worth moving across.
-      const carries = t => !!(t.cost || t.bills || t.soldQty || t.qty);
+      const carries = t => !!(t.cost || t.bills || t.docCount || t.soldQty || t.qty);
       r.flags.push(all.some(carries) ? 'twin-ready' : 'twin-bare');
 
       // the one kept holds the stock, so an inventory item always comes before
