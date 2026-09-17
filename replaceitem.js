@@ -484,6 +484,47 @@ export function shopifyVariants(rows) {
 // by name, description or SKU - becomes a pair that moves onto it. Nothing is
 // guessed: a SKU that matches no item, or more than one, is set aside to be
 // looked at, and an item that is itself live in Shopify is never merged away.
+// Why two items were taken for the same product, in words, with how far it is
+// worth trusting. A pair is only ever made where one of the three things an item
+// is known by - its name, its description, its SKU - reads exactly the same on
+// both once case, spaces and punctuation are set aside. Which of them matched,
+// and what the shade came to on each side, is the difference between a match
+// worth running and one worth looking at first.
+export function matchWhy(keep, dup, helpers) {
+  const { variantsOf } = helpers;
+  const fields = it => [['name', it.name], ['SKU', it.sku], ['description', it.desc]];
+  const found = [];
+
+  fields(keep).forEach(([ka, va]) => fields(dup).forEach(([kb, vb]) => {
+    const a = looseName(va), b = looseName(vb);
+    if (!a || a.length <= 2 || a !== b) return;
+    found.push({ on: ka === kb ? ('the same ' + ka) : (keep === dup ? ka : ka + ' = ' + kb), text: String(va).trim(), ka, kb });
+  }));
+
+  const vk = Array.from(variantsOf(keep)), vd = Array.from(variantsOf(dup));
+  const shared = vk.filter(v => vd.indexOf(v) > -1);
+  const shade = shared.length ? 'same shade (' + shared.join(', ') + ')'
+              : (!vk.length || !vd.length) ? 'shade not shown on one of them'
+              : 'different shades';
+
+  // a SKU or a name that reads the same is the product itself; a description
+  // alone is often the same line for forty shades of the same lipstick
+  const best = found.filter(f => f.ka !== 'description' && f.kb !== 'description')[0] || found[0] || null;
+  const onNameOrSku = !!(best && best.ka !== 'description' && best.kb !== 'description');
+  const strength = !best ? 'none'
+                 : (onNameOrSku && shared.length) ? 'strong'
+                 : onNameOrSku ? 'fair'
+                 : shared.length ? 'fair'
+                 : 'weak';
+
+  return {
+    on: best ? best.on : '',
+    text: best ? best.text : '',
+    all: found.map(f => f.on),
+    keepShades: vk, dupShades: vd, shade, strength
+  };
+}
+
 export function pairsFromShopify(variants, items, helpers) {
   const { twinKeys, sameVariant } = helpers;
   const norm = s => looseName(s);
@@ -554,7 +595,8 @@ export function pairsFromShopify(variants, items, helpers) {
         line: pairs.length + 1,
         from: { id: o.id, name: o.name, sku: o.sku, type: o.type, active: o.active },
         to: { id: keep.id, name: keep.name, sku: keep.sku, type: keep.type, active: keep.active,
-              shopCost: v.cost }
+              shopCost: v.cost, shopSku: v.sku, shopTitle: v.title },
+        why: matchWhy(keep, o, helpers)
       });
     }));
   });

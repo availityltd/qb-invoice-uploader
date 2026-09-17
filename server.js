@@ -7360,6 +7360,34 @@ app.post('/api/replace/target', async (req, res) => {
   }
 });
 
+// The pairs, narrowed to the ones ticked on the page. Read first, run second:
+// this is where a match that does not look right is taken out before anything is
+// found or changed.
+app.post('/api/replace/pairs-keep', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = replStore.get(realmId);
+    if (!st || !st.pairs.length) throw new Error('There are no pairs to narrow');
+    if ((st.scan && st.scan.running) || (st.job && st.job.running)) throw new Error('A read or a run is still going');
+
+    const ids = new Set((((req.body || {}).ids) || []).map(String));
+    if (!ids.size) throw new Error('Tick the pairs to keep');
+    const kept = st.pairs.filter(p => ids.has(String(p.from.id)));
+    if (!kept.length) throw new Error('None of those pairs is in the list');
+
+    st.pairs = kept;
+    st.rows = [];
+    st.scan = null;
+    st.scanState = null;
+    st.job = null;
+    res.json({ pairs: kept });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post('/api/replace/scan', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;

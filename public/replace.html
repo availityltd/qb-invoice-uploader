@@ -40,7 +40,10 @@
   td.nm{white-space:normal;max-width:300px;font-weight:600}
   td.nm small{display:block;font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
   td.arrow{color:var(--faint);text-align:center;width:24px}
-  td.kinds{white-space:normal;font-size:11.5px;color:var(--muted);max-width:220px}
+  td.kinds{white-space:normal;font-size:11.5px;color:var(--muted);max-width:240px}
+  td.tick{width:34px}
+  td.tick input{accent-color:var(--qbo);width:15px;height:15px;margin:0}
+  tr.off{opacity:.45}
   .tag{font-size:10px;letter-spacing:.04em;text-transform:uppercase;
     padding:2px 6px;border-radius:4px;background:#F1F3F2;color:var(--muted)}
   .tag.ok{background:#EFF8EC;color:var(--ok)}
@@ -164,10 +167,19 @@
           <div class="sec">
             <h2><span class="no">02</span> The pairs, as QuickBooks knows them
               <span class="aside" id="pairCount"></span></h2>
-            <div class="tbl" style="max-height:360px">
+            <p class="hint" style="margin:0 0 10px" id="pairWhyHint"></p>
+            <div class="acts hide" id="pairActs">
+              <button class="mini" id="pairAll">Tick all</button>
+              <button class="mini" id="pairWeak">Untick the ones to look at</button>
+              <button class="mini" id="pairCsv">Download this list</button>
+              <button class="solid" id="pairKeep">Use only the ticked pairs</button>
+            </div>
+            <div class="tbl" style="max-height:420px;margin-top:12px">
               <table>
                 <thead><tr>
+                  <th class="tickh"></th>
                   <th>Going</th><th></th><th>Taking its place</th>
+                  <th>Why they were matched</th>
                   <th class="num">Transactions</th><th class="num">Lines</th>
                   <th class="num">Qty</th><th class="num">Amount</th><th>Where</th>
                   <th>Already on the new one</th><th></th>
@@ -275,7 +287,7 @@
   "use strict";
 
   var $ = function(id){ return document.getElementById(id); };
-  var S = { kinds:[], pairs:[], rows:[], total:0, poller:null, logged:0, items:[] };
+  var S = { kinds:[], pairs:[], rows:[], total:0, poller:null, logged:0, items:[], drop:{} };
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -504,6 +516,20 @@
     var byFrom = {};
     (summary || []).forEach(function(g){ byFrom[g.from.id] = g; });
     $('pairCount').textContent = nf(S.pairs.length) + (S.pairs.length === 1 ? ' pair' : ' pairs');
+    $('pairActs').classList.toggle('hide', S.pairs.length < 2);
+
+    var strong = S.pairs.filter(function(p){ return (p.why || {}).strength === 'strong'; }).length;
+    var fair = S.pairs.filter(function(p){ return (p.why || {}).strength === 'fair'; }).length;
+    var weak = S.pairs.length - strong - fair;
+    $('pairWhyHint').innerHTML = !S.pairs.length ? '' :
+      'Two items are taken for the same product only where one of the three things an item is known by &mdash; ' +
+      'its name, its description, its SKU &mdash; reads exactly the same on both once case, spaces and punctuation ' +
+      'are set aside, <b>and</b> the shade agrees. <b>Clear</b>: the name or the SKU matched and both say the same ' +
+      'shade. <b>Worth a look</b>: one of those two held but not the other &mdash; most often a shared description ' +
+      'with the shade agreeing, which is the usual shape of a connector duplicate. <b>Look first</b>: only the ' +
+      'description matched and no shade could be read on one of them. ' +
+      nf(strong) + ' clear, ' + nf(fair) + ' worth a look, ' + nf(weak) + ' to look at first. ' +
+      'Untick anything that is not the same product, then press <b>Use only the ticked pairs</b>.';
 
     $('pairRows').innerHTML = S.pairs.map(function(p){
       var g = byFrom[p.from.id];
@@ -512,13 +538,22 @@
         g.failed ? '<span class="tag bad">' + nf(g.failed) + ' refused</span>' :
         (g.done && g.done === g.txns) ? '<span class="tag ok">done</span>' :
         g.done ? '<span class="tag warn">' + nf(g.done) + ' of ' + nf(g.txns) + '</span>' : '';
-      return '<tr>' +
+      var w = p.why || {};
+      var mark = w.strength === 'strong' ? '<span class="tag ok">clear</span>'
+               : w.strength === 'fair' ? '<span class="tag warn">worth a look</span>'
+               : '<span class="tag bad">look first</span>';
+      return '<tr class="' + (S.drop[p.from.id] ? 'off' : '') + '">' +
+        '<td class="tick"><input type="checkbox" data-pair="' + esc(p.from.id) + '"' +
+          (S.drop[p.from.id] ? '' : ' checked') + '></td>' +
         '<td class="nm">' + esc(p.from.name) + (p.from.sku ? '<small>' + esc(p.from.sku) + '</small>' : '') + '</td>' +
         '<td class="arrow">&rarr;</td>' +
         (p.to
           ? '<td class="nm">' + esc(p.to.name) + (p.to.sku ? '<small>' + esc(p.to.sku) + '</small>' : '') +
             (p.to.active ? '' : ' <span class="tag warn">switched off</span>') + '</td>'
           : '<td class="nm" style="color:var(--faint);font-weight:400">picked after the read</td>') +
+        '<td class="kinds">' + mark + '<div>' + esc(w.on || 'nothing in common') +
+          (w.text ? ': <b>' + esc(w.text) + '</b>' : '') + '</div>' +
+          '<div>' + esc(w.shade || '') + '</div></td>' +
         '<td class="num mono">' + (g ? nf(g.txns) : '—') + '</td>' +
         '<td class="num mono">' + (g ? nf(g.lines) : '—') + '</td>' +
         '<td class="num mono">' + (g ? nf(g.qty) : '—') + '</td>' +
@@ -534,6 +569,40 @@
         '<td>' + state + '</td>' +
         '</tr>';
     }).join('');
+
+    Array.prototype.forEach.call($('pairRows').querySelectorAll('input[data-pair]'), function(b){
+      b.addEventListener('change', function(){
+        var id = b.getAttribute('data-pair');
+        if(b.checked) delete S.drop[id]; else S.drop[id] = true;
+        var tr = b.parentNode.parentNode;
+        tr.className = b.checked ? '' : 'off';
+      });
+    });
+  }
+
+  // the whole list as it stands, to be read away from the screen before any of it
+  // is run - every pair with what matched, what the shade came to, and how clear
+  function pairCsv(){
+    var head = ['Duplicate (going)', 'Its SKU', 'Type', 'Active', 'Kept (active in Shopify)', 'Its SKU',
+                'Shopify SKU', 'Shopify cost', 'Matched on', 'What matched', 'Shade', 'How clear',
+                'Everything that matched'];
+    var rows = [head].concat(S.pairs.map(function(p){
+      var w = p.why || {};
+      return [p.from.name, p.from.sku, p.from.type, p.from.active ? 'yes' : 'no',
+              p.to.name, p.to.sku, p.to.shopSku || '', p.to.shopCost == null ? '' : p.to.shopCost,
+              w.on || '', w.text || '', w.shade || '', w.strength || '', (w.all || []).join(' | ')];
+    }));
+    var text = rows.map(function(r){
+      return r.map(function(c){
+        var v = String(c == null ? '' : c);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8;' }));
+    a.download = 'product-pairs.csv';
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
   }
 
   /* ---------- finding them ---------- */
@@ -826,6 +895,29 @@
 
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
   $('btnPairs').addEventListener('click', checkPairs);
+  $('pairCsv').addEventListener('click', pairCsv);
+  $('pairAll').addEventListener('click', function(){ S.drop = {}; drawPairs(null); });
+  $('pairWeak').addEventListener('click', function(){
+    // everything but a clear match is set aside to be read rather than run
+    S.pairs.forEach(function(p){ if((p.why || {}).strength !== 'strong') S.drop[p.from.id] = true; });
+    drawPairs(null);
+  });
+  $('pairKeep').addEventListener('click', function(){
+    var ids = S.pairs.filter(function(p){ return !S.drop[p.from.id]; }).map(function(p){ return p.from.id; });
+    if(!ids.length) return say('pairStat', 'bad', '<b>Tick at least one pair to keep</b>');
+    $('pairKeep').disabled = true;
+    post('/api/replace/pairs-keep', { ids: ids })
+      .then(function(d){
+        S.pairs = d.pairs || [];
+        S.drop = {};
+        say('pairStat', 'ok', '<b>' + nf(S.pairs.length) +
+          (S.pairs.length === 1 ? ' pair kept.' : ' pairs kept.') + ' The rest are left alone.</b>');
+        $('foundSheet').classList.add('hide');
+        drawPairs(null);
+      })
+      .catch(function(e){ say('pairStat', 'bad', '<b>' + esc(e.message) + '</b>'); })
+      .then(function(){ $('pairKeep').disabled = false; });
+  });
   (function(){
     var z = $('shopZone'), inp = $('shopFile');
     z.addEventListener('click', function(){ inp.click(); });
