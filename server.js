@@ -3034,6 +3034,24 @@ app.get('/api/swap/products', async (req, res) => {
   }
 });
 
+const swapChecks = new Map();      // realmId -> { running, stop }
+
+app.get('/api/swap/plan-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const c = swapChecks.get(realmId);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ running: !!(c && c.running), stopping: !!(c && c.stop) });
+});
+
+app.post('/api/swap/plan-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const c = swapChecks.get(realmId);
+  if (c && c.running) c.stop = true;
+  res.json({ ok: true });
+});
+
 app.post('/api/swap/plan', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -3052,7 +3070,16 @@ app.post('/api/swap/plan', async (req, res) => {
     const fromP = swapProduct(products, from);
     const toP = swapProduct(products, to);
 
-    const rows = await buildSwapPlan(realmId, token, list, fromP.id);
+    // the check is held on the server while it reads, so any computer on the
+    // same company can see it running and stop it
+    const check = { running: true, stop: false, started: Date.now() };
+    swapChecks.set(realmId, check);
+    let rows;
+    try {
+      rows = await buildSwapPlan(realmId, token, list, fromP.id, () => check.stop);
+    } finally {
+      check.running = false;
+    }
 
     const old = swapStore.get(realmId);
     if (old && old.job && old.job.running) throw new Error('A change is still running');
@@ -3285,7 +3312,8 @@ app.post('/api/recat/scan', async (req, res) => {
 
     runRecatScan(realmId, st, scan).catch(e => {
       scan.running = false;
-      scan.error = e.message === 'stopped' ? null : e.message;
+      scan.stopped = e.message === 'stopped';
+      scan.error = scan.stopped ? null : e.message;
     });
 
     res.json({ ok: true, from: fromA, to: toA });
@@ -3392,7 +3420,7 @@ app.get('/api/recat/status', async (req, res) => {
     rows: st.rows,
     scan: s ? {
       running: s.running, from: s.from, to: s.to, upto: s.upto, kind: s.kind,
-      found: s.found, read: s.read, error: s.error || null
+      found: s.found, read: s.read, stopped: !!s.stopped, error: s.error || null
     } : null,
     job: job ? {
       running: job.running, done: job.done, failed: job.failed,
@@ -3522,7 +3550,8 @@ app.post('/api/desc/scan', async (req, res) => {
       })
       .catch(e => {
         scan.running = false;
-        scan.error = e.message === 'stopped' ? null : e.message;
+        scan.stopped = e.message === 'stopped';
+        scan.error = scan.stopped ? null : e.message;
       });
 
     res.json({ ok: true, account: only });
@@ -3557,7 +3586,7 @@ app.get('/api/desc/status', async (req, res) => {
     txns: st.rows.length,
     scan: s ? {
       running: s.running, from: s.from, to: s.to, upto: s.upto, kind: s.kind,
-      found: s.found, read: s.read, itemOnly: s.itemOnly || 0, error: s.error || null
+      found: s.found, read: s.read, itemOnly: s.itemOnly || 0, stopped: !!s.stopped, error: s.error || null
     } : null,
     job: job ? {
       running: job.running, done: job.done, failed: job.failed,
@@ -6558,19 +6587,23 @@ app.post('/api/products/scan', async (req, res) => {
 
     (async () => {
       const token = await getAccessToken(realmId);
+      const halt = () => { if (scan.stop) throw new Error('stopped'); };
 
       scan.step = 'the items';
-      const items = await readItems(realmId, token, s => { scan.items = s.items; });
+      const items = await readItems(realmId, token, s => { halt(); scan.items = s.items; });
+      halt();
 
       scan.step = 'what sold, and what it cost';
       const sales = await readItemSales(realmId, token, from, to);
+      halt();
 
       scan.step = 'what the stock is worth';
       const valuation = await readValuation(realmId, token, to);
+      halt();
 
       scan.step = 'what was bought';
       const purchases = await readPurchases(realmId, token, from, to,
-        s => { scan.read = s.read; });
+        s => { halt(); scan.read = s.read; });
 
       st.rows = buildProductRows(items, sales.by, valuation.by, purchases.by);
       st.summary = summariseProducts(st.rows);
@@ -6580,7 +6613,8 @@ app.post('/api/products/scan', async (req, res) => {
       scan.finished = Date.now();
     })().catch(e => {
       scan.running = false;
-      scan.error = e.message;
+      scan.stopped = e.message === 'stopped';
+      scan.error = scan.stopped ? null : e.message;
     });
 
     res.json({ ok: true });
@@ -6604,7 +6638,7 @@ app.get('/api/products/status', async (req, res) => {
     columns: st.columns || null,
     scan: {
       running: st.scan.running, step: st.scan.step, items: st.scan.items,
-      read: st.scan.read, error: st.scan.error || null
+      read: st.scan.read, stopped: !!st.scan.stopped, error: st.scan.error || null
     },
     job: st.job ? {
       running: st.job.running, field: st.job.field, done: st.job.done,
@@ -6987,6 +7021,7 @@ app.post('/api/products/stop', async (req, res) => {
   if (!realmId) return;
   const st = prodStore.get(realmId);
   if (st && st.job) st.job.stop = true;
+  if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
 });
 

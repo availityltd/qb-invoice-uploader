@@ -505,6 +505,10 @@
 
   var LABEL = {};
   function drawScan(s){
+    // the stop follows the read on the server, not the click that began it - a
+    // read started on another computer, or before a reload, can always be stopped
+    $('btnScanStop').classList.toggle('hide', !s.running);
+    $('btnScan').disabled = !!s.running;
     if(s.running){
       say('scanStat', 'busy', 'Reading <b>' + esc(LABEL[s.kind] || s.kind || '…') + '</b> up to <b>' +
         esc(s.upto) + '</b> &mdash; ' + nf(s.read) + ' read, <b>' + nf(s.found) + '</b> carrying one of the products');
@@ -649,6 +653,9 @@
   }
 
   function drawJob(job){
+    // the same for the run
+    $('btnStop').classList.toggle('hide', !job.running);
+    if(job.running) $('btnRun').disabled = true;
     $('runSheet').classList.remove('hide');
     $('runAside').textContent = nf(job.done) + ' of ' + nf(job.total) +
       (job.failed ? ' — ' + nf(job.failed) + ' refused' : '');

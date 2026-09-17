@@ -140,6 +140,7 @@
             </div>
             <div class="acts" style="margin-top:14px">
               <button class="solid" id="btnScan">Read the books</button>
+              <button class="ghost hide" id="btnScanStop" style="border-color:var(--neg);color:var(--neg)">Stop</button>
               <button class="ghost" id="btnReset">Start again</button>
             </div>
             <div class="stat" id="statBox"></div>
@@ -963,6 +964,9 @@
   }
 
   function drawJob(job){
+    // shown for as long as the run is running on the server, from this computer
+    // or another one
+    $('btnStop').classList.toggle('hide', !job.running);
     $('runAside').textContent = job.done + ' of ' + job.total +
       (job.failed ? ' — ' + job.failed + ' refused' : '');
 
@@ -1063,12 +1067,17 @@
 
   function drawScan(d){
     var s = d.scan;
+    // the stop follows the read on the server, whichever computer began it
+    $('btnScanStop').classList.toggle('hide', !s.running);
+    $('btnScan').disabled = !!s.running;
+    if(!s.running) $('btnScanStop').disabled = false;
     if(s.running){
       say('busy', 'Reading <b>' + esc(s.step) + '</b> &mdash; ' +
         nf(s.items) + ' items, ' + nf(s.read) + ' bills read');
       return;
     }
     $('btnScan').disabled = false;
+    if(s.stopped){ say('bad', '<b>Stopped.</b> Change the dates and read the books again.'); return; }
     if(s.error){ say('bad', '<b>' + esc(s.error) + '</b>'); return; }
 
     S.summary = d.summary;
@@ -1115,6 +1124,11 @@
   $('btnCsv').addEventListener('click', csv);
   $('btnApply').addEventListener('click', apply);
   $('adjAcct').addEventListener('change', drawApply);
+  $('btnScanStop').addEventListener('click', function(){
+    $('btnScanStop').disabled = true;
+    say('busy', 'Stopping after the read in hand…');
+    post('/api/products/stop');
+  });
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     post('/api/products/stop').then(function(){ $('btnStop').disabled = false; });

@@ -46,11 +46,12 @@ const lineItem = l => {
 // The invoices behind the pasted numbers. A number is looked for as it was
 // written and with a leading #, because #91306999 and 91306999 are two
 // different invoices and we do not know which one was pasted.
-export async function readInvoices(realmId, token, numbers) {
+export async function readInvoices(realmId, token, numbers, shouldStop) {
   const byKey = new Map();                       // pasted key -> [invoice, ...]
   const size = 20;                               // whole invoices are heavy
 
   for (let i = 0; i < numbers.length; i += size) {
+    if (shouldStop && shouldStop()) throw new Error('Stopped - nothing was changed');
     const slice = numbers.slice(i, i + size);
     const wanted = new Set(slice.map(n => n.key));
     const variants = [];
@@ -116,8 +117,8 @@ export function planInvoice(inv, fromId, pastedAs) {
 }
 
 // the whole pasted list against QuickBooks
-export async function buildPlan(realmId, token, numbers, fromId) {
-  const found = await readInvoices(realmId, token, numbers);
+export async function buildPlan(realmId, token, numbers, fromId, shouldStop) {
+  const found = await readInvoices(realmId, token, numbers, shouldStop);
   const rows = [];
 
   numbers.forEach(n => {

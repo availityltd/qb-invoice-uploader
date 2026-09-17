@@ -127,6 +127,13 @@ Closing the page changes nothing. `jobs.js` is the reference implementation and
 `jobstore.js` writes its position to Postgres after every batch, so a deploy
 mid-run picks up where it stopped (`resumeUnfinished`).
 
+**Every read of QuickBooks can be stopped, from any computer.** A read or a run
+lives on the server, one per company, and every computer on that company sees
+the same one. So its Stop button is drawn from the server's state on every poll
+(`scan.running`, `job.running`) - never shown only by the click that started it -
+and a stopped read reports `stopped` rather than an empty result. A page added
+later that reads QuickBooks follows this, or it strands a read nobody can stop.
+
 **Ask once, then remember.** Column choices per courier, bank name → QB account
 mappings, SKU mappings — all saved in `settings.js` and never asked again unless
 something new appears.

@@ -137,6 +137,7 @@
             <textarea id="nums" spellcheck="false" placeholder="WH1132&#10;WH1133&#10;WH1134"></textarea>
             <div class="acts" style="margin-top:14px">
               <button class="solid" id="btnCheck">Check these invoices</button>
+              <button class="ghost hide" id="btnCheckStop" style="border-color:var(--neg);color:var(--neg)">Stop</button>
               <button class="ghost" id="btnReset">Start again</button>
             </div>
             <div class="stat" id="statBox"></div>
@@ -326,6 +327,8 @@
     if(!numbers.trim()) return say('bad', '<b>Paste the invoice numbers first</b>');
 
     $('btnCheck').disabled = true;
+    S.checking = true;
+    $('btnCheckStop').classList.remove('hide');
     say('busy', 'Reading those invoices out of QuickBooks…');
 
     post('/api/swap/plan', { from: S.from.id, to: S.to.id, numbers: numbers })
@@ -337,7 +340,12 @@
         say('ok', '<b>' + d.pasted + ' numbers read</b>');
       })
       .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); })
-      .then(function(){ $('btnCheck').disabled = false; });
+      .then(function(){
+        S.checking = false;
+        $('btnCheck').disabled = false;
+        $('btnCheckStop').classList.add('hide');
+        $('btnCheckStop').disabled = false;
+      });
   }
 
   function counts(){
@@ -474,6 +482,10 @@
   }
 
   function drawJob(job){
+    // shown for as long as the run is running on the server - started from this
+    // computer or another one, before a reload or after it
+    $('btnStop').classList.toggle('hide', !job.running);
+    if(job.running) $('btnRun').disabled = true;
     $('runSheet').classList.remove('hide');
     var pct = job.total ? Math.round(100 * job.done / job.total) : 0;
     $('bar').style.width = pct + '%';
@@ -530,6 +542,24 @@
   $('toFind').addEventListener('input', function(){ drawPicker('to'); });
   $('rewrite').addEventListener('change', function(){ if(S.rows.length) drawPlan(); });
   $('btnCheck').addEventListener('click', check);
+  $('btnCheckStop').addEventListener('click', function(){
+    $('btnCheckStop').disabled = true;
+    post('/api/swap/plan-stop');
+  });
+
+  // A check reads QuickBooks on the server, and another computer on the same
+  // company - or this one before a reload - may have one going. Its stop is
+  // shown whenever one is, not only on the computer that pressed the button.
+  function watchCheck(){
+    get('/api/swap/plan-status').then(function(d){
+      $('btnCheckStop').classList.toggle('hide', !d.running);
+      if(!d.running) $('btnCheckStop').disabled = false;
+      if(d.running) $('btnCheck').disabled = true;
+      else if(!S.checking) $('btnCheck').disabled = false;
+    }).catch(function(){ /* tried again on the next tick */ });
+  }
+  setInterval(watchCheck, 3000);
+  watchCheck();
   $('btnAll').addEventListener('click', function(){ tickAll(true); });
   $('btnNone').addEventListener('click', function(){ tickAll(false); });
   $('btnCsv').addEventListener('click', csv);

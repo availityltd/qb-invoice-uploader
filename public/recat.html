@@ -139,6 +139,7 @@
 
             <div class="acts" style="margin-top:14px">
               <button class="solid" id="btnScan">Find these transactions</button>
+              <button class="ghost hide" id="btnScanStop" style="border-color:var(--neg);color:var(--neg)">Stop</button>
               <button class="ghost" id="btnReset">Start again</button>
             </div>
             <div class="stat" id="statBox"></div>
@@ -623,19 +624,29 @@
   }
 
   function drawScan(s){
+    // the stop follows the read on the server, not the button that started it -
+    // a read begun on another computer, or before a reload, can still be stopped
+    $('btnScanStop').classList.toggle('hide', !s.running);
+    $('btnScan').disabled = !!s.running;
+    if(!s.running) $('btnScanStop').disabled = false;
     if(s.running){
       say('busy', 'Reading the books &mdash; up to <b>' + esc(s.upto) + '</b>, ' +
         s.read + ' transactions read, <b>' + s.found + '</b> under that category so far');
       return;
     }
     $('btnScan').disabled = false;
-    if(s.error) say('bad', '<b>' + esc(s.error) + '</b>');
+    if(s.stopped) say('bad', '<b>Stopped.</b> Change the dates or what is ticked, and read again.');
+    else if(s.error) say('bad', '<b>' + esc(s.error) + '</b>');
     else say('ok', '<b>' + s.found + (s.found === 1 ? ' transaction' : ' transactions') +
       '</b> under that category between ' + esc(s.from) + ' and ' + esc(s.to) +
       ' &mdash; ' + s.read + ' read in all');
   }
 
   function drawJob(job){
+    // shown for as long as the run is running on the server - started from this
+    // computer or another one, before a reload or after it
+    $('btnStop').classList.toggle('hide', !job.running);
+    if(job.running) $('btnRun').disabled = true;
     $('runSheet').classList.remove('hide');
     var pct = job.total ? Math.round(100 * job.done / job.total) : 0;
     $('bar').style.width = pct + '%';
@@ -728,6 +739,11 @@
 
   $('btnHistCsv').addEventListener('click', histCsv);
   $('btnRun').addEventListener('click', run);
+  $('btnScanStop').addEventListener('click', function(){
+    $('btnScanStop').disabled = true;
+    say('busy', 'Stopping after the read in hand…');
+    post('/api/recat/stop');
+  });
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     post('/api/recat/stop').then(function(){ $('btnStop').disabled = false; });
