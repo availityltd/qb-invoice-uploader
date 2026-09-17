@@ -7166,7 +7166,10 @@ app.post('/api/replace/scan', async (req, res) => {
       })
       .catch(e => {
         scan.running = false;
-        scan.error = e.message === 'stopped' ? null : e.message;
+        // a stop asked for is not an error - the dates or the kinds are about to
+        // change and the read to start again
+        scan.stopped = e.message === 'stopped';
+        scan.error = scan.stopped ? null : e.message;
       });
 
     res.json({ ok: true });
@@ -7218,11 +7221,13 @@ app.get('/api/replace/status', async (req, res) => {
     rows: st.rows.slice(0, limit),
     scan: s ? {
       running: s.running, from: s.from, to: s.to, kinds: s.kinds, kind: s.kind,
-      upto: s.upto, found: s.found, read: s.read, error: s.error || null
+      upto: s.upto, found: s.found, read: s.read, stopped: !!s.stopped, error: s.error || null
     } : null,
     job: job ? {
       running: job.running, done: job.done, failed: job.failed, lines: job.lines,
-      total: job.total, error: job.error || null, log: job.log.slice(-80)
+      total: job.total, round: job.round, retried: job.retried, recovered: job.recovered,
+      stopped: !!job.stopped, failures: job.failures || [],
+      error: job.error || null, log: job.log.slice(-80)
     } : null
   });
 });
@@ -7231,12 +7236,38 @@ app.get('/api/replace/status', async (req, res) => {
 // times out under inventory locks, and a slow run that finishes beats a fast one
 // that does not.
 async function runReplace(realmId, st, job) {
-  const token = await getAccessToken(realmId);
+  let token = await getAccessToken(realmId);
   const pairById = new Map(st.pairs.map(p => [p.from.id, p]));
+  const pause = ms => new Promise(r => setTimeout(r, ms));
 
-  for (const row of job.rows) {
+  // A refusal is very often not about the transaction at all - a lock held by
+  // another edit, a gateway that timed out, a token that ran out mid-run. So the
+  // run goes through once, then takes the refused ones again, twice more, after
+  // a breath each time. Only what is still refused after that is reported as
+  // refused, with the reason QuickBooks gave the last time.
+  for (job.round = 1; job.round <= 3; job.round++) {
+    const todo = job.rows.filter(r => job.round === 1 ? r.state === 'ready' : r.state === 'failed');
+    if (!todo.length) break;
+    if (job.round > 1) {
+      job.log.push({ ok: true, note: true, doc: 'Trying the ' + todo.length + ' refused again (round ' + job.round + ')', lines: 0 });
+      await pause(4000);
+      token = await getAccessToken(realmId);
+      job.retried += job.round === 2 ? todo.length : 0;
+    }
+    await replacePass(realmId, token, job, todo, pairById);
+    if (job.stop) { job.stopped = true; break; }
+  }
+
+  job.failures = job.rows.filter(r => r.state === 'failed')
+    .map(r => ({ kind: r.kindLabel, doc: r.doc || r.qbId, date: r.date, why: r.note }));
+  job.running = false;
+  job.finished = Date.now();
+}
+
+async function replacePass(realmId, token, job, todo, pairById) {
+  for (const row of todo) {
     if (job.stop) break;
-    if (row.state !== 'ready') continue;
+    const again = row.state === 'failed';
 
     const pairs = Array.from(new Set(row.hits.map(h => h.fromId)))
       .map(id => pairById.get(id)).filter(Boolean);
@@ -7244,8 +7275,8 @@ async function runReplace(realmId, st, job) {
     try {
       const out = await replaceItemOn(realmId, token, row.kind, row.qbId, pairs);
       row.state = 'changed';
-      row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' changed';
-      job.done++;
+      row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' changed' + (again ? ' on another try' : '');
+      if (again) { job.failed--; job.recovered++; } else job.done++;
       job.lines += out.lines;
       job.log.push({
         ok: true, doc: row.kindLabel + ' ' + (out.doc || row.qbId), lines: out.lines,
@@ -7262,21 +7293,20 @@ async function runReplace(realmId, st, job) {
     } catch (e) {
       row.state = 'failed';
       row.note = e.message;
-      job.done++;
-      job.failed++;
+      if (!again) { job.done++; job.failed++; }
       job.log.push({ ok: false, doc: row.kindLabel + ' ' + (row.doc || row.qbId), msg: e.message });
-      for (const p of pairs) {
-        await logProductChange(realmId, {
-          id: p.from.id, name: p.from.name, sku: p.from.sku, field: 'replace',
-          was: row.kindLabel + ' ' + (row.doc || row.qbId), now: p.to.name,
-          ok: false, message: e.message
-        }).catch(err => console.error('replace log:', err.message));
+      // the record says a refusal once, when it is final - not once per try
+      if (again && job.round === 3) {
+        for (const p of pairs) {
+          await logProductChange(realmId, {
+            id: p.from.id, name: p.from.name, sku: p.from.sku, field: 'replace',
+            was: row.kindLabel + ' ' + (row.doc || row.qbId), now: p.to.name,
+            ok: false, message: e.message
+          }).catch(err => console.error('replace log:', err.message));
+        }
       }
     }
   }
-
-  job.running = false;
-  job.finished = Date.now();
 }
 
 app.post('/api/replace/run', async (req, res) => {
@@ -7292,12 +7322,15 @@ app.post('/api/replace/run', async (req, res) => {
     // the kinds left ticked on the page decide what is run - bills alone, say,
     // before the invoices are touched
     const kinds = (req.body || {}).kinds;
+    // what a finished run left refused is taken again by pressing the button again
+    st.rows.forEach(r => { if (r.state === 'failed') { r.state = 'ready'; r.note = ''; } });
     const rows = st.rows.filter(r => r.state === 'ready' &&
       (!Array.isArray(kinds) || !kinds.length || kinds.includes(r.kind)));
     if (!rows.length) throw new Error('Nothing is waiting to be changed');
 
     const job = {
       running: true, stop: false, done: 0, failed: 0, lines: 0,
+      round: 1, retried: 0, recovered: 0,
       total: rows.length, rows, log: [], started: Date.now()
     };
     st.job = job;

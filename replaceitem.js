@@ -148,9 +148,12 @@ function whoOf(kind, txn) {
 // One window of one kind. QuickBooks stops handing rows over past 9,000 in a
 // query, so a window that reaches it is said to have, and is read again in
 // smaller pieces - which for a month of invoices here means a day at a time.
-async function readSpan(realmId, token, kind, from, to, keep, onRead) {
+async function readSpan(realmId, token, kind, from, to, keep, onRead, shouldStop) {
   let start = 1;
   while (true) {
+    // a month of invoices is dozens of reads, so stopping is looked at before
+    // every one of them rather than only between months
+    if (shouldStop && shouldStop()) throw new Error('stopped');
     const q = await qbQueryStrict(realmId, token,
       `SELECT * FROM ${kind.key} WHERE TxnDate >= '${quote(from)}' AND TxnDate <= '${quote(to)}' ` +
       `STARTPOSITION ${start} MAXRESULTS 1000`);
@@ -224,17 +227,17 @@ export async function scanReplace(realmId, token, opts, onStep) {
       if (end > to) end = to;
 
       // a month first; a week where the month is too full; a day where the week is
-      const monthFull = await readSpan(realmId, token, kind, cursor, end, keep, counted);
+      const monthFull = await readSpan(realmId, token, kind, cursor, end, keep, counted, opts.shouldStop);
       if (monthFull) {
         let w = cursor;
         while (w <= end) {
           let wEnd = addDays(w, 6);
           if (wEnd > end) wEnd = end;
-          const weekFull = await readSpan(realmId, token, kind, w, wEnd, keep, counted);
+          const weekFull = await readSpan(realmId, token, kind, w, wEnd, keep, counted, opts.shouldStop);
           if (weekFull) {
             let d = w;
             while (d <= wEnd) {
-              const dayFull = await readSpan(realmId, token, kind, d, d, keep, counted);
+              const dayFull = await readSpan(realmId, token, kind, d, d, keep, counted, opts.shouldStop);
               if (dayFull) {
                 throw new Error('More than 9,000 ' + kind.label.toLowerCase() + 's on ' + d +
                                 ' - QuickBooks will not hand over that many from one day');

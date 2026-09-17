@@ -139,7 +139,7 @@
               those on the Category tab.</p>
             <div class="acts" style="margin-top:12px">
               <button class="solid" id="btnScan">Find them</button>
-              <button class="ghost hide" id="btnScanStop">Stop reading</button>
+              <button class="ghost hide" id="btnScanStop" style="border-color:var(--neg);color:var(--neg)">Stop</button>
             </div>
             <div class="stat" id="scanStat"></div>
           </div>
@@ -174,7 +174,8 @@
           <div class="sec">
             <h2><span class="no">05</span> The run
               <span class="aside" id="runAside"></span></h2>
-            <div class="acts"><button class="ghost hide" id="btnStop">Stop after this one</button></div>
+            <div class="acts"><button class="ghost hide" id="btnStop" style="border-color:var(--neg);color:var(--neg)">Stop after this one</button></div>
+            <div class="stat" id="doneStat"></div>
             <div class="log" id="log"></div>
           </div>
         </div>
@@ -357,6 +358,11 @@
     }
     $('btnScan').disabled = false;
     $('btnScanStop').classList.add('hide');
+    $('btnScanStop').disabled = false;
+    if(s.stopped){
+      say('scanStat', 'bad', '<b>Stopped.</b> Change the dates or what is ticked, and press Find them again.');
+      return;
+    }
     if(s.error){ say('scanStat', 'bad', '<b>' + esc(s.error) + '</b>'); return; }
     if(!s.read){
       say('scanStat', 'bad', '<b>QuickBooks gave back nothing at all</b> between ' + esc(s.from) +
@@ -459,7 +465,11 @@
     var atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 12;
     (job.log || []).slice(S.logged).forEach(function(l){
       var div = document.createElement('div');
-      if(l.ok){
+      if(l.note){
+        div.className = 'ok';
+        div.style.fontWeight = '600';
+        div.textContent = l.doc;
+      } else if(l.ok){
         div.className = 'ok';
         div.textContent = l.doc + ' — ' + l.lines + (l.lines === 1 ? ' line' : ' lines') + ' changed' +
           (l.moved ? '  (total moved by ' + l.moved + ')' : '');
@@ -471,10 +481,33 @@
     });
     S.logged = (job.log || []).length;
     if(atEnd) box.scrollTop = box.scrollHeight;
-    if(!job.running){
-      $('btnStop').classList.add('hide');
-      if(job.error) $('runHint').textContent = job.error;
+    if(job.running){
+      say('doneStat', 'busy', job.round > 1
+        ? 'Trying the refused ones again &mdash; round ' + job.round + ' of 3'
+        : 'Replacing &mdash; ' + nf(job.done) + ' of ' + nf(job.total));
+      return;
     }
+
+    $('btnStop').classList.add('hide');
+    if(job.error){ say('doneStat', 'bad', '<b>' + esc(job.error) + '</b>'); return; }
+
+    var went = job.done - job.failed;
+    var head = job.stopped ? 'Stopped' : 'Finished';
+    var out = '<b>' + head + ': ' + nf(went) + ' of ' + nf(job.total) +
+              (job.total === 1 ? ' transaction' : ' transactions') + ' changed.</b>';
+    if(job.retried){
+      out += '<br>' + nf(job.retried) + ' were refused the first time and tried again: ' +
+             nf(job.recovered) + ' went through' +
+             (job.failed ? ', ' + nf(job.failed) + ' still refused.' : ' &mdash; all of them.');
+    }
+    if(job.failures && job.failures.length){
+      out += '<div style="margin-top:6px;font-family:var(--mono);font-size:11.5px;white-space:pre-wrap">' +
+        job.failures.map(function(f){
+          return esc(f.kind + ' ' + f.doc + ' (' + f.date + ')') + '<br>&nbsp;&nbsp;&rarr; ' + esc(f.why);
+        }).join('<br>') + '</div>' +
+        'Press <b>Replace them</b> again to take just these once more.';
+    }
+    say('doneStat', job.failed ? 'bad' : 'ok', out);
   }
 
   function poll(){
@@ -500,7 +533,11 @@
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
   $('btnPairs').addEventListener('click', checkPairs);
   $('btnScan').addEventListener('click', scan);
-  $('btnScanStop').addEventListener('click', function(){ post('/api/replace/stop'); });
+  $('btnScanStop').addEventListener('click', function(){
+    $('btnScanStop').disabled = true;
+    say('scanStat', 'busy', 'Stopping after the read in hand…');
+    post('/api/replace/stop');
+  });
   $('btnRun').addEventListener('click', run);
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
