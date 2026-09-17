@@ -52,6 +52,13 @@
   .tag.bad{background:#FDECEC;color:var(--neg)}
   .tag.warn{background:#FFF6E6;color:#8A5A00}
   .tag.ok{background:#EFF8EC;color:var(--ok)}
+  .tag[data-tip]{position:relative;cursor:help}
+  .tag[data-tip]:hover::after,.tag[data-tip]:focus::after{content:attr(data-tip);position:absolute;
+    left:0;bottom:calc(100% + 6px);z-index:20;width:240px;padding:8px 10px;border-radius:6px;
+    background:#1B2B24;color:#fff;font-size:11.5px;line-height:1.45;letter-spacing:0;
+    text-transform:none;font-weight:400;white-space:normal;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+  .tag[data-tip]:hover::before,.tag[data-tip]:focus::before{content:'';position:absolute;left:12px;
+    bottom:calc(100% + 1px);border:5px solid transparent;border-top-color:#1B2B24;z-index:20}
   .subways{display:flex;gap:2px;margin:0 0 14px;border:1px solid var(--line-2);
     border-radius:8px;padding:3px;background:#F7F8F7;width:max-content;max-width:100%;flex-wrap:wrap}
   .subways button{border:0;background:none;font:inherit;font-size:12.5px;padding:7px 15px;
@@ -614,23 +621,35 @@
       });
   }
 
+  // what each tag means, shown in a small box over the tag when the pointer rests
+  // on it - the tag itself is two words, and whoever reads the list next needs
+  // the rest of the sentence
   var TAGS = {
-    'zero-cogs':      { cls:'bad',  text:'no cost charged' },
-    'no-cost':        { cls:'warn', text:'no cost' },
-    'negative':       { cls:'bad',  text:'below zero' },
-    'sold-not-bought':{ cls:'warn', text:'never bought' },
-    'bought-not-sold':{ cls:'',     text:'not sold' },
-    'not-inventory':  { cls:'warn', text:'not stock' },
-    'twin':           { cls:'warn', text:'twin' },
-    'unused':         { cls:'',     text:'untouched' }
+    'zero-cogs':      { cls:'bad',  text:'no cost charged',
+      tip:'Sold in these dates, and QuickBooks put no cost of sales against it. This is what leaves the gross profit too high.' },
+    'no-cost':        { cls:'warn', text:'no cost',
+      tip:'No cost anywhere: none written on the item, never bought on a bill, and no average worked out by QuickBooks.' },
+    'negative':       { cls:'bad',  text:'below zero',
+      tip:'Stock reads below zero - more was sold than was ever brought in. A sale out of nothing carries no cost.' },
+    'sold-not-bought':{ cls:'warn', text:'never bought',
+      tip:'Sold in these dates, but no bill or expense has ever carried this item.' },
+    'bought-not-sold':{ cls:'',     text:'not sold',
+      tip:'Bought in these dates, but nothing sold against it in the same dates.' },
+    'not-inventory':  { cls:'warn', text:'not stock',
+      tip:'A service or non-inventory item that sells. QuickBooks works out no cost of sales for these at all.' },
+    'twin':           { cls:'warn', text:'twin',
+      tip:'The same product, in the same shade, is on another item too - matched on name, description or SKU.' },
+    'unused':         { cls:'',     text:'untouched',
+      tip:'Active, and in these dates never sold, never bought, with no stock. Safe to put away.' }
   };
 
   function tags(r){
     var out = (r.flags || []).map(function(f){
       var t = TAGS[f];
-      return t ? '<span class="tag ' + t.cls + '">' + t.text + '</span>' : '';
+      return t ? '<span class="tag ' + t.cls + '" data-tip="' + esc(t.tip) + '" tabindex="0">' +
+                 t.text + '</span>' : '';
     }).join('');
-    if(!r.active) out += '<span class="tag">off</span>';
+    if(!r.active) out += '<span class="tag" data-tip="Already switched off in QuickBooks." tabindex="0">off</span>';
     return out ? '<div class="tagline">' + out + '</div>' : '';
   }
 

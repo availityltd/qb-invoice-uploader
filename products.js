@@ -27,6 +27,38 @@ const num = v => {
 export const looseName = s =>
   String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
 
+// Which shade or number of a product an item is. A lipstick comes in forty
+// colours, each its own SKU, and very often each with the same description - so
+// two items that read alike are not twins unless they are the same shade. This
+// takes the last piece of the name and of the SKU - after the last space, slash
+// or dash - with the bracketed SKU off the name and leading zeros off a number:
+// "Blush - 02" and "7004-109/B-20/2" both come to 2, "BB Cream Fair" and
+// "7601-162/Fair" both to fair, and shade 3 never meets shade 4.
+export function variantsOf(it) {
+  const out = new Set();
+  const take = v => {
+    const s = String(v == null ? '' : v).replace(/\([^)]*\)?\s*$/, '').trim();
+    if (!s) return;
+    const last = s.split(/[\s\/\-]+/).filter(Boolean).pop();
+    if (!last) return;
+    let k = last.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (/^\d+$/.test(k)) k = String(Number(k));
+    if (k) out.add(k);
+  };
+  take(it.name);
+  take(it.sku);
+  return out;
+}
+
+// The same shade, or no way of telling. Where both say which shade they are and
+// no shade is shared, they are two products that happen to be written alike.
+export function sameVariant(a, b) {
+  const va = variantsOf(a), vb = variantsOf(b);
+  if (!va.size || !vb.size) return true;
+  for (const v of va) if (vb.has(v)) return true;
+  return false;
+}
+
 // The connector names its item after the SKU - 7301-490/k-15/l-653 - while the
 // one made by hand is called "Miss Rose Dream Glide Lipstick 653". Those two are
 // one product, and nothing in the name says so. What ties them together is the
@@ -265,6 +297,8 @@ export function buildRows(items, sales, valuation, purchases) {
       (byLoose.get(k) || []).forEach(o => {
         if (seen.has(o.id)) return;
         seen.add(o.id);
+        // a shared description is not enough - it has to be the same shade too
+        if (!sameVariant(it, o)) return;
         out.push(o);
       });
     });
@@ -321,7 +355,7 @@ export function buildRows(items, sales, valuation, purchases) {
       const t = byId.get(id);
       if (!t) return null;
       return {
-        id: t.id, name: t.name, sku: t.sku, active: t.active,
+        id: t.id, name: t.name, sku: t.sku, active: t.active, type: t.type,
         qty: t.qty, cost: t.cost, avg: t.avg,
         soldQty: t.soldQty, soldAmount: t.soldAmount, cogs: t.cogs,
         bills: t.bills, boughtQty: t.boughtQty
@@ -341,7 +375,11 @@ export function buildRows(items, sales, valuation, purchases) {
       const carries = t => !!(t.cost || t.bills || t.soldQty || t.qty);
       r.flags.push(all.some(carries) ? 'twin-ready' : 'twin-bare');
 
+      // the one kept holds the stock, so an inventory item always comes before
+      // one that cannot - merging into a non-inventory item ends the cost of
+      // sales for that product altogether
       const best = all.slice().sort((a, b) =>
+        (b.type === 'Inventory' ? 1 : 0) - (a.type === 'Inventory' ? 1 : 0) ||
         (b.soldAmount || 0) - (a.soldAmount || 0) ||
         (b.bills || 0) - (a.bills || 0) ||
         (b.cost ? 1 : 0) - (a.cost ? 1 : 0) ||
