@@ -285,8 +285,10 @@ export async function replaceOne(realmId, token, kindKey, txnId, pairs) {
   if (pairs.some(p => !p.to)) throw new Error('Pick the product to put on it first');
   const map = new Map(pairs.map(p => [p.from.id, p.to]));
 
+  const t0 = Date.now();
   const q = await qbQueryStrict(realmId, token,
     `SELECT * FROM ${kind.key} WHERE Id = '${quote(txnId)}'`);
+  const readMs = Date.now() - t0;
   const txn = (q[kind.key] || [])[0];
   if (!txn) throw new Error(kind.label + ' ' + txnId + ' is not in QuickBooks any more');
 
@@ -317,6 +319,7 @@ export async function replaceOne(realmId, token, kindKey, txnId, pairs) {
   delete payload.HomeTotalAmt;
   delete payload.Balance;
 
+  const t1 = Date.now();
   const r = await fetch(`${API}/v3/company/${realmId}/${kind.path}?minorversion=70`, {
     method: 'POST',
     headers: {
@@ -328,6 +331,10 @@ export async function replaceOne(realmId, token, kindKey, txnId, pairs) {
   });
 
   const text = await r.text();
+  // the write is where QuickBooks works the stock cost of the product out again
+  // for everything after this date, and so where the time goes - measured on its
+  // own, so a slow run can be seen for what it is
+  const writeMs = Date.now() - t1;
   let data = {};
   try { data = JSON.parse(text); } catch (e) { /* left as it came */ }
 
@@ -340,6 +347,7 @@ export async function replaceOne(realmId, token, kindKey, txnId, pairs) {
   return {
     id: String(out.Id || txnId),
     doc: String(out.DocNumber || txn.DocNumber || ''),
+    readMs, writeMs,
     lines: changed,
     total: Number(out.TotalAmt === undefined ? (txn.TotalAmt || 0) : out.TotalAmt),
     before: Number(txn.TotalAmt || 0)

@@ -134,6 +134,19 @@ the same one. So its Stop button is drawn from the server's state on every poll
 and a stopped read reports `stopped` rather than an empty result. A page added
 later that reads QuickBooks follows this, or it strands a read nobody can stop.
 
+**Long runs survive a deploy.** Upload (`jobstore.js`), the category change
+(`recatstore.js`) and product replacement (`replacestore.js`) are written to
+Postgres as they go and carried on after a restart. The others - description
+change, product health cost/stock/merge runs, swap by pasted invoices - still live
+in memory only, and a deploy stops them.
+
+**Replacing a product on an invoice is slow in QuickBooks itself.** The write makes
+QuickBooks work the stock cost of the product out again for everything dated
+after it - tens of seconds an invoice on a busy product. Runs go newest first so
+each change has the least left to redo, and each log line shows the write time.
+Moving the few bills onto the item the invoices use gives the same cost of sales
+as moving hundreds of invoices onto the item the bills use, in minutes.
+
 **Ask once, then remember.** Column choices per courier, bank name → QB account
 mappings, SKU mappings — all saved in `settings.js` and never asked again unless
 something new appears.

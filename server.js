@@ -30,6 +30,9 @@ import {
   KINDS as REPLACE_KINDS, parsePairs as parseReplacePairs, resolvePairs as resolveReplacePairs,
   scanReplace, replaceOne as replaceItemOn, itemById as replaceItemById
 } from './replaceitem.js';
+import {
+  initReplaceStore, saveReplace, clearReplace, unfinishedReplace
+} from './replacestore.js';
 import { sameVariant } from './products.js';
 import {
   listVendors, listPayables, readDocs, readOne, createDoc,
@@ -7343,6 +7346,7 @@ app.post('/api/replace/scan', async (req, res) => {
     st.rows = [];
     st.onNew = {};
     st.job = null;
+    clearReplace(realmId).catch(() => {});
 
     const token = await getAccessToken(realmId);
     scanReplace(realmId, token,
@@ -7427,6 +7431,7 @@ app.get('/api/replace/status', async (req, res) => {
     job: job ? {
       running: job.running, done: job.done, failed: job.failed, lines: job.lines,
       total: job.total, round: job.round, retried: job.retried, recovered: job.recovered,
+      avgMs: job.avgMs || 0, resumed: !!job.resumed,
       stopped: !!job.stopped, failures: job.failures || [],
       error: job.error || null, log: job.log.slice(-80)
     } : null
@@ -7440,6 +7445,16 @@ async function runReplace(realmId, st, job) {
   let token = await getAccessToken(realmId);
   const pairById = new Map(st.pairs.map(p => [p.from.id, p]));
   const pause = ms => new Promise(r => setTimeout(r, ms));
+
+  // Newest first. Changing the product on a transaction makes QuickBooks work the
+  // stock cost of both products out again for everything dated after it - so the
+  // oldest invoice first means every change redoes the whole year after it, and
+  // the newest first means each one has only the little after it left to redo.
+  job.rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') ||
+                          String(b.doc || '').localeCompare(String(a.doc || '')));
+
+  // written down before it starts, so a restart in the first minutes is not lost
+  await saveReplace(realmId, st).catch(e => console.error('replace save:', e.message));
 
   // A refusal is very often not about the transaction at all - a lock held by
   // another edit, a gateway that timed out, a token that ran out mid-run. So the
@@ -7463,26 +7478,43 @@ async function runReplace(realmId, st, job) {
     .map(r => ({ kind: r.kindLabel, doc: r.doc || r.qbId, date: r.date, why: r.note }));
   job.running = false;
   job.finished = Date.now();
+  // finished - there is nothing for a restart to carry on with
+  await clearReplace(realmId).catch(e => console.error('replace clear:', e.message));
 }
 
 async function replacePass(realmId, token, job, todo, pairById) {
+  let sinceSave = 0, savedAt = Date.now();
+  const saveNow = async (force) => {
+    if (!force && sinceSave < 5 && Date.now() - savedAt < 20000) return;
+    sinceSave = 0; savedAt = Date.now();
+    await saveReplace(realmId, job.st).catch(e => console.error('replace save:', e.message));
+  };
+
   for (const row of todo) {
     if (job.stop) break;
     const again = row.state === 'failed';
+    sinceSave++;
 
     const pairs = Array.from(new Set(row.hits.map(h => h.fromId)))
       .map(id => pairById.get(id)).filter(Boolean);
 
+    const started = Date.now();
     try {
       const out = await replaceItemOn(realmId, token, row.kind, row.qbId, pairs);
       row.state = 'changed';
       row.note = out.lines + (out.lines === 1 ? ' line' : ' lines') + ' changed' + (again ? ' on another try' : '');
       if (again) { job.failed--; job.recovered++; } else job.done++;
       job.lines += out.lines;
+      // how long a transaction takes, on the last twenty, so the page can say how
+      // long is left and a slow stretch can be seen as QuickBooks' and not ours
+      const took = Date.now() - started;
+      job.recent = (job.recent || []).concat(took).slice(-20);
+      job.avgMs = Math.round(job.recent.reduce((a, b) => a + b, 0) / job.recent.length);
       job.log.push({
         ok: true, doc: row.kindLabel + ' ' + (out.doc || row.qbId), lines: out.lines,
         // the total is the proof that only the product moved
-        moved: Math.round((out.total - out.before) * 100) / 100
+        moved: Math.round((out.total - out.before) * 100) / 100,
+        readMs: out.readMs, writeMs: out.writeMs
       });
       for (const p of pairs) {
         await logProductChange(realmId, {
@@ -7492,6 +7524,16 @@ async function replacePass(realmId, token, job, todo, pairById) {
         }).catch(e => console.error('replace log:', e.message));
       }
     } catch (e) {
+      // changed before a restart but not yet written down - the old product is
+      // simply not on it any more, which is the change having been made
+      if (/None of those products is on/.test(e.message)) {
+        row.state = 'changed';
+        row.note = 'already changed';
+        if (again) { job.failed--; job.recovered++; } else job.done++;
+        job.log.push({ ok: true, doc: row.kindLabel + ' ' + (row.doc || row.qbId), lines: 0, already: true });
+        await saveNow(false);
+        continue;
+      }
       row.state = 'failed';
       row.note = e.message;
       if (!again) { job.done++; job.failed++; }
@@ -7507,7 +7549,9 @@ async function replacePass(realmId, token, job, todo, pairById) {
         }
       }
     }
+    await saveNow(false);
   }
+  await saveNow(true);
 }
 
 app.post('/api/replace/run', async (req, res) => {
@@ -7532,9 +7576,10 @@ app.post('/api/replace/run', async (req, res) => {
 
     const job = {
       running: true, stop: false, done: 0, failed: 0, lines: 0,
-      round: 1, retried: 0, recovered: 0,
+      round: 1, retried: 0, recovered: 0, kinds: Array.isArray(kinds) ? kinds : null,
       total: rows.length, rows, log: [], started: Date.now()
     };
+    job.st = st;
     st.job = job;
 
     runReplace(realmId, st, job).catch(e => {
@@ -7568,6 +7613,45 @@ app.post('/api/replace/clear', async (req, res) => {
   res.json({ ok: true });
 });
 
+// A replacement that was running when the server went down - a deploy, a crash -
+// is carried on with what was left, and says so at the top of its log.
+async function resumeReplace() {
+  const rows = await unfinishedReplace();
+  for (const r of rows) {
+    try {
+      const saved = r.job || {};
+      const all = (r.rows || []);
+      if (!all.some(x => x.state === 'ready' || x.state === 'failed')) { await clearReplace(r.realm_id); continue; }
+
+      const st = {
+        pairs: r.pairs || [], bad: [],
+        scan: Object.assign({ running: false, stopped: false, error: null }, r.scan || {}),
+        rows: all, onNew: {}, at: Date.now()
+      };
+      const kinds = saved.kinds;
+      const job = {
+        running: true, stop: false, resumed: true,
+        done: saved.done || 0, failed: saved.failed || 0, lines: saved.lines || 0,
+        round: 1, retried: saved.retried || 0, recovered: saved.recovered || 0,
+        kinds, total: saved.total || all.length, started: saved.started || Date.now(),
+        avgMs: saved.avgMs || 0, log: saved.log || []
+      };
+      // what was refused before the restart is simply taken again
+      all.forEach(x => { if (x.state === 'failed') { x.state = 'ready'; job.failed = Math.max(0, job.failed - 1); job.done = Math.max(0, job.done - 1); } });
+      job.rows = all.filter(x => x.state === 'ready' && (!kinds || !kinds.length || kinds.includes(x.kind)));
+      job.log.push({ ok: true, note: true, lines: 0,
+        doc: 'Server restarted - carrying on. ' + (all.length - job.rows.length) + ' already done, ' + job.rows.length + ' to go.' });
+      job.st = st;
+      st.job = job;
+      replStore.set(r.realm_id, st);
+
+      runReplace(r.realm_id, st, job).catch(e => { job.running = false; job.error = e.message; });
+    } catch (e) {
+      console.error('replace resume:', e.message);
+    }
+  }
+}
+
 // ==================== Start ====================
 const PORT = process.env.PORT || 3000;
 
@@ -7580,11 +7664,13 @@ initDb()
     .then(() => import('./jobstore.js').then(m => m.initJobStore()))
   .then(() => initRecatStore())
   .then(() => initProdStore())
+  .then(() => initReplaceStore())
   .then(() => app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startKeeper();
         resumeUnfinished().catch(e => console.error('resume failed:', e.message));
     resumeRecat().catch(e => console.error('recat resume failed:', e.message));
+    resumeReplace().catch(e => console.error('replace resume failed:', e.message));
   }))
   .catch(err => {
     console.error('DB init failed:', err);

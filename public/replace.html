@@ -652,6 +652,15 @@
       });
   }
 
+  function secs(ms){ return (Math.round(ms / 100) / 10) + 's'; }
+  function duration(ms){
+    var m = Math.round(ms / 60000);
+    if(m < 1) return 'under a minute';
+    if(m < 60) return m + (m === 1 ? ' minute' : ' minutes');
+    var h = Math.floor(m / 60), r = m % 60;
+    return h + (h === 1 ? ' hour' : ' hours') + (r ? ' ' + r + ' min' : '');
+  }
+
   function drawJob(job){
     // the same for the run
     $('btnStop').classList.toggle('hide', !job.running);
@@ -669,8 +678,12 @@
         div.textContent = l.doc;
       } else if(l.ok){
         div.className = 'ok';
-        div.textContent = l.doc + ' — ' + l.lines + (l.lines === 1 ? ' line' : ' lines') + ' changed' +
-          (l.moved ? '  (total moved by ' + l.moved + ')' : '');
+        div.textContent = l.already
+          ? l.doc + ' — already changed before the restart'
+          : l.doc + ' — ' + l.lines + (l.lines === 1 ? ' line' : ' lines') + ' changed' +
+            (l.moved ? '  (total moved by ' + l.moved + ')' : '') +
+            // where the time went: reading it back, or QuickBooks taking the change
+            (l.writeMs ? '  · QuickBooks took ' + secs(l.writeMs) + (l.readMs ? ', read ' + secs(l.readMs) : '') : '');
       } else {
         div.className = 'err';
         div.textContent = l.doc + ' — ' + l.msg;
@@ -680,9 +693,14 @@
     S.logged = (job.log || []).length;
     if(atEnd) box.scrollTop = box.scrollHeight;
     if(job.running){
+      var left = Math.max(0, job.total - job.done);
       say('doneStat', 'busy', job.round > 1
         ? 'Trying the refused ones again &mdash; round ' + job.round + ' of 3'
-        : 'Replacing &mdash; ' + nf(job.done) + ' of ' + nf(job.total));
+        : 'Replacing &mdash; ' + nf(job.done) + ' of ' + nf(job.total) +
+          (job.avgMs && left
+            ? ' &middot; about ' + secs(job.avgMs) + ' each, <b>' + duration(job.avgMs * left) + ' left</b>'
+            : '') +
+          (job.resumed ? '<br>The server restarted during this run and carried on where it stopped.' : ''));
       return;
     }
 
