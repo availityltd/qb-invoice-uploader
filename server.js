@@ -115,7 +115,25 @@ const bulkUpload = multer({
 
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static('public'));
+// Which build is running. Render hands over the commit being deployed; anywhere
+// else, the moment the process started stands in for it. Every open page asks
+// for this now and then, and a different answer means a deploy has landed.
+const BUILD = process.env.RENDER_GIT_COMMIT || ('boot-' + Date.now());
+const BUILD_AT = new Date().toISOString();
+
+app.get('/api/version', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ version: BUILD, at: BUILD_AT });
+});
+
+// Pages, scripts and styles are asked for again on every load rather than served
+// from a copy the browser or the installed app kept - so what was deployed is what
+// every computer runs, the moment it reloads.
+app.use(express.static('public', {
+  setHeaders(res, file) {
+    if (/\.(html|js|css|json)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
+  }
+}));
 
 const API = 'https://quickbooks.api.intuit.com';
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';

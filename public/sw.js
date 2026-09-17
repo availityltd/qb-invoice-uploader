@@ -1,4 +1,6 @@
-const CACHE = 'sqbo-v1';
+// a new name clears what the old worker kept, so no computer keeps serving a
+// page from before the update
+const CACHE = 'sqbo-v2';
 const SHELL = ['/', '/upload.html', '/app.css', '/logo.svg', '/favicon.svg', '/manifest.json'];
 
 self.addEventListener('install', e => {
