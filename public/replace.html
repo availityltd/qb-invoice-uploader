@@ -120,6 +120,24 @@
               <div class="list" id="fromList"><div class="none">Reading the products…</div></div>
             </div>
 
+            <details class="many" id="shopBox">
+              <summary>Every active Shopify product at once &mdash; upload the Shopify export</summary>
+              <div class="inner">
+                <p class="hint" style="margin:0 0 10px">In Shopify: <b>Products</b> &rarr; filter
+                  <b>Status: Active</b> &rarr; <b>Export</b> &rarr; <i>Products matching your search</i>,
+                  <i>CSV for Excel</i>. Upload that file here. For every variant live in the store, the
+                  item carrying its SKU is kept, and its duplicates in QuickBooks &mdash; the same product,
+                  the same shade &mdash; are paired onto it. A SKU that matches no item, or more than one,
+                  is set aside and listed, never guessed at. Nothing changes until the pairs have been
+                  read and Replace them is pressed.</p>
+                <div class="zone" id="shopZone" tabindex="0" role="button">
+                  <span><b>Shopify products export</b><span>products_export.csv</span></span>
+                  <span class="pick">Browse</span>
+                </div>
+                <input type="file" id="shopFile" accept=".csv,.xlsx,.xls">
+              </div>
+            </details>
+
             <details class="many">
               <summary>Many products at once &mdash; paste the pairs</summary>
               <div class="inner">
@@ -412,6 +430,41 @@
   }
 
   /* ---------- the pairs ---------- */
+
+  // the Shopify export, sent to the server to be turned into pairs
+  function readShopify(file){
+    if(!file) return;
+    say('pairStat', 'busy', 'Reading ' + esc(file.name) + ' and the items in QuickBooks…');
+    var fd = new FormData();
+    fd.append('file', file, file.name);
+    fetch('/api/replace/shopify', { method:'POST', credentials:'same-origin', body: fd })
+      .then(function(r){ return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      }); })
+      .then(function(d){
+        S.pairs = d.pairs || [];
+        $('fromChosen').innerHTML = ''; $('toChosen').innerHTML = '';
+        var out = '<b>' + nf(d.variants) + ' active variants read' +
+          (d.notActive ? ' (' + nf(d.notActive) + ' not active, left out)' : '') + '. ' +
+          nf(d.keepers) + ' found in QuickBooks, ' + nf(S.pairs.length) +
+          (S.pairs.length === 1 ? ' duplicate' : ' duplicates') + ' to move onto them.</b>' +
+          (S.pairs.length ? '<br>Read the pairs below before going on &mdash; each one is a product whose sales, bills and orders will move.' : '');
+        if(d.bad && d.bad.length){
+          out += '<br>' + nf(d.bad.length) + ' set aside:' +
+            '<div class="miss">' + d.bad.map(function(b){
+              return esc(b.raw) + '<br>&nbsp;&nbsp;&rarr; ' + esc(b.why);
+            }).join('<br>') + '</div>';
+        }
+        say('pairStat', d.bad && d.bad.length ? 'bad' : 'ok', out);
+        $('pairSheet').classList.toggle('hide', !S.pairs.length);
+        $('whereSheet').classList.toggle('hide', !S.pairs.length);
+        $('foundSheet').classList.add('hide');
+        $('runSheet').classList.add('hide');
+        drawPairs(null);
+      })
+      .catch(function(e){ say('pairStat', 'bad', '<b>' + esc(e.message) + '</b>'); });
+  }
 
   function checkPairs(){
     var text = $('pairText').value;
@@ -748,6 +801,21 @@
 
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
   $('btnPairs').addEventListener('click', checkPairs);
+  (function(){
+    var z = $('shopZone'), inp = $('shopFile');
+    z.addEventListener('click', function(){ inp.click(); });
+    z.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); inp.click(); }
+    });
+    ['dragenter','dragover'].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.add('hot'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.remove('hot'); });
+    });
+    z.addEventListener('drop', function(e){ readShopify(e.dataTransfer.files[0]); });
+    inp.addEventListener('change', function(){ readShopify(inp.files[0]); inp.value = ''; });
+  })();
   $('btnScan').addEventListener('click', scan);
   $('btnScanStop').addEventListener('click', function(){
     $('btnScanStop').disabled = true;

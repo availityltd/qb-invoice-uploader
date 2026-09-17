@@ -353,3 +353,145 @@ export async function replaceOne(realmId, token, kindKey, txnId, pairs) {
     before: Number(txn.TotalAmt || 0)
   };
 }
+
+/* ==================== pairs from a Shopify export ==================== */
+
+// Shopify's product export, one row per variant, read into what matters here:
+// the SKU of every variant that is live in the store, what it costs, and what it
+// is called. The header names are Shopify's own; a row with no SKU is a product
+// line without a variant and is left out.
+export function shopifyVariants(rows) {
+  if (!rows.length) throw new Error('The file is empty');
+  const head = Object.keys(rows[0]).reduce((m, k) => { m[k.trim().toLowerCase()] = k; return m; }, {});
+  const col = (...names) => { for (const n of names) if (head[n]) return head[n]; return null; };
+
+  const cSku = col('variant sku', 'sku');
+  if (!cSku) throw new Error('No "Variant SKU" column - export it from Shopify: Products, Export, CSV');
+  const cStatus = col('status');
+  const cTitle = col('title');
+  const cHandle = col('handle');
+  const cOpt = col('option1 value');
+  const cCost = col('cost per item', 'variant cost');
+
+  // the title is on the first row of a product only; its variants below leave it
+  // blank, so it is carried down by handle
+  const titleOf = {};
+  const statusOf = {};
+  const out = new Map();
+  let skipped = 0;
+
+  rows.forEach(r => {
+    const handle = cHandle ? String(r[cHandle] || '').trim() : '';
+    if (cTitle && r[cTitle]) titleOf[handle] = String(r[cTitle]).trim();
+    if (cStatus && r[cStatus]) statusOf[handle] = String(r[cStatus]).trim().toLowerCase();
+
+    const sku = String(r[cSku] || '').trim();
+    if (!sku) return;
+    const status = statusOf[handle] || '';
+    // only what is live in the store is kept
+    if (cStatus && status && status !== 'active') { skipped++; return; }
+    if (out.has(sku.toLowerCase())) return;
+
+    const cost = cCost ? Number(String(r[cCost] || '').replace(/[^0-9.\-]/g, '')) : 0;
+    out.set(sku.toLowerCase(), {
+      sku,
+      title: (titleOf[handle] || handle) + (cOpt && r[cOpt] && r[cOpt] !== 'Default Title' ? ' - ' + r[cOpt] : ''),
+      cost: isFinite(cost) && cost > 0 ? cost : null
+    });
+  });
+
+  return { variants: Array.from(out.values()), skipped };
+}
+
+// For every variant live in Shopify: the item in QuickBooks that carries its SKU
+// is the one kept, and every twin of it - the same product, the same shade, found
+// by name, description or SKU - becomes a pair that moves onto it. Nothing is
+// guessed: a SKU that matches no item, or more than one, is set aside to be
+// looked at, and an item that is itself live in Shopify is never merged away.
+export function pairsFromShopify(variants, items, helpers) {
+  const { twinKeys, sameVariant } = helpers;
+  const norm = s => looseName(s);
+
+  const bySku = new Map();
+  items.forEach(it => {
+    const k = norm(it.sku);
+    if (!k) return;
+    if (!bySku.has(k)) bySku.set(k, []);
+    bySku.get(k).push(it);
+  });
+
+  const byKey = new Map();
+  items.forEach(it => twinKeys(it).forEach(k => {
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(it);
+  }));
+
+  const liveSkus = new Set(variants.map(v => norm(v.sku)));
+  const keepers = new Map();                     // item id -> variant
+  const pairs = [], bad = [];
+  let line = 0;
+
+  variants.forEach(v => {
+    line++;
+    let hits = (bySku.get(norm(v.sku)) || []);
+    // several items with this SKU: the active inventory one is the keeper if
+    // there is exactly one
+    if (hits.length > 1) {
+      const live = hits.filter(h => h.active && h.type === 'Inventory');
+      if (live.length === 1) hits = live;
+    }
+    if (!hits.length) {
+      bad.push({ line, raw: v.sku + ' - ' + v.title, why: 'no item in QuickBooks carries this SKU' });
+      return;
+    }
+    if (hits.length > 1) {
+      bad.push({ line, raw: v.sku + ' - ' + v.title,
+        why: hits.length + ' items carry this SKU: ' + hits.map(h => h.name).join(' | ') + ' - replace these by hand' });
+      return;
+    }
+    keepers.set(hits[0].id, v);
+  });
+
+  const taken = new Map();                       // duplicate id -> keeper it went to
+  keepers.forEach((v, keepId) => {
+    const keep = items.find(i => i.id === keepId);
+    const seen = new Set([keep.id]);
+    twinKeys(keep).forEach(k => (byKey.get(k) || []).forEach(o => {
+      if (seen.has(o.id)) return;
+      seen.add(o.id);
+      if (!sameVariant(keep, o)) return;
+      // an item live in Shopify under its own SKU is a product, not a duplicate
+      if (keepers.has(o.id) || liveSkus.has(norm(o.sku))) return;
+      if (taken.get(o.id) === 'both') return;
+      if (taken.has(o.id)) {
+        const other = items.find(i => i.id === taken.get(o.id));
+        bad.push({ line: 0, raw: o.name,
+          why: 'looks like a duplicate of both ' + other.name + ' and ' + keep.name + ' - left alone' });
+        // take it back out of the first pair too
+        const i = pairs.findIndex(p => p.from.id === o.id);
+        if (i > -1) pairs.splice(i, 1);
+        taken.set(o.id, 'both');
+        return;
+      }
+      taken.set(o.id, keep.id);
+      pairs.push({
+        line: pairs.length + 1,
+        from: { id: o.id, name: o.name, sku: o.sku, type: o.type, active: o.active },
+        to: { id: keep.id, name: keep.name, sku: keep.sku, type: keep.type, active: keep.active,
+              shopCost: v.cost }
+      });
+    }));
+  });
+
+  // stock never goes onto an item that does not hold it
+  const safe = pairs.filter(p => {
+    if (p.from.type === 'Inventory' && p.to.type !== 'Inventory') {
+      bad.push({ line: 0, raw: p.from.name + ' → ' + p.to.name,
+        why: 'the item kept does not hold stock and the duplicate does - left alone' });
+      return false;
+    }
+    return true;
+  });
+
+  return { pairs: safe, bad, keepers: keepers.size };
+}

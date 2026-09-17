@@ -28,12 +28,13 @@ import {
 } from './prodstore.js';
 import {
   KINDS as REPLACE_KINDS, parsePairs as parseReplacePairs, resolvePairs as resolveReplacePairs,
-  scanReplace, replaceOne as replaceItemOn, itemById as replaceItemById
+  scanReplace, replaceOne as replaceItemOn, itemById as replaceItemById,
+  shopifyVariants, pairsFromShopify
 } from './replaceitem.js';
 import {
   initReplaceStore, saveReplace, clearReplace, unfinishedReplace
 } from './replacestore.js';
-import { sameVariant } from './products.js';
+import { sameVariant, twinKeys } from './products.js';
 import {
   listVendors, listPayables, readDocs, readOne, createDoc,
   attachFile, listAttachments
@@ -7258,6 +7259,41 @@ app.get('/api/replace/items', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       items: items.map(it => ({ id: it.id, name: it.name, sku: it.sku, type: it.type, active: it.active, qty: it.qty }))
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Shopify's product export, turned into pairs: every variant live in the store
+// keeps the item carrying its SKU, and that item's duplicates in the same shade
+// are paired onto it. What could not be paired safely comes back named, with why.
+app.post('/api/replace/shopify', upload.single('file'), async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const old = replStore.get(realmId);
+    if (old && ((old.scan && old.scan.running) || (old.job && old.job.running))) {
+      throw new Error('A read or a run is still going');
+    }
+    if (!req.file) throw new Error('No file came through');
+
+    // raw, so a SKU like 7102-001/7 is not read as a date
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer', raw: true, cellDates: false });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+    const { variants, skipped } = shopifyVariants(rows);
+    if (!variants.length) throw new Error('No active variant with a SKU was found in that file');
+
+    const token = await getAccessToken(realmId);
+    const items = await readItems(realmId, token);
+    const out = pairsFromShopify(variants, items, { twinKeys, sameVariant });
+
+    replStore.set(realmId, { pairs: out.pairs, bad: out.bad, scan: null, rows: [], job: null, at: Date.now() });
+    res.json({
+      variants: variants.length, notActive: skipped, keepers: out.keepers,
+      pairs: out.pairs, bad: out.bad
     });
   } catch (e) {
     res.status(400).json({ error: e.message });
