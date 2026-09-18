@@ -524,7 +524,10 @@
     $('pairWhyHint').innerHTML = !S.pairs.length ? '' :
       'Two items are taken for the same product only where one of the three things an item is known by &mdash; ' +
       'its name, its description, its SKU &mdash; reads exactly the same on both once case, spaces and punctuation ' +
-      'are set aside, <b>and</b> the shade agrees. <b>Clear</b>: the name or the SKU matched and both say the same ' +
+      'are set aside &mdash; or where the names agree once the SKU written into one of them is set aside &mdash; ' +
+      '<b>and</b> the shade agrees. The shade is never ignored: it is read off the end of the name and of the SKU ' +
+      '(Fair, Beige2, 10) and checked first, so two shades that differ are never paired however alike the rest ' +
+      'reads. <b>Clear</b>: the name or the SKU matched and both say the same ' +
       'shade. <b>Worth a look</b>: one of those two held but not the other &mdash; most often a shared description ' +
       'with the shade agreeing, which is the usual shape of a connector duplicate. <b>Look first</b>: only the ' +
       'description matched and no shade could be read on one of them. ' +
