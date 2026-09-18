@@ -18,7 +18,7 @@
 // not here; the category change covers those.
 
 import { qbQueryStrict } from './qb.js';
-import { looseName, variantsOf } from './products.js';
+import { looseName, variantsOf, baseName } from './products.js';
 
 const API = 'https://quickbooks.api.intuit.com';
 const quote = s => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -510,15 +510,32 @@ export function matchWhy(keep, dup) {
   // alone is often the same line for forty shades of the same lipstick
   const best = found.filter(f => f.ka !== 'description' && f.kb !== 'description')[0] || found[0] || null;
   const onNameOrSku = !!(best && best.ka !== 'description' && best.kb !== 'description');
-  const strength = !best ? 'none'
-                 : (onNameOrSku && shared.length) ? 'strong'
-                 : onNameOrSku ? 'fair'
-                 : shared.length ? 'fair'
-                 : 'weak';
+  let on = best ? best.on : '';
+  let text = best ? best.text : '';
+  let strength = !best ? 'none'
+               : (onNameOrSku && shared.length) ? 'strong'
+               : onNameOrSku ? 'fair'
+               : shared.length ? 'fair'
+               : 'weak';
+
+  // nothing read the same outright, but the names agree once the SKU and the
+  // shade are taken off them - "…BB Cream Fair" beside "…Bb Cream 7601-162/Fair"
+  const bk = baseName(keep), bd = baseName(dup);
+  if (bk && bk === bd && bk.length >= 6 && shared.length) {
+    const sk = looseName(keep.sku), sd = looseName(dup.sku);
+    // one SKU inside the other, or only one of them has a SKU at all, says they
+    // are the same line of stock; two unrelated SKUs is worth a second look
+    const related = !sk || !sd || sk.indexOf(sd) > -1 || sd.indexOf(sk) > -1;
+    const near = { on: 'the same name once the SKU and shade are taken off',
+                   text: String(keep.name || '').trim(), strength: related ? 'strong' : 'fair' };
+    if (!best || strength === 'weak' || (!onNameOrSku && near.strength === 'strong')) {
+      on = near.on; text = near.text; strength = near.strength;
+    }
+    found.push({ on: near.on });
+  }
 
   return {
-    on: best ? best.on : '',
-    text: best ? best.text : '',
+    on, text,
     all: found.map(f => f.on),
     keepShades: vk, dupShades: vd, shade, strength
   };

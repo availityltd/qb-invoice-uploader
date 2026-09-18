@@ -63,12 +63,38 @@ export function sameVariant(a, b) {
 // one made by hand is called "Miss Rose Dream Glide Lipstick 653". Those two are
 // one product, and nothing in the name says so. What ties them together is the
 // description, the SKU, and the SKU written inside the other one's name.
+// The product's name with the parts that only say which one it is taken off: the
+// SKU, wherever it sits in the name, and the shade at the end. "Missrose Silk
+// Radiance Bb Cream 7601-162/Fair" and "Missrose Silk Radiance BB Cream Fair"
+// both come down to "missrosesilkradiancebbcream" - which, with the shade agreeing,
+// is how a connector's item and a hand-made one are seen to be one product even
+// though neither name nor SKU reads the same.
+export function baseName(it) {
+  let base = looseName(it.name);
+  if (!base) return '';
+  const sku = looseName(it.sku);
+  if (sku && sku.length > 3) base = base.split(sku).join('');
+  variantsOf(it).forEach(v => {
+    if (base.length - v.length >= 6 && base.endsWith(v)) base = base.slice(0, -v.length);
+  });
+  return base;
+}
+
 export function twinKeys(it) {
   const keys = [];
   const push = v => { const k = looseName(v); if (k && k.length > 2 && keys.indexOf(k) < 0) keys.push(k); };
   push(it.name);
   push(it.desc);
   push(it.sku);
+
+  // the name without its SKU and shade, tied to the shade itself - two items
+  // only meet on this key when both say the same shade, so shade 3 still never
+  // meets shade 4
+  const base = baseName(it);
+  const shades = Array.from(variantsOf(it)).sort();
+  if (base.length >= 6 && shades.length) {
+    shades.forEach(v => keys.push('base:' + base + ':' + v));
+  }
   return keys;
 }
 
