@@ -510,11 +510,16 @@ export function matchWhy(keep, dup) {
   // alone is often the same line for forty shades of the same lipstick
   const best = found.filter(f => f.ka !== 'description' && f.kb !== 'description')[0] || found[0] || null;
   const onNameOrSku = !!(best && best.ka !== 'description' && best.kb !== 'description');
+  // one item's full name written word for word as the other's description is a
+  // copy made from it, not a line two products happen to share - so with the
+  // shade agreeing it is as clear as a matching name. Only description against
+  // description is the loose one, because forty shades often carry the same line.
+  const nameAgainstDesc = !!(best && !onNameOrSku && (best.ka === 'name' || best.kb === 'name'));
   let on = best ? best.on : '';
   let text = best ? best.text : '';
   let strength = !best ? 'none'
-               : (onNameOrSku && shared.length) ? 'strong'
-               : onNameOrSku ? 'fair'
+               : ((onNameOrSku || nameAgainstDesc) && shared.length) ? 'strong'
+               : (onNameOrSku || nameAgainstDesc) ? 'fair'
                : shared.length ? 'fair'
                : 'weak';
 
