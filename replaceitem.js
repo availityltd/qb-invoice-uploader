@@ -526,7 +526,10 @@ export function matchWhy(keep, dup) {
     // one SKU inside the other, or only one of them has a SKU at all, says they
     // are the same line of stock; two unrelated SKUs is worth a second look
     const related = !sk || !sd || sk.indexOf(sd) > -1 || sd.indexOf(sk) > -1;
-    const near = { on: 'the same name once the SKU and shade are taken off',
+    // said as what it is: the product is the same and the shade is the same. The
+    // SKU and the shade come off the name only so the rest of it can be compared -
+    // the shade itself is checked first, and two shades that differ never meet
+    const near = { on: 'same product name (its SKU set aside) and the same shade',
                    text: String(keep.name || '').trim(), strength: related ? 'strong' : 'fair' };
     if (!best || strength === 'weak' || (!onNameOrSku && near.strength === 'strong')) {
       on = near.on; text = near.text; strength = near.strength;
