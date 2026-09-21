@@ -69,6 +69,7 @@ export function backfillSnapshot(realmId, since) {
     id: job.id,
     state: job.state,
     phase: job.phase,
+    canCarryOn: job.state === 'stopped' || job.state === 'failed',
     startedAt: job.startedAt,
     finishedAt: job.finishedAt || null,
     account: job.label,
@@ -82,6 +83,29 @@ export function backfillSnapshot(realmId, since) {
     logLength: job.log.length,
     error: job.error || null
   };
+}
+
+// Carry on after a Stop or a failure: the months not yet kept are read again,
+// and the receipts are asked for again where they are still missing.
+export function resumeBackfill(realmId) {
+  const job = jobs.get(realmId);
+  if (!job) throw new Error('There is no backfill to carry on');
+  if (job.state === 'running') throw new Error('The backfill is still running');
+  if (job.state === 'done') throw new Error('The backfill already finished');
+
+  job.cancel = false;
+  job.error = null;
+  job.state = 'running';
+  job.phase = 'orders';
+  job.finishedAt = null;
+  job.monthsDone = job.okMonths.size;
+  say(job, 'Carrying on');
+  run(realmId, job, true).catch(e => {
+    job.state = 'failed';
+    job.error = e.message;
+    job.finishedAt = new Date().toISOString();
+    say(job, 'Stopped: ' + e.message);
+  });
 }
 
 export function stopBackfill(realmId) {
@@ -123,6 +147,7 @@ export function startBackfill(realmId, opts) {
     from, to,
     months: monthsBetween(from, to),
     monthsDone: 0,
+    okMonths: new Set(),          // months kept, which a carry-on skips
     monthsTotal: 0,
     ordersSaved: 0,
     asked: 0,
@@ -143,7 +168,7 @@ export function startBackfill(realmId, opts) {
   return job.id;
 }
 
-async function run(realmId, job) {
+async function run(realmId, job, carrying) {
   const acc = await getAccount(realmId, job.accountId);
   if (!acc) throw new Error('No such account');
 
@@ -151,12 +176,13 @@ async function run(realmId, job) {
   if (!a) throw new Error('No adapter for ' + acc.courier);
 
   job.label = acc.label;
-  say(job, `${acc.label}: ${job.from} to ${job.to}, ${job.months.length} month${job.months.length === 1 ? '' : 's'}`);
+  if (!carrying) say(job, `${acc.label}: ${job.from} to ${job.to}, ${job.months.length} month${job.months.length === 1 ? '' : 's'}`);
 
   /* ---------- the orders themselves ---------- */
 
   for (const m of job.months) {
     if (job.cancel) break;
+    if (job.okMonths.has(m.label)) continue;
 
     let orders = [];
     try {
@@ -178,6 +204,7 @@ async function run(realmId, job) {
 
     job.ordersSaved += saved;
     job.monthsDone++;
+    job.okMonths.add(m.label);
     say(job, `${m.label}: ${orders.length} orders, ${saved} kept`);
 
     await sleep(500);

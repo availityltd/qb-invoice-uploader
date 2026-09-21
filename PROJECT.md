@@ -134,6 +134,14 @@ the same one. So its Stop button is drawn from the server's state on every poll
 and a stopped read reports `stopped` rather than an empty result. A page added
 later that reads QuickBooks follows this, or it strands a read nobody can stop.
 
+**Every run has Stop, Carry on and Clear log.** On every page and tab that runs
+something on the server. Stop is drawn from the server's state; Carry on (with the
+count left) shows once the run has stopped or part failed and takes only what is not
+yet done, never twice what is (void, advance, receive payments, delete, swap, replace,
+recat, desc, shipping off, product health, find, backfill, upload); Clear log shows only
+once the run is over, wipes that run's history on the server for every computer, and
+leaves what was read so a new run shows only itself. A new kind of run brings all three.
+
 **Long runs survive a deploy.** Upload (`jobstore.js`), the category change
 (`recatstore.js`) and product replacement (`replacestore.js`) are written to
 Postgres as they go and carried on after a restart. The others - description

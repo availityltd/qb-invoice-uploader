@@ -216,7 +216,8 @@
 
           <div class="row" style="margin-top:14px">
             <button id="btnStop">Stop</button>
-            <button id="btnClear" class="hide">Start over</button>
+            <button id="btnCarry" class="hide">Carry on</button>
+            <button id="btnClear" class="hide">Clear log</button>
             <a id="btnFile" class="hide" href="/api/find/file"><button>Download the answer</button></a>
           </div>
 
@@ -693,6 +694,7 @@
       $('stepRun').classList.remove('hide');
       $('btnStop').classList.remove('hide');
       $('btnClear').classList.add('hide');
+      $('btnCarry').classList.add('hide');
        $('btnFile').classList.add('hide');
       $('btnFile').style.display = 'none';
       keepAwake(true);
@@ -707,12 +709,25 @@
     post('/api/find/stop').catch(function(){});
   });
 
+  $('btnCarry').addEventListener('click', function(){
+    $('btnCarry').classList.add('hide');
+    $('btnClear').classList.add('hide');
+    post('/api/find/resume').then(function(){
+      $('btnStop').classList.remove('hide');
+      $('btnStart').disabled = true;
+      keepAwake(true);
+      poll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
   $('btnClear').addEventListener('click', function(){
     post('/api/find/clear').then(function(){
       $('stepRun').classList.add('hide');
       $('stepOut').classList.add('hide');
+      $('btnCarry').classList.add('hide');
       $('btnStart').disabled = false;
       since = 0;
+      $('log').textContent = '';
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
 
@@ -772,6 +787,7 @@
         keepAwake(false);
         $('btnStop').classList.add('hide');
         $('btnClear').classList.remove('hide');
+        $('btnCarry').classList.toggle('hide', !job.canCarryOn);
         $('btnStart').disabled = false;
 
         if(job.error) say('bad', '<b>' + esc(job.error) + '</b>');

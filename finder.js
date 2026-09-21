@@ -199,12 +199,35 @@ export function findSnapshot(realmId, since) {
     sheetsSeen: job.sheetsSeen,
     sheetsTotal: job.sheetsTotal,
     matched: job.hits.size,
+    canCarryOn: job.state === 'stopped' || job.state === 'failed',
     skipped: job.skipped.length,
     log: job.log.slice(from),
     logLength: job.log.length,
     result: (job.state === 'done' || job.state === 'stopped') ? summarise(job) : null,
     error: job.error || null
   };
+}
+
+// Carry on after a Stop: the sheets not yet read are read, what was found stays.
+export function resumeFindJob(realmId) {
+  const job = jobs.get(realmId);
+  if (!job) throw new Error('There is no search to carry on');
+  if (job.state === 'running') throw new Error('The search is still running');
+  if (job.state === 'done') throw new Error('The search already finished');
+
+  job.cancel = false;
+  job.error = null;
+  job.state = 'running';
+  job.finishedAt = null;
+  job.skipped = [];
+  job.sheetsSeen = 0;
+  say(job, 'Carrying on - ' + job.hits.size + ' of ' + job.wanted.size + ' found so far');
+  run(realmId, job, true).catch(e => {
+    job.state = 'failed';
+    job.error = e.message;
+    job.finishedAt = new Date().toISOString();
+    say(job, 'Stopped: ' + e.message);
+  });
 }
 
 export function stopFindJob(realmId) {
@@ -254,6 +277,7 @@ export function startFindJob(realmId, opts) {
     wanted,
     asWritten,
     hits: new Map(),
+    seen: new Set(),                // sheets read to the end, which a carry-on skips
     log: [],
     skipped: [],
     beat: now(),
@@ -276,8 +300,8 @@ export function startFindJob(realmId, opts) {
   return job.id;
 }
 
-async function run(realmId, job) {
-  say(job, `Looking for ${job.asked} order numbers`);
+async function run(realmId, job, carrying) {
+  if (!carrying) say(job, `Looking for ${job.asked} order numbers`);
 
   if (!job.skipCpr) await walkCpr(realmId, job);
 
@@ -355,6 +379,8 @@ async function walkCpr(realmId, job) {
       break;
     }
 
+    if (job.seen.has(item.file.id)) { job.sheetsSeen++; continue; }
+
     const where = item.month ? `${item.courier} / ${item.month}` : item.courier;
     const label = `${where} / ${item.file.name}`;
 
@@ -410,6 +436,7 @@ async function walkCpr(realmId, job) {
     }
 
     job.sheetsSeen++;
+    if (!job.cancel) job.seen.add(item.file.id);
     job.beat = now();
 
     if (foundHere) {

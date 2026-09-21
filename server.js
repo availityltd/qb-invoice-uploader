@@ -74,11 +74,11 @@ import {
 import { loadTraxSummaries, applyLines } from './traxsheet.js';
 import { startPayJob, stopPayJob, clearPayJob, resumePayJob, paySnapshot } from './payjobs.js';
 import {
-  startFindJob, stopFindJob, clearFindJob, findSnapshot,
+  startFindJob, resumeFindJob, stopFindJob, clearFindJob, findSnapshot,
   listTree, sheetsIn, peekHeader
 } from './finder.js';
 import {
-  startBackfill, stopBackfill, clearBackfill, backfillSnapshot
+  startBackfill, resumeBackfill, stopBackfill, clearBackfill, backfillSnapshot
 } from './backfill.js';
 import {
   openFile as openMergeFile, buildOrders, groupOrders, parsePasted, placeGroups
@@ -2322,6 +2322,17 @@ app.post('/api/find/stop', async (req, res) => {
   res.json({ ok: stopFindJob(realmId) });
 });
 
+app.post('/api/find/resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeFindJob(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
 app.post('/api/find/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -4467,6 +4478,17 @@ app.post('/api/courier/backfill-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.json({ ok: stopBackfill(realmId) });
+});
+
+app.post('/api/courier/backfill-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeBackfill(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
 });
 
 app.post('/api/courier/backfill-clear', async (req, res) => {

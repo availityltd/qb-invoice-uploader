@@ -14,7 +14,7 @@
   #startBtn { background: #1a73e8; color: #fff; }
   #startBtn:disabled { background: #99b8e8; cursor: not-allowed; }
   #stopBtn { background: #d93025; color: #fff; }
-  #clearBtn { background: #eee; color: #333; }
+  #clearBtn, #carryBtn { background: #eee; color: #333; }
   .hidden { display: none; }
   .panel { border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; margin-top: 20px; }
   .bar-track { background: #eee; border-radius: 5px; height: 10px; overflow: hidden; margin: 6px 0; }
@@ -60,7 +60,8 @@
   <div class="row">
     <button id="startBtn">Start backfill</button>
     <button id="stopBtn" class="hidden">Stop</button>
-    <button id="clearBtn" class="hidden">Clear</button>
+    <button id="carryBtn" class="hidden">Carry on</button>
+    <button id="clearBtn" class="hidden">Clear log</button>
   </div>
 
   <div id="err" class="err hidden"></div>
@@ -146,6 +147,7 @@
       $('panel').classList.remove('hidden');
       $('stopBtn').classList.remove('hidden');
       $('clearBtn').classList.add('hidden');
+      $('carryBtn').classList.add('hidden');
       poll();
     } catch (e) {
       showError(e.message);
@@ -157,11 +159,23 @@
     await fetch('/api/courier/backfill-stop', { method: 'POST' });
   }
 
+  async function carryOn() {
+    $('carryBtn').classList.add('hidden');
+    $('clearBtn').classList.add('hidden');
+    const r = await fetch('/api/courier/backfill-resume', { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { showError(data.error || 'Could not carry on'); return; }
+    $('startBtn').disabled = true;
+    $('stopBtn').classList.remove('hidden');
+    poll();
+  }
+
   async function clearJob() {
     const r = await fetch('/api/courier/backfill-clear', { method: 'POST' });
     if (r.ok) {
       $('panel').classList.add('hidden');
       $('clearBtn').classList.add('hidden');
+      $('carryBtn').classList.add('hidden');
       $('startBtn').disabled = false;
     }
   }
@@ -195,6 +209,7 @@
       clearInterval(pollTimer);
       $('stopBtn').classList.add('hidden');
       $('clearBtn').classList.remove('hidden');
+      $('carryBtn').classList.toggle('hidden', !job.canCarryOn);
       $('startBtn').disabled = false;
       if (job.error) showError(job.error);
     }
@@ -231,6 +246,7 @@
   $('startBtn').addEventListener('click', start);
   $('stopBtn').addEventListener('click', stop);
   $('clearBtn').addEventListener('click', clearJob);
+  $('carryBtn').addEventListener('click', carryOn);
 
   defaultDates();
   loadAccounts().then(resumeIfRunning);
