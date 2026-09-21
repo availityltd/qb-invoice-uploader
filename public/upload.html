@@ -92,7 +92,7 @@
             <div class="acts" style="margin-top:12px;margin-bottom:0">
               <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
               <button class="mini" id="btnCopyLog">Copy log</button>
-              <button class="mini" id="btnClear">Clear finished run</button>
+              <button class="mini" id="btnClear">Clear log</button>
             </div>
           </div>
 
@@ -403,6 +403,8 @@
     $('btnStart').style.display  = (!job || (!live && !held && !halted)) ? 'block' : 'none';
     $('btnPause').style.display  = live ? 'block' : 'none';
     $('btnStop').style.display   = (live || held) ? 'block' : 'none';
+    // the log can be cleared once the run is over, never while it is going
+    $('btnClear').style.display  = (live || held) ? 'none' : '';
     $('btnResume').style.display = (held || halted) ? 'block' : 'none';
 
     $('btnPause').disabled = false;
@@ -549,7 +551,7 @@
       logLines.length = 0;
       $('resultSec').classList.add('hide');
       paint();
-      log('Finished run cleared.', 'warn');
+      log('Log cleared.', 'warn');
     }).catch(function(e){
       log(e.message, 'err');
     });

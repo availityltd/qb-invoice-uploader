@@ -211,7 +211,7 @@
               <button class="mini" id="btnCopyLog">Copy log</button>
               <button class="mini" id="btnDlVoided">Download voided</button>
               <button class="mini" id="btnDlLeft">Download not voided</button>
-              <button class="mini" id="btnClearRun">Clear finished run</button>
+              <button class="mini" id="btnClearRun">Clear log</button>
             </div>
           </div>
         </div>
@@ -767,6 +767,7 @@
       var live = j.state === 'running';
       $('btnVoid').style.display = live ? 'none' : 'block';
       $('btnStop').style.display = live ? 'block' : 'none';
+      $('btnClearRun').style.display = live ? 'none' : '';
       $('btnStop').disabled = false;
       $('btnStop').textContent = 'Stop';
       if(!live){

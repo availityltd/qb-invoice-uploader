@@ -7688,6 +7688,19 @@ app.post('/api/replace/stop', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Only the log of a finished run goes - the pairs and what was found stay, so a
+// new run starts with an empty log and shows nothing of the last one.
+app.post('/api/replace/clear-log', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = replStore.get(realmId);
+  if (st && st.job && st.job.running) {
+    return res.status(400).json({ error: 'The run is still going' });
+  }
+  if (st) st.job = null;
+  res.json({ ok: true });
+});
+
 app.post('/api/replace/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;

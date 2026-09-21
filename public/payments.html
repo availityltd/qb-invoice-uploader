@@ -260,6 +260,7 @@
             <div class="paylog" id="paylog"></div>
           </div>
           <div id="payOut"></div>
+          <div class="acts"><button class="mini" id="btnClearRun" style="display:none">Clear log</button></div>
         </div>
 
         <div class="stat" id="statBox"></div>
@@ -1232,6 +1233,7 @@
       var live = j.state === 'running';
       $('btnPay').style.display = live ? 'none' : 'block';
       $('btnStop').style.display = live ? 'block' : 'none';
+      $('btnClearRun').style.display = live ? 'none' : '';
       $('btnStop').disabled = false;
       $('btnStop').textContent = 'Stop';
 
@@ -1272,8 +1274,20 @@
       if(!S.excel) colourNow(true);
     }
 
-    post('/api/cpr/receive-clear').catch(function(){});
   }
+
+  // the finished run stays on the page until it is cleared here
+  $('btnClearRun').addEventListener('click', function(){
+    post('/api/cpr/receive-clear').then(function(){
+      S.lastEventId = 0;
+      $('paylog').innerHTML = '';
+      $('payOut').innerHTML = '';
+      $('runBox').classList.add('hide');
+      $('btnClearRun').style.display = 'none';
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
 
   /* ---------- the paid list, to copy or download ---------- */
 
