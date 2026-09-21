@@ -53,11 +53,11 @@ import {
   startJob, stopJob, pauseJob, resumeJob, clearJob,
     retryFailed, snapshot, remainingInvoices, resumeUnfinished
 } from './jobs.js';
-import { startVoidJob, stopVoidJob, clearVoidJob, voidSnapshot } from './voidjobs.js';
+import { startVoidJob, stopVoidJob, clearVoidJob, resumeVoidJob, voidSnapshot } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
 import { startDelJob, stopDelJob, clearDelJob, delSnapshot } from './deljobs.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
-import { startAdvJob, stopAdvJob, clearAdvJob, advSnapshot } from './advjobs.js';
+import { startAdvJob, stopAdvJob, clearAdvJob, resumeAdvJob, advSnapshot } from './advjobs.js';
 import {
   initCouriers, listAccounts as listCourierAccounts, getAccount as getCourierAccount,
   addAccount as addCourierAccount, removeAccount as removeCourierAccount,
@@ -72,7 +72,7 @@ import {
   loadCharges, listAllAccounts, findJournal, postJournal
 } from './journal.js';
 import { loadTraxSummaries, applyLines } from './traxsheet.js';
-import { startPayJob, stopPayJob, clearPayJob, paySnapshot } from './payjobs.js';
+import { startPayJob, stopPayJob, clearPayJob, resumePayJob, paySnapshot } from './payjobs.js';
 import {
   startFindJob, stopFindJob, clearFindJob, findSnapshot,
   listTree, sheetsIn, peekHeader
@@ -2161,6 +2161,17 @@ app.post('/api/cpr/receive-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.json({ ok: stopPayJob(realmId) });
+});
+
+app.post('/api/cpr/receive-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumePayJob(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
 });
 
 app.post('/api/cpr/receive-clear', async (req, res) => {
@@ -5480,6 +5491,17 @@ app.post('/api/adv/receive-stop', async (req, res) => {
   res.json({ ok: stopAdvJob(realmId) });
 });
 
+app.post('/api/adv/receive-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeAdvJob(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
 app.post('/api/adv/receive-clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -5776,6 +5798,17 @@ app.post('/api/void/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.json({ ok: stopVoidJob(realmId) });
+});
+
+app.post('/api/void/resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeVoidJob(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
 });
 
 app.post('/api/void/clear', async (req, res) => {

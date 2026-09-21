@@ -207,7 +207,7 @@
             <div class="runline" id="runline"></div>
             <div class="vlog" id="vlog"></div>
             <div class="acts">
-              <button class="mini" id="btnRetry" style="display:none">Retry what is left</button>
+              <button class="mini" id="btnRetry" style="display:none">Carry on</button>
               <button class="mini" id="btnCopyLog">Copy log</button>
               <button class="mini" id="btnDlVoided">Download voided</button>
               <button class="mini" id="btnDlLeft">Download not voided</button>
@@ -702,15 +702,14 @@
     startRun(list, force);
   });
 
-  // whatever is still standing, one more sweep - as many times as it takes
+  // carry on from where the run stopped, in the same log
   $('btnRetry').addEventListener('click', function(){
-    var left = ((S.job && S.job.failed) || []).map(function(r){
-      return { id: r.id, doc: r.doc };
-    });
-    if(!left.length) return say('bad', '<b>Nothing left to retry.</b>');
-
-    post('/api/void/clear').catch(function(){}).then(function(){
-      startRun(left, forceOn());
+    $('btnRetry').style.display = 'none';
+    post('/api/void/resume').then(function(){
+      pollJob(false);
+      startPolling();
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
     });
   });
 
@@ -789,9 +788,12 @@
       if(live){ startPolling(); return; }
 
       stopPolling();
-      if(j.failedCount){
+      // a stopped or part-failed run is carried on from where it stands
+      if(j.leftCount){
         $('btnRetry').style.display = 'inline-block';
-        $('btnRetry').textContent = 'Retry what is left (' + nf(j.failedCount) + ')';
+        $('btnRetry').textContent = 'Carry on (' + nf(j.leftCount) + ' left)';
+      } else {
+        $('btnRetry').style.display = 'none';
       }
     }).catch(function(){ /* a missed poll is nothing to worry about */ });
   }

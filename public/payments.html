@@ -260,7 +260,7 @@
             <div class="paylog" id="paylog"></div>
           </div>
           <div id="payOut"></div>
-          <div class="acts"><button class="mini" id="btnClearRun" style="display:none">Clear log</button></div>
+          <div class="acts"><button class="mini" id="btnResume" style="display:none">Carry on</button> <button class="mini" id="btnClearRun" style="display:none">Clear log</button></div>
         </div>
 
         <div class="stat" id="statBox"></div>
@@ -1234,6 +1234,9 @@
       $('btnPay').style.display = live ? 'none' : 'block';
       $('btnStop').style.display = live ? 'block' : 'none';
       $('btnClearRun').style.display = live ? 'none' : '';
+      // a stopped run is carried on from the rows not yet paid
+      $('btnResume').style.display = (!live && j.leftCount) ? '' : 'none';
+      $('btnResume').textContent = 'Carry on (' + nf(j.leftCount || 0) + ' left)';
       $('btnStop').disabled = false;
       $('btnStop').textContent = 'Stop';
 
@@ -1276,6 +1279,16 @@
 
   }
 
+  $('btnResume').addEventListener('click', function(){
+    $('btnResume').style.display = 'none';
+    post('/api/cpr/receive-resume').then(function(){
+      pollPay(false);
+      startPolling();
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
   // the finished run stays on the page until it is cleared here
   $('btnClearRun').addEventListener('click', function(){
     post('/api/cpr/receive-clear').then(function(){
@@ -1284,6 +1297,7 @@
       $('payOut').innerHTML = '';
       $('runBox').classList.add('hide');
       $('btnClearRun').style.display = 'none';
+      $('btnResume').style.display = 'none';
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
     });

@@ -193,15 +193,16 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
   return job.id;
 }
 
-async function run(realmId, job) {
+async function run(realmId, job, only) {
   push(job, 'log', 'Connecting to QuickBooks...');
   await tokenFor(realmId, job);
 
-  push(job, 'log', `Voiding ${job.total} invoice${job.total === 1 ? '' : 's'}` +
+  const count = only ? only.length : job.total;
+  push(job, 'log', (only ? 'Carrying on: ' : '') + `Voiding ${count} invoice${count === 1 ? '' : 's'}` +
     (job.force ? ' - linked payments will be freed first.' : '.'));
 
   // One invoice at a time, back to back. Those on a payment go after the rest.
- let pending = job.invoices.slice();
+  let pending = (only || job.invoices).slice();
 
   for (let round = 1; pending.length && !job.stop; round++) {
     const again = [];
@@ -307,6 +308,31 @@ async function run(realmId, job) {
   job.finishedAt = Date.now();
 }
 
+// Carry on after a Stop: whatever was neither voided nor held back - the ones
+// not reached and the ones that failed - goes through the same run again.
+export function resumeVoidJob(realmId) {
+  const job = jobs.get(realmId);
+  if (!job) throw new Error('There is no void run to carry on');
+  if (job.state === 'running') throw new Error('The void run is still going');
+
+  const gone = new Set(job.voided.concat(job.held).map(x => String(x.id)));
+  const left = job.invoices
+    .filter(i => !gone.has(String(i.id)))
+    .map(i => Object.assign({}, i, { syncToken: null }));
+  if (!left.length) throw new Error('Nothing is left to void');
+
+  job.failed = [];
+  job.done = gone.size;
+  job.stop = false;
+  job.state = 'running';
+  job.finishedAt = null;
+  run(realmId, job, left).catch(e => {
+    push(job, 'error', 'ERROR: ' + e.message);
+    job.state = 'error';
+    job.finishedAt = Date.now();
+  });
+}
+
 export function stopVoidJob(realmId) {
   const job = jobs.get(realmId);
   if (!job) return false;
@@ -336,6 +362,7 @@ export function voidSnapshot(realmId, since, full) {
     voidedCount: job.voided.length,
     heldCount: job.held.length,
     failedCount: job.failed.length,
+    leftCount: Math.max(0, job.total - job.voided.length - job.held.length),
     force: job.force,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,

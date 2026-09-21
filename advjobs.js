@@ -70,14 +70,15 @@ export function startAdvJob(realmId, body) {
   return job.id;
 }
 
-async function run(realmId, job) {
+async function run(realmId, job, only) {
   const {
-    rows, methodId,
+    rows: allRows, methodId,
     txnDate, label, courier,
     sheetId, tab, postedCol, stamp
   } = job.body;
 
-  push(job, 'log', 'Connecting to QuickBooks...');
+  const rows = only || allRows;
+  push(job, 'log', (only ? 'Carrying on: ' + rows.length + ' left. ' : '') + 'Connecting to QuickBooks...');
   await tokenFor(realmId, job);
 
   const memo = `Advance payment\ndated: ${label}`;
@@ -224,6 +225,31 @@ async function run(realmId, job) {
   job.finishedAt = Date.now();
 }
 
+// Carry on after a Stop: the rows not yet paid go through again, in the same log.
+// A row is paid once its invoice is in job.paid, so nothing is paid twice.
+export function resumeAdvJob(realmId) {
+  const job = jobs.get(realmId);
+  if (!job) throw new Error('There is no run to carry on');
+  if (job.state === 'running') throw new Error('The run is still going');
+
+  const key = x => String(x.invoice) + '|' + String(x.qbDoc);
+  const paidKeys = new Set(job.paid.map(key));
+  const left = job.body.rows.filter(r => !paidKeys.has(key(r)));
+  if (!left.length) throw new Error('Nothing is left to receive');
+
+  job.results = job.results.filter(r => r.ok);
+  job.doneCount = job.paid.length;
+  job.toStamp = [];
+  job.stop = false;
+  job.state = 'running';
+  job.finishedAt = null;
+  run(realmId, job, left).catch(e => {
+    push(job, 'error', 'ERROR: ' + e.message);
+    job.state = 'error';
+    job.finishedAt = Date.now();
+  });
+}
+
 export function stopAdvJob(realmId) {
   const job = jobs.get(realmId);
   if (!job) return false;
@@ -248,6 +274,7 @@ export function advSnapshot(realmId, since, full) {
     state: job.state,
     total: job.total,
     doneCount: job.doneCount,
+    leftCount: Math.max(0, job.total - job.paid.length),
     posted: job.posted,
     amount: Math.round(job.totalAmount * 100) / 100,
     label: job.body.label || '',

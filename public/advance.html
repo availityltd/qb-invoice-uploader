@@ -250,6 +250,7 @@
           <div class="acts" id="afterActs" style="display:none">
             <button class="mini" id="btnCopyLog">Copy log</button>
             <button class="mini" id="btnCsv">Download what was received</button>
+            <button class="mini" id="btnResume" style="display:none">Carry on</button>
             <button class="mini" id="btnClearRun">Clear log</button>
           </div>
         </div>
@@ -1200,6 +1201,9 @@
       $('btnPay').style.display = live ? 'none' : 'block';
       $('btnStop').style.display = live ? 'block' : 'none';
       $('btnClearRun').style.display = live ? 'none' : '';
+      // a stopped run is carried on from the rows not yet paid
+      $('btnResume').style.display = (!live && j.leftCount) ? '' : 'none';
+      $('btnResume').textContent = 'Carry on (' + nf(j.leftCount || 0) + ' left)';
       $('btnStop').disabled = false;
       $('btnStop').textContent = 'Stop';
       if(!live) $('btnPay').disabled = false;
@@ -1266,6 +1270,16 @@
     a.download = 'advance-received.csv';
     a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  });
+
+  $('btnResume').addEventListener('click', function(){
+    $('btnResume').style.display = 'none';
+    post('/api/adv/receive-resume').then(function(){
+      pollJob(false);
+      startPolling();
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
   });
 
   $('btnClearRun').addEventListener('click', function(){
