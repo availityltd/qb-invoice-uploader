@@ -1,5 +1,5 @@
 import { getAccessToken, qbQuery } from './qb.js';
-import { logUpload } from './db.js';
+import { logUpload, pool } from './db.js';
 
 const API = 'https://quickbooks.api.intuit.com';
 
@@ -24,6 +24,89 @@ async function tokenFor(realmId, job, force) {
     if (force) push(job, 'log', 'QuickBooks sign-in had expired - signed in again.');
   }
   return job.token;
+}
+
+// A void run lives in memory while it goes and in Postgres as well, so a deploy or a
+// crash half way does not lose it: a server that comes back carries on with what was
+// left. What was voided a moment before the restart but not yet written down is
+// simply tried again, and QuickBooks answers that it is already void - which counts
+// as done. The progress is written every few invoices, the list itself once.
+export async function initVoidStore() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS void_runs (
+      realm_id   TEXT PRIMARY KEY,
+      invoices   JSONB,
+      progress   JSONB,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+}
+
+async function saveVoid(realmId, job, withList) {
+  const progress = {
+    id: job.id, state: job.state, force: job.force, total: job.total,
+    voided: job.voided, held: job.held, failed: job.failed,
+    retried: job.retried || 0, lastId: job.lastId,
+    startedAt: job.startedAt, finishedAt: job.finishedAt,
+    events: job.events.slice(-300)
+  };
+  if (withList) {
+    await pool.query(
+      `INSERT INTO void_runs (realm_id, invoices, progress, updated_at)
+       VALUES ($1,$2,$3, now())
+       ON CONFLICT (realm_id) DO UPDATE SET invoices = $2, progress = $3, updated_at = now()`,
+      [realmId, JSON.stringify(job.invoices), JSON.stringify(progress)]);
+  } else {
+    await pool.query(
+      `UPDATE void_runs SET progress = $2, updated_at = now() WHERE realm_id = $1`,
+      [realmId, JSON.stringify(progress)]);
+  }
+}
+
+// written every few results or every 15 seconds, and always when the state changes
+function saveSoon(realmId, job, force) {
+  job.unsaved = (job.unsaved || 0) + 1;
+  if (!force && job.unsaved < 5 && Date.now() - (job.savedAt || 0) < 15000) return;
+  job.unsaved = 0;
+  job.savedAt = Date.now();
+  return saveVoid(realmId, job, false).catch(e => console.error('void save:', e.message));
+}
+
+// after a restart: a run that was going carries on, one that had stopped or
+// finished comes back as it was, so its log and its Carry on are still there
+export async function resumeVoidRuns() {
+  const q = await pool.query('SELECT realm_id, invoices, progress FROM void_runs');
+  for (const row of q.rows) {
+    try {
+      const p = row.progress || {};
+      const job = {
+        id: p.id || Date.now(), state: p.state || 'stopped', stop: false,
+        invoices: row.invoices || [], force: !!p.force,
+        delay: 0, lanes: 1, token: null, tokenAt: 0,
+        total: p.total || (row.invoices || []).length,
+        voided: p.voided || [], held: p.held || [], failed: p.failed || [],
+        retried: p.retried || 0, events: p.events || [], lastId: p.lastId || 0,
+        startedAt: p.startedAt || Date.now(), finishedAt: p.finishedAt || null
+      };
+      job.done = job.voided.length + job.held.length + job.failed.length;
+      jobs.set(row.realm_id, job);
+      if (job.state !== 'running') continue;
+
+      const gone = new Set(job.voided.concat(job.held, job.failed).map(x => String(x.id)));
+      const left = job.invoices
+        .filter(i => !gone.has(String(i.id)))
+        .map(i => Object.assign({}, i, { syncToken: null }));
+      push(job, 'log', 'The server restarted - carrying on where it stopped (' + left.length + ' left).');
+      run(row.realm_id, job, left).catch(e => {
+        push(job, 'error', 'ERROR: ' + e.message);
+        job.state = 'error';
+        job.finishedAt = Date.now();
+        saveSoon(row.realm_id, job, true);
+      });
+    } catch (e) {
+      console.error('void resume:', e.message);
+    }
+  }
 }
 
 function push(job, type, msg, extra) {
@@ -184,10 +267,13 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
   };
 
   jobs.set(realmId, job);
+  // written down before it starts, so a restart in the first minutes is not lost
+  saveVoid(realmId, job, true).catch(e => console.error('void save:', e.message));
   run(realmId, job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
     job.finishedAt = Date.now();
+    saveSoon(realmId, job, true);
   });
 
   return job.id;
@@ -232,6 +318,7 @@ async function run(realmId, job, only) {
       try {
         await logUpload(realmId, inv.doc, 'voided', `QB Id ${inv.id} voided`, null);
       } catch (e) {}
+      saveSoon(realmId, job);
       return 'done';
     }
 
@@ -239,6 +326,7 @@ async function run(realmId, job, only) {
       job.done++;
       job.held.push({ doc: inv.doc, id: inv.id, msg: r.msg });
       push(job, 'held', `HELD    ${inv.doc}   ${r.msg}`, { doc: inv.doc });
+      saveSoon(realmId, job);
       return 'done';
     }
 
@@ -253,6 +341,7 @@ async function run(realmId, job, only) {
     job.done++;
     job.failed.push({ doc: inv.doc, id: inv.id, msg: r.msg });
     push(job, 'fail', `FAILED  ${inv.doc}   ${String(r.msg).slice(0, 200)}`, { doc: inv.doc });
+    saveSoon(realmId, job);
     return 'final';
   }
 
@@ -275,6 +364,7 @@ async function run(realmId, job, only) {
     job.state = 'done';
   }
   job.finishedAt = Date.now();
+  await saveSoon(realmId, job, true);
 }
 
 // Carry on after a Stop: whatever was neither voided nor held back - the ones
@@ -295,10 +385,12 @@ export function resumeVoidJob(realmId) {
   job.stop = false;
   job.state = 'running';
   job.finishedAt = null;
+  saveSoon(realmId, job, true);
   run(realmId, job, left).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
     job.finishedAt = Date.now();
+    saveSoon(realmId, job, true);
   });
 }
 
@@ -314,6 +406,7 @@ export function clearVoidJob(realmId) {
   const job = jobs.get(realmId);
   if (job && job.state === 'running') return false;
   jobs.delete(realmId);
+  pool.query('DELETE FROM void_runs WHERE realm_id = $1', [realmId]).catch(() => {});
   return true;
 }
 

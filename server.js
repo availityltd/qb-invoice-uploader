@@ -53,7 +53,7 @@ import {
   startJob, stopJob, pauseJob, resumeJob, clearJob,
     retryFailed, snapshot, remainingInvoices, resumeUnfinished
 } from './jobs.js';
-import { startVoidJob, stopVoidJob, clearVoidJob, resumeVoidJob, voidSnapshot } from './voidjobs.js';
+import { startVoidJob, stopVoidJob, clearVoidJob, resumeVoidJob, voidSnapshot, initVoidStore, resumeVoidRuns } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
 import { startDelJob, stopDelJob, clearDelJob, resumeDelJob, delSnapshot } from './deljobs.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
@@ -7926,12 +7926,14 @@ initDb()
   .then(() => initRecatStore())
   .then(() => initProdStore())
   .then(() => initReplaceStore())
+  .then(() => initVoidStore())
   .then(() => app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startKeeper();
         resumeUnfinished().catch(e => console.error('resume failed:', e.message));
     resumeRecat().catch(e => console.error('recat resume failed:', e.message));
     resumeReplace().catch(e => console.error('replace resume failed:', e.message));
+    resumeVoidRuns().catch(e => console.error('void resume failed:', e.message));
   }))
   .catch(err => {
     console.error('DB init failed:', err);
