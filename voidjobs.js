@@ -6,7 +6,8 @@ const API = 'https://quickbooks.api.intuit.com';
 // one void run per company, kept on the server so leaving the page is safe
 const jobs = new Map();
 const MAX_EVENTS = 3000;
-const MAX_ROUNDS = 8;
+// like product replacement: one pass through, then the refused ones twice more
+const MAX_ROUNDS = 3;
 // QuickBooks access tokens last an hour - refresh well before that
 const TOKEN_LIFE = 40 * 60 * 1000;
 function isAuthError(msg) {
@@ -21,11 +22,6 @@ async function tokenFor(realmId, job, force) {
     if (force) push(job, 'log', 'QuickBooks sign-in had expired - signed in again.');
   }
   return job.token;
-}
-// worth another go - QuickBooks was busy or the inventory was locked for a moment
-function worthRetry(msg) {
-  return /another user was creating|stale object|429|throttle|System Failure|application error|business validation|deadlock|timeout|temporarily|try again/i
-    .test(String(msg || ''));
 }
 
 function push(job, type, msg, extra) {
@@ -248,8 +244,9 @@ async function run(realmId, job) {
         return;
       }
 
-      // inventory locks and throttling pass - a fresh token and a pause fix them
-      if (worthRetry(r.msg) && round < MAX_ROUNDS) {
+      // a refusal is very often a lock or a gateway that timed out, not the invoice -
+      // so every one is taken again after a breath, whatever the message said
+      if (round < MAX_ROUNDS && !/not in QuickBooks any more/.test(r.msg)) {
         again.push(Object.assign({}, inv, { syncToken: null }));
         job.retried = (job.retried || 0) + 1;
         push(job, 'retry', `retry ${round}/${MAX_ROUNDS}  ${inv.doc}   ${String(r.msg).slice(0, 110)}`);
@@ -294,16 +291,16 @@ async function run(realmId, job) {
     pending = again;
 
     if (pending.length && round < MAX_ROUNDS && !job.stop) {
-      const wait = round * 10;
-      push(job, 'log', `${pending.length} left over - waiting ${wait} seconds, then round ${round + 1}.`);
-      await nap(job, wait * 1000);
+      push(job, 'log', `${pending.length} refused - a short pause, then round ${round + 1}.`);
+      await nap(job, 4000);
+      job.token = null; // a fresh sign-in for the next round
     }
   }
 
   // anything still standing after every round really did not go through
   pending.forEach(inv => {
     job.done++;
-    job.failed.push({ doc: inv.doc, id: inv.id, msg: 'still failing after every round' });
+    job.failed.push({ doc: inv.doc, id: inv.id, msg: 'refused every time' });
     push(job, 'fail', `FAILED  ${inv.doc}   still failing after ${MAX_ROUNDS} rounds`, { doc: inv.doc });
   });
   if (job.stop) {
