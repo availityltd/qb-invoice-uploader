@@ -1365,7 +1365,8 @@
         return;
       }
       $('rOut').innerHTML = '<div class="barz"><i id="rBarI" style="width:0"></i></div>' +
-                            '<div class="log" id="rLog">Starting…</div>';
+                            '<div class="log" id="rLog">Starting…</div>' + runButtons();
+      wireRunButtons();
       watchReceive(0);
     })
     .catch(function(e){
@@ -1380,6 +1381,44 @@
   // state off the envelope instead left this stuck on "Starting" while the
   // run carried on behind it, which is the worst way to be wrong.
   var payMisses = 0;
+
+  // Stop while it goes; once it is over, Carry on with what is left and Clear log
+  function runButtons(){
+    return '<div style="margin-top:10px;display:flex;gap:8px">' +
+      '<button class="go2" id="rStop" style="display:none">Stop</button>' +
+      '<button class="go2" id="rCarry" style="display:none">Carry on</button>' +
+      '<button class="go2" id="rClear" style="display:none">Clear log</button></div>';
+  }
+  function wireRunButtons(){
+    $('rStop').addEventListener('click', function(){
+      $('rStop').disabled = true;
+      fetch('/api/cpr/receive-stop', { method:'POST' })
+        .then(function(){ $('rStop').disabled = false; }).catch(function(){});
+    });
+    $('rCarry').addEventListener('click', function(){
+      $('rCarry').style.display = 'none';
+      $('rClear').style.display = 'none';
+      $('dReceive').disabled = true;
+      $('rGo').disabled = true;
+      fetch('/api/cpr/receive-resume', { method:'POST' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d.error){ $('rLog').textContent += ' ' + d.error; return; }
+          $('rLog').textContent = '';
+          watchReceive(0);
+        }).catch(function(){});
+    });
+    $('rClear').addEventListener('click', function(){
+      fetch('/api/cpr/receive-clear', { method:'POST' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d.error){ $('rLog').textContent += ' ' + d.error; return; }
+          $('rOut').innerHTML = '';
+          $('dReceive').disabled = false;
+          load();
+        }).catch(function(){});
+    });
+  }
 
   function watchReceive(since){
     clearTimeout(payTimer);
@@ -1420,6 +1459,13 @@
         }
         if($('rGo') && s.total){
           $('rGo').textContent = 'Receiving… ' + n0(s.doneCount) + ' of ' + n0(s.total);
+        }
+
+        if($('rStop')){
+          $('rStop').style.display = s.state === 'running' ? '' : 'none';
+          $('rClear').style.display = s.state === 'running' ? 'none' : '';
+          $('rCarry').style.display = (s.state !== 'running' && s.leftCount) ? '' : 'none';
+          $('rCarry').textContent = 'Carry on (' + n0(s.leftCount || 0) + ' left)';
         }
 
         if(s.state === 'running'){
