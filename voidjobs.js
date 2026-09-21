@@ -208,7 +208,7 @@ async function run(realmId, job, only) {
     const again = [];
 
     if (round > 1) {
-      push(job, 'log', `Round ${round}: trying ${pending.length} again.`);
+      push(job, 'log', `Trying the ${pending.length} that were refused again, one at a time.`);
     }
 
    async function attempt(inv) {
@@ -250,7 +250,7 @@ async function run(realmId, job, only) {
       if (!/not in QuickBooks any more/.test(r.msg)) {
         again.push(Object.assign({}, inv, { syncToken: null }));
         job.retried = (job.retried || 0) + 1;
-        push(job, 'retry', `retry (round ${round})  ${inv.doc}   ${String(r.msg).slice(0, 110)}`);
+        push(job, 'retry', `retry  ${inv.doc}   ${String(r.msg).slice(0, 300)}`);
         return;
       }
 
@@ -292,7 +292,7 @@ async function run(realmId, job, only) {
     pending = again;
 
     if (pending.length && !job.stop) {
-      push(job, 'log', `${pending.length} refused - a short pause, then round ${round + 1}.`);
+      push(job, 'log', `${pending.length} refused - a short pause, then they go again.`);
       await nap(job, Math.min(4000 * round, LONGEST_PAUSE));
       job.token = null; // a fresh sign-in for the next round
     }
