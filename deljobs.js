@@ -26,12 +26,34 @@ export function delSnapshot(realmId, since) {
     finishedAt: job.finishedAt || null,
     total: job.total,
     done: job.done,
+    leftCount: Math.max(0, job.total - job.done),
     failed: job.failed,
         paymentsGone: job.paymentsGone,
     log: job.log.slice(Number(since) || 0),
     logLength: job.log.length,
     error: job.error || null
   };
+}
+
+// Carry on after a Stop or a failure: what is not yet gone goes through again.
+export function resumeDelJob(realmId) {
+  const job = jobs.get(realmId);
+  if (!job) throw new Error('There is no run to carry on');
+  if (job.state === 'running') throw new Error('The run is still going');
+  if (job.done >= job.total) throw new Error('Nothing is left to delete');
+
+  job.cancel = false;
+  job.failed = 0;
+  job.error = null;
+  job.state = 'running';
+  job.finishedAt = null;
+  say(job, 'Carrying on - ' + (job.total - job.done) + ' left');
+  run(realmId, job, true).catch(e => {
+    job.state = 'failed';
+    job.error = e.message;
+    job.finishedAt = new Date().toISOString();
+    say(job, 'Stopped: ' + e.message, 'err');
+  });
 }
 
 export function stopDelJob(realmId) {
@@ -73,6 +95,7 @@ export function startDelJob(realmId, opts) {
     list,
     total: list.length,
     done: 0,
+    deleted: new Set(),          // ids that are gone, so a carry-on skips them
     failed: 0,
         payDone: new Set(),
     paymentsGone: 0,
@@ -169,11 +192,12 @@ async function removeOne(realmId, job, inv) {
   return 'gone';
 }
 
-async function run(realmId, job) {
-  say(job, `Removing ${job.total} invoice${job.total === 1 ? '' : 's'}`);
+async function run(realmId, job, carrying) {
+  if (!carrying) say(job, `Removing ${job.total} invoice${job.total === 1 ? '' : 's'}`);
   for (let i = 0; i < job.list.length; i++) {
     if (job.cancel) break;
     const inv = job.list[i];
+    if (job.deleted.has(inv.id)) continue;
 
     let done = false;
     for (let attempt = 1; attempt <= 3 && !done; attempt++) {
@@ -188,6 +212,7 @@ async function run(realmId, job) {
         }
         await removeOne(realmId, job, inv);
         job.done++;
+        job.deleted.add(inv.id);
         say(job, `Deleted ${inv.doc || inv.id}`, 'ok');
         done = true;
       } catch (e) {

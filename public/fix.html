@@ -323,7 +323,8 @@
               <div class="log" id="delLog" style="height:280px"></div>
               <div class="acts" style="margin-top:12px;margin-bottom:0">
                 <button class="mini" id="btnDelStop">Stop</button>
-                <button class="mini hide" id="btnDelClear">Start over</button>
+                <button class="mini hide" id="btnDelResume">Carry on</button>
+                <button class="mini hide" id="btnDelClear">Clear log</button>
               </div>
             </div>
           </div>
@@ -964,6 +965,7 @@
         $('delRun').classList.remove('hide');
         $('btnDelStop').classList.remove('hide');
         $('btnDelClear').classList.add('hide');
+        $('btnDelResume').classList.add('hide');
         delKeepAwake(true);
         delPoll();
       })
@@ -977,11 +979,27 @@
     fetch('/api/invoice-delete-stop', { method:'POST' }).catch(function(){});
   });
 
+  $('btnDelResume').addEventListener('click', function(){
+    fetch('/api/invoice-delete-resume', { method:'POST' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error){ setStat($('statLook'),'bad', d.error); return; }
+        $('btnDelResume').classList.add('hide');
+        $('btnDelClear').classList.add('hide');
+        $('btnDelStop').classList.remove('hide');
+        $('btnDelStart').disabled = true;
+        delKeepAwake(true);
+        delPoll();
+      })
+      .catch(function(){});
+  });
+
   $('btnDelClear').addEventListener('click', function(){
     fetch('/api/invoice-delete-clear', { method:'POST' })
       .then(function(r){ return r.json(); })
       .then(function(){
         $('delRun').classList.add('hide');
+        $('btnDelResume').classList.add('hide');
                $('btnDelStart').disabled = false;
         $('btnDelPaid').disabled = false;
         delSince = 0;
@@ -1039,6 +1057,9 @@
         delKeepAwake(false);
         $('btnDelStop').classList.add('hide');
         $('btnDelClear').classList.remove('hide');
+        // a stopped or part-failed run is carried on from what is not yet gone
+        $('btnDelResume').classList.toggle('hide', !job.leftCount);
+        $('btnDelResume').textContent = 'Carry on (' + nf(job.leftCount || 0) + ' left)';
         $('btnDelStart').disabled = false;
                 $('btnDelPaid').disabled = false;
       })

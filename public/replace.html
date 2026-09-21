@@ -271,6 +271,7 @@
             <h2><span class="no">05</span> The run
               <span class="aside" id="runAside"></span></h2>
             <div class="acts"><button class="ghost hide" id="btnStop" style="border-color:var(--neg);color:var(--neg)">Stop after this one</button>
+              <button class="ghost hide" id="btnCarry">Carry on</button>
               <button class="ghost hide" id="btnClearLog">Clear log</button></div>
             <div class="stat" id="doneStat"></div>
             <div class="log" id="log"></div>
@@ -817,6 +818,9 @@
     $('btnStop').classList.toggle('hide', !job.running);
     // the log can be cleared once the run is over, never while it is going
     $('btnClearLog').classList.toggle('hide', !!job.running);
+    var leftOver = Math.max(0, job.total - (job.done - job.failed));
+    $('btnCarry').classList.toggle('hide', !!job.running || !leftOver);
+    $('btnCarry').textContent = 'Carry on (' + nf(leftOver) + ' left)';
     if(job.running) $('btnRun').disabled = true;
     $('runSheet').classList.remove('hide');
     $('runAside').textContent = nf(job.done) + ' of ' + nf(job.total) +
@@ -951,6 +955,10 @@
     post('/api/replace/stop').then(function(){ $('btnStop').disabled = false; });
   });
   $('btnCsv').addEventListener('click', csv);
+  $('btnCarry').addEventListener('click', function(){
+    $('btnCarry').classList.add('hide');
+    run();
+  });
   $('btnClearLog').addEventListener('click', function(){
     post('/api/replace/clear-log').then(function(){
       clearInterval(S.poller); S.poller = null;

@@ -55,7 +55,7 @@ import {
 } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, resumeVoidJob, voidSnapshot } from './voidjobs.js';
 import { readDateColumns } from './voidsheet.js';
-import { startDelJob, stopDelJob, clearDelJob, delSnapshot } from './deljobs.js';
+import { startDelJob, stopDelJob, clearDelJob, resumeDelJob, delSnapshot } from './deljobs.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
 import { startAdvJob, stopAdvJob, clearAdvJob, resumeAdvJob, advSnapshot } from './advjobs.js';
 import {
@@ -1159,6 +1159,17 @@ app.post('/api/invoice-delete-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.json({ ok: stopDelJob(realmId) });
+});
+
+app.post('/api/invoice-delete-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeDelJob(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
 });
 
 app.post('/api/invoice-delete-clear', async (req, res) => {
@@ -2963,6 +2974,8 @@ app.post('/api/shipfix/run', async (req, res) => {
     if (st.job && st.job.running) throw new Error('That is already running');
 
     const only = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : null;
+    // what a finished run left refused is taken again by carrying on
+    st.rows.forEach(r => { if (r.state === 'failed') { r.state = 'ready'; r.note = ''; } });
     const rows = st.rows.filter(r =>
       r.state === 'ready' && r.qbId && (!only || only.includes(String(r.qbId))));
     if (!rows.length) throw new Error('None of these are waiting to have shipping taken off');
@@ -3224,6 +3237,16 @@ app.post('/api/swap/stop', async (req, res) => {
   if (!realmId) return;
   const st = swapStore.get(realmId);
   if (st && st.job) st.job.stop = true;
+  res.json({ ok: true });
+});
+
+// Only the log of a finished run goes; the invoices checked stay.
+app.post('/api/swap/clear-log', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = swapStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
+  if (st) st.job = null;
   res.json({ ok: true });
 });
 
