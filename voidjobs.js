@@ -6,8 +6,10 @@ const API = 'https://quickbooks.api.intuit.com';
 // one void run per company, kept on the server so leaving the page is safe
 const jobs = new Map();
 const MAX_EVENTS = 3000;
-// like product replacement: one pass through, then the refused ones twice more
-const MAX_ROUNDS = 3;
+// A refusal here is QuickBooks being loaded, never the invoice - so the refused ones
+// go round again until every last one is voided, or Stop is pressed. The pause between
+// rounds grows a little and then stays at this.
+const LONGEST_PAUSE = 30 * 1000;
 // QuickBooks access tokens last an hour - refresh well before that
 const TOKEN_LIFE = 40 * 60 * 1000;
 function isAuthError(msg) {
@@ -198,16 +200,14 @@ async function run(realmId, job) {
   push(job, 'log', `Voiding ${job.total} invoice${job.total === 1 ? '' : 's'}` +
     (job.force ? ' - linked payments will be freed first.' : '.'));
 
- // Voiding does not touch stock, so several can run side by side.
-  // Anything that needs its payment freeing goes one at a time - those
-  // do touch a shared record and must not trip over each other.
+  // One invoice at a time, back to back. Those on a payment go after the rest.
  let pending = job.invoices.slice();
 
-  for (let round = 1; round <= MAX_ROUNDS && pending.length && !job.stop; round++) {
+  for (let round = 1; pending.length && !job.stop; round++) {
     const again = [];
 
     if (round > 1) {
-      push(job, 'log', `Round ${round} of ${MAX_ROUNDS}: trying ${pending.length} again.`);
+      push(job, 'log', `Round ${round}: trying ${pending.length} again.`);
     }
 
    async function attempt(inv) {
@@ -246,10 +246,10 @@ async function run(realmId, job) {
 
       // a refusal is very often a lock or a gateway that timed out, not the invoice -
       // so every one is taken again after a breath, whatever the message said
-      if (round < MAX_ROUNDS && !/not in QuickBooks any more/.test(r.msg)) {
+      if (!/not in QuickBooks any more/.test(r.msg)) {
         again.push(Object.assign({}, inv, { syncToken: null }));
         job.retried = (job.retried || 0) + 1;
-        push(job, 'retry', `retry ${round}/${MAX_ROUNDS}  ${inv.doc}   ${String(r.msg).slice(0, 110)}`);
+        push(job, 'retry', `retry (round ${round})  ${inv.doc}   ${String(r.msg).slice(0, 110)}`);
         return;
       }
 
@@ -290,19 +290,13 @@ async function run(realmId, job) {
 
     pending = again;
 
-    if (pending.length && round < MAX_ROUNDS && !job.stop) {
+    if (pending.length && !job.stop) {
       push(job, 'log', `${pending.length} refused - a short pause, then round ${round + 1}.`);
-      await nap(job, 4000);
+      await nap(job, Math.min(4000 * round, LONGEST_PAUSE));
       job.token = null; // a fresh sign-in for the next round
     }
   }
 
-  // anything still standing after every round really did not go through
-  pending.forEach(inv => {
-    job.done++;
-    job.failed.push({ doc: inv.doc, id: inv.id, msg: 'refused every time' });
-    push(job, 'fail', `FAILED  ${inv.doc}   still failing after ${MAX_ROUNDS} rounds`, { doc: inv.doc });
-  });
   if (job.stop) {
     push(job, 'log', 'Stopped.');
     job.state = 'stopped';
