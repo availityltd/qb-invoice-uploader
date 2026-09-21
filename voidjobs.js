@@ -7,8 +7,9 @@ const API = 'https://quickbooks.api.intuit.com';
 const jobs = new Map();
 const MAX_EVENTS = 3000;
 // A refusal is QuickBooks being loaded - it holds the stock for a while after each
-// void - never the invoice. So the refused one waits this long and goes again, until
-// it is voided or Stop is pressed.
+// void - never the invoice. So the refused one goes to the back of the queue and is
+// tried again this long afterwards, as many times as it takes. Nothing else waits on
+// it, and the run only ends when every invoice is voided or Stop is pressed.
 const RETRY_PAUSE = 60 * 1000;
 // QuickBooks access tokens last an hour - refresh well before that
 const TOKEN_LIFE = 40 * 60 * 1000;
@@ -290,7 +291,8 @@ async function run(realmId, job, only) {
   // One invoice at a time. Those with no payment go first, then those on a payment.
   const order = (only || job.invoices).slice();
   const queue = order.filter(x => !x.hasPayment).concat(order.filter(x => x.hasPayment));
-  push(job, 'log', `${queue.length} to void, one at a time. A refused one waits ${Math.round(RETRY_PAUSE / 1000)} seconds and is tried again until it goes.`);
+  push(job, 'log', `${queue.length} to void, one at a time. A refused one goes to the back of ` +
+    `the queue and comes round again ${Math.round(RETRY_PAUSE / 1000)} seconds later, so the rest do not wait for it.`);
 
   // Does one attempt and says what came of it: 'done', 'retry' or 'final'.
   async function attempt(inv) {
@@ -345,15 +347,33 @@ async function run(realmId, job, only) {
     return 'final';
   }
 
-  for (const inv of queue) {
-    while (!job.stop) {
-      const out = await attempt(Object.assign({}, inv, { syncToken: null }));
-      if (out !== 'retry') break;
-      push(job, 'log', `Waiting ${Math.round(RETRY_PAUSE / 1000)} seconds, then ${inv.doc} goes again.`);
-      await nap(job, RETRY_PAUSE);
-      job.token = null; // a fresh sign-in for the next go
+  // The queue is worked from the front, without a pause: a void that goes through
+  // quickly is followed straight away by the next one. A refused one is put at the
+  // back with the time it may be tried again, so the others carry on meanwhile and
+  // it comes round later. Only when every one left is still waiting does the run
+  // pause, and then only until the first of them is due.
+  const waiting = queue.map(inv => ({ inv, readyAt: 0 }));
+
+  while (waiting.length && !job.stop) {
+    const now = Date.now();
+    let at = waiting.findIndex(w => w.readyAt <= now);
+
+    if (at < 0) {
+      // every one left is still cooling off - wait for the first that is due
+      const due = Math.min(...waiting.map(w => w.readyAt));
+      const secs = Math.max(1, Math.round((due - now) / 1000));
+      push(job, 'log', `${waiting.length} waiting for QuickBooks to let go - ${secs}s until the next try.`);
+      await nap(job, due - now);
+      job.token = null; // a fresh sign-in after the wait
+      continue;
     }
-    if (job.stop) break;
+
+    const one = waiting.splice(at, 1)[0];
+    const out = await attempt(Object.assign({}, one.inv, { syncToken: null }));
+    if (out === 'retry') {
+      one.readyAt = Date.now() + RETRY_PAUSE;
+      waiting.push(one);
+    }
   }
 
   if (job.stop) {
