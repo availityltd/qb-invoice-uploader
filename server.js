@@ -2889,6 +2889,16 @@ app.post('/api/merge/strip-stop', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Only the log of a finished run goes; the matched rows stay.
+app.post('/api/merge/strip-clear-log', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = mergeStore.get(realmId);
+  if (st && st.strip && st.strip.running) return res.status(400).json({ error: 'The run is still going' });
+  if (st) st.strip = null;
+  res.json({ ok: true });
+});
+
 app.post('/api/merge/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -3022,6 +3032,16 @@ app.post('/api/shipfix/stop', async (req, res) => {
   if (!realmId) return;
   const st = shipStore.get(realmId);
   if (st && st.job && st.job.running) st.job.stop = true;
+  res.json({ ok: true });
+});
+
+// Only the log of a finished run goes; the invoices found stay.
+app.post('/api/shipfix/clear-log', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = shipStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
+  if (st) st.job = null;
   res.json({ ok: true });
 });
 

@@ -248,6 +248,10 @@
           <div id="stripRun" class="hide">
             <div class="prog"><i id="stripBar"></i></div>
             <div class="paylog" id="stripLog"></div>
+            <div class="row">
+              <button id="btnStripCarry" style="display:none">Carry on</button>
+              <button id="btnStripClearLog" style="display:none">Clear log</button>
+            </div>
           </div>
 
           <div id="backBox" style="margin-top:18px">
@@ -324,6 +328,10 @@
             <div id="shipRun" class="hide">
               <div class="prog"><i id="shipBar"></i></div>
               <div class="paylog" id="shipLog"></div>
+              <div class="row">
+                <button id="btnShipCarry" style="display:none">Carry on</button>
+                <button id="btnShipClearLog" style="display:none">Clear log</button>
+              </div>
             </div>
           </div>
 
@@ -757,6 +765,18 @@
     });
   });
 
+  $('btnStripCarry').addEventListener('click', function(){ $('btnStrip').click(); });
+  $('btnStripClearLog').addEventListener('click', function(){
+    post('/api/merge/strip-clear-log', {}).then(function(){
+      $('stripLog').innerHTML = '';
+      $('stripNote').textContent = '';
+      $('stripRun').classList.add('hide');
+      $('btnStripCarry').style.display = 'none';
+      $('btnStripClearLog').style.display = 'none';
+      clearSay();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
   $('btnStripStop').addEventListener('click', function(){
     post('/api/merge/strip-stop', {}).catch(function(){});
   });
@@ -774,10 +794,17 @@
       }).join('<br>');
       $('stripLog').scrollTop = $('stripLog').scrollHeight;
 
+      $('btnStripCarry').style.display = 'none';
+      $('btnStripClearLog').style.display = 'none';
       if(j.running){ setTimeout(pollStrip, 1200); return; }
 
       $('btnStripStop').style.display = 'none';
       $('btnStrip').disabled = false;
+      // once the run is over: carry on with what is left, or clear the log
+      var stripLeft = Math.max(0, j.total - (j.done - (j.failed || 0)));
+      $('btnStripCarry').style.display = stripLeft ? '' : 'none';
+      $('btnStripCarry').textContent = 'Carry on (' + stripLeft + ' left)';
+      $('btnStripClearLog').style.display = j.total ? '' : 'none';
       if(j.error) say('bad', '<b>' + esc(j.error) + '</b>');
       else if(!j.failed && j.total){
         say('ok', '<b>Done.</b> The shipping is off ' + j.done +
@@ -1120,6 +1147,12 @@
     S.logged = (job.log || []).length;
     box.scrollTop = box.scrollHeight;
 
+    // the buttons for a finished run: carry on with what is left, or clear the log
+    var shipLeft = Math.max(0, job.total - (job.done - job.failed));
+    $('btnShipCarry').style.display = (!job.running && shipLeft) ? '' : 'none';
+    $('btnShipCarry').textContent = 'Carry on (' + shipLeft + ' left)';
+    $('btnShipClearLog').style.display = job.running ? 'none' : '';
+
     if(!job.running){
       $('btnShipStop').style.display = 'none';
       $('btnShipRun').disabled = false;
@@ -1177,6 +1210,24 @@
   $('btnShipAll').addEventListener('click', function(){ tickAll(true); });
   $('btnShipNone').addEventListener('click', function(){ tickAll(false); });
   $('btnShipRun').addEventListener('click', run);
+  $('btnShipCarry').addEventListener('click', function(){
+    $('btnShipCarry').style.display = 'none';
+    $('shipLog').innerHTML = '';
+    S.logged = 0;
+    post('/api/shipfix/run', {})
+      .then(function(){ $('btnShipStop').style.display = ''; poll(); })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  $('btnShipClearLog').addEventListener('click', function(){
+    post('/api/shipfix/clear-log').then(function(){
+      S.logged = 0;
+      $('shipLog').innerHTML = '';
+      $('shipRun').classList.add('hide');
+      $('btnShipCarry').style.display = 'none';
+      $('btnShipClearLog').style.display = 'none';
+      $('btnShipRun').disabled = false;
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
   $('btnShipStop').addEventListener('click', function(){
     $('btnShipStop').disabled = true;
     post('/api/shipfix/stop').then(function(){ $('btnShipStop').disabled = false; });
