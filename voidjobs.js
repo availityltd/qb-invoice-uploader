@@ -6,10 +6,10 @@ const API = 'https://quickbooks.api.intuit.com';
 // one void run per company, kept on the server so leaving the page is safe
 const jobs = new Map();
 const MAX_EVENTS = 3000;
-// A refusal here is QuickBooks being loaded, never the invoice - so the refused ones
-// go round again until every last one is voided, or Stop is pressed. The pause between
-// rounds grows a little and then stays at this.
-const LONGEST_PAUSE = 30 * 1000;
+// A refusal is QuickBooks being loaded - it holds the stock for a while after each
+// void - never the invoice. So the refused one waits this long and goes again, until
+// it is voided or Stop is pressed.
+const RETRY_PAUSE = 60 * 1000;
 // QuickBooks access tokens last an hour - refresh well before that
 const TOKEN_LIFE = 40 * 60 * 1000;
 function isAuthError(msg) {
@@ -201,101 +201,70 @@ async function run(realmId, job, only) {
   push(job, 'log', (only ? 'Carrying on: ' : '') + `Voiding ${count} invoice${count === 1 ? '' : 's'}` +
     (job.force ? ' - linked payments will be freed first.' : '.'));
 
-  // One invoice at a time, back to back. Those on a payment go after the rest.
-  let pending = (only || job.invoices).slice();
+  // One invoice at a time. Those with no payment go first, then those on a payment.
+  const order = (only || job.invoices).slice();
+  const queue = order.filter(x => !x.hasPayment).concat(order.filter(x => x.hasPayment));
+  push(job, 'log', `${queue.length} to void, one at a time. A refused one waits ${Math.round(RETRY_PAUSE / 1000)} seconds and is tried again until it goes.`);
 
-  for (let round = 1; pending.length && !job.stop; round++) {
-    const again = [];
+  // Does one attempt and says what came of it: 'done', 'retry' or 'final'.
+  async function attempt(inv) {
+    let r;
+    try {
+      const token = await tokenFor(realmId, job);
+      r = await voidOne(realmId, token, inv, job.force);
 
-    if (round > 1) {
-      push(job, 'log', `Trying the ${pending.length} that were refused again, one at a time.`);
+      // the hour ran out mid-run - sign in again and have another go now
+      if (!r.ok && isAuthError(r.msg)) {
+        const fresh = await tokenFor(realmId, job, true);
+        r = await voidOne(realmId, fresh, Object.assign({}, inv, { syncToken: null }), job.force);
+      }
+    } catch (e) {
+      r = { ok: false, msg: e.message };
     }
 
-   async function attempt(inv) {
-      let r;
-      try {
-        const token = await tokenFor(realmId, job);
-        r = await voidOne(realmId, token, inv, job.force);
-
-        // the hour ran out mid-run - sign in again and have another go now
-        if (!r.ok && isAuthError(r.msg)) {
-          const fresh = await tokenFor(realmId, job, true);
-          r = await voidOne(realmId, fresh, Object.assign({}, inv, { syncToken: null }), job.force);
-        }
-      } catch (e) {
-        r = { ok: false, msg: e.message };
-      }
-      if (r.ok) {
-        job.done++;
-        job.voided.push({ doc: inv.doc, id: inv.id, already: !!r.already });
-        push(job, 'ok', `VOID    ${inv.doc}` +
-          (r.already ? '   (was already void)' : '') +
-          ((r.notes && r.notes.length) ? '   [' + r.notes.join('; ') + ']' : ''),
-          { doc: inv.doc });
-        try {
-          await logUpload(realmId, inv.doc, 'voided', `QB Id ${inv.id} voided`, null);
-        } catch (e) {}
-        return;
-      }
-
-      if (r.held) {
-        job.done++;
-        job.held.push({ doc: inv.doc, id: inv.id, msg: r.msg });
-        push(job, 'held', `HELD    ${inv.doc}   ${r.msg}`, { doc: inv.doc });
-        return;
-      }
-
-      // a refusal is very often a lock or a gateway that timed out, not the invoice -
-      // so every one is taken again after a breath, whatever the message said
-      if (!/not in QuickBooks any more/.test(r.msg)) {
-        again.push(Object.assign({}, inv, { syncToken: null }));
-        job.retried = (job.retried || 0) + 1;
-        push(job, 'retry', `retry  ${inv.doc}   ${String(r.msg).slice(0, 300)}`);
-        return;
-      }
-
+    if (r.ok) {
       job.done++;
-      job.failed.push({ doc: inv.doc, id: inv.id, msg: r.msg });
-      push(job, 'fail', `FAILED  ${inv.doc}   ${String(r.msg).slice(0, 200)}`, { doc: inv.doc });
+      job.voided.push({ doc: inv.doc, id: inv.id, already: !!r.already });
+      push(job, 'ok', `VOID    ${inv.doc}` +
+        (r.already ? '   (was already void)' : '') +
+        ((r.notes && r.notes.length) ? '   [' + r.notes.join('; ') + ']' : ''),
+        { doc: inv.doc });
+      try {
+        await logUpload(realmId, inv.doc, 'voided', `QB Id ${inv.id} voided`, null);
+      } catch (e) {}
+      return 'done';
     }
 
-    const quick = pending.filter(x => !x.hasPayment);
-    const careful = pending.filter(x => x.hasPayment);
-
-    if (quick.length) {
-      if (round === 1) {
-        push(job, 'log', `${quick.length} with no payment on them - ${job.lanes} at a time.`);
-      }
-      let next = 0;
-      const lane = async () => {
-        while (!job.stop) {
-          const i = next++;
-          if (i >= quick.length) return;
-          await attempt(quick[i]);
-          if (job.delay) await nap(job, job.delay);
-        }
-      };
-      await Promise.all(Array.from({ length: job.lanes }, lane));
+    if (r.held) {
+      job.done++;
+      job.held.push({ doc: inv.doc, id: inv.id, msg: r.msg });
+      push(job, 'held', `HELD    ${inv.doc}   ${r.msg}`, { doc: inv.doc });
+      return 'done';
     }
 
-    if (careful.length && !job.stop) {
-      if (round === 1) {
-        push(job, 'log', `${careful.length} sit on payments - these go one at a time.`);
-      }
-      for (const inv of careful) {
-        if (job.stop) break;
-        await attempt(inv);
-        if (job.delay) await nap(job, job.delay);
-      }
+    // a refusal is QuickBooks being busy - a lock, a timeout - not the invoice,
+    // so it is tried again after a pause, however many times that takes
+    if (!/not in QuickBooks any more/.test(r.msg)) {
+      job.retried = (job.retried || 0) + 1;
+      push(job, 'retry', `retry  ${inv.doc}   ${String(r.msg).slice(0, 300)}`);
+      return 'retry';
     }
 
-    pending = again;
+    job.done++;
+    job.failed.push({ doc: inv.doc, id: inv.id, msg: r.msg });
+    push(job, 'fail', `FAILED  ${inv.doc}   ${String(r.msg).slice(0, 200)}`, { doc: inv.doc });
+    return 'final';
+  }
 
-    if (pending.length && !job.stop) {
-      push(job, 'log', `${pending.length} refused - a short pause, then they go again.`);
-      await nap(job, Math.min(4000 * round, LONGEST_PAUSE));
-      job.token = null; // a fresh sign-in for the next round
+  for (const inv of queue) {
+    while (!job.stop) {
+      const out = await attempt(Object.assign({}, inv, { syncToken: null }));
+      if (out !== 'retry') break;
+      push(job, 'log', `Waiting ${Math.round(RETRY_PAUSE / 1000)} seconds, then ${inv.doc} goes again.`);
+      await nap(job, RETRY_PAUSE);
+      job.token = null; // a fresh sign-in for the next go
     }
+    if (job.stop) break;
   }
 
   if (job.stop) {
