@@ -774,12 +774,11 @@
         updateVoidButton();
       }
 
-      var seen = j.seen === undefined ? j.done : j.seen;
-      var pct = j.total ? Math.round(seen / j.total * 100) : 0;
+      var pct = j.total ? Math.round(j.done / j.total * 100) : 0;
       $('bar').style.width = pct + '%';
       $('runline').textContent =
-        nf(seen) + ' of ' + nf(j.total) + ' looked at \u00b7 ' +
-        nf(j.retried || 0) + ' waiting for another round \u00b7 ' +
+        nf(j.done) + ' of ' + nf(j.total) + ' done · ' +
+        nf(Math.max(0, j.total - j.done)) + ' still to go (refused ones are tried again) · ' +
         nf(j.voidedCount) + ' voided \u00b7 ' +
         nf(j.heldCount) + ' held \u00b7 ' +
         nf(j.failedCount) + ' failed' +
