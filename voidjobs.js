@@ -169,8 +169,9 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
     stop: false,
     invoices,
     force: !!force,
-   delay: delay === undefined ? 0 : Number(delay) || 0,
-    lanes: 1,
+    // one invoice per request, back to back - no pause between them
+    delay: delay === undefined ? 0 : Number(delay) || 0,
+    lanes: 1, // strictly one at a time: QuickBooks turns down voids sent together
     token: null,
     tokenAt: 0,
     total: invoices.length,
@@ -293,7 +294,7 @@ async function run(realmId, job) {
     pending = again;
 
     if (pending.length && round < MAX_ROUNDS && !job.stop) {
-      const wait = round * 30;
+      const wait = round * 10;
       push(job, 'log', `${pending.length} left over - waiting ${wait} seconds, then round ${round + 1}.`);
       await nap(job, wait * 1000);
     }

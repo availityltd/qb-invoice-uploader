@@ -5755,7 +5755,7 @@ app.post('/api/void/start', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const { invoices, force = false, delay = 400 } = req.body;
+  const { invoices, force = false, delay = 0 } = req.body;
   try {
     const id = startVoidJob(realmId, { invoices, force, delay });
     res.json({ ok: true, jobId: id });
