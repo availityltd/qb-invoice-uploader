@@ -6772,6 +6772,7 @@ app.get('/api/products/status', async (req, res) => {
     job: st.job ? {
       running: st.job.running, field: st.job.field, done: st.job.done,
       failed: st.job.failed, total: st.job.total,
+      left: Math.max(0, st.job.total - st.job.okIds.size),
       error: st.job.error || null, log: st.job.log.slice(-80)
     } : null
   });
@@ -6906,8 +6907,18 @@ app.post('/api/products/clear', async (req, res) => {
 async function runProductJob(realmId, st, job) {
   let token = await getAccessToken(realmId);
 
+  // an item counts as done once it went through, so a carry-on skips it
+  let lastOne = null, lastOk = 0;
+  const settle = () => {
+    if (lastOne && (job.done - job.failed) > lastOk) job.okIds.add(lastOne.id);
+  };
+
   for (const one of job.items) {
+    settle();
     if (job.stop) break;
+    if (job.okIds.has(one.id)) continue;
+    lastOne = one;
+    lastOk = job.done - job.failed;
 
     const row = st.rows.filter(r => r.id === one.id)[0] || { id: one.id, name: '', sku: '' };
 
@@ -7088,6 +7099,7 @@ async function runProductJob(realmId, st, job) {
     }
   }
 
+  settle();
   job.running = false;
   job.finished = Date.now();
   if (st.rows.length) st.summary = summariseProducts(st.rows);
@@ -7104,6 +7116,15 @@ app.post('/api/products/apply', async (req, res) => {
     if (st.job && st.job.running) throw new Error('That is already running');
 
     const body = req.body || {};
+    // carrying on takes what is left of the run before, the way it was asked
+    const before = body.carryOn && st.job ? st.job : null;
+    if (before) {
+      body.field = before.field;
+      body.items = before.items;
+      body.accountId = before.accountId;
+      body.date = before.date;
+      body.memo = before.memo;
+    }
     const field = String(body.field || '');
     if (['cost', 'active', 'stock', 'merge'].indexOf(field) < 0) throw new Error('Unknown change');
     if (field === 'stock' && !body.accountId) {
@@ -7118,8 +7139,10 @@ app.post('/api/products/apply', async (req, res) => {
     const job = {
       running: true, stop: false, field, done: 0, failed: 0,
       total: items.length, items, log: [], started: Date.now(),
+      okIds: new Set(before ? before.okIds : []),
       accountId: body.accountId || '', date: body.date || '', memo: body.memo || ''
     };
+    job.done = job.okIds.size;
     st.job = job;
 
     runProductJob(realmId, st, job).catch(e => {
@@ -7143,6 +7166,16 @@ app.get('/api/products/adjust-accounts', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+// Only the log of a finished run goes; what was read stays.
+app.post('/api/products/clear-log', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = prodStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
+  if (st) st.job = null;
+  res.json({ ok: true });
 });
 
 app.post('/api/products/stop', async (req, res) => {

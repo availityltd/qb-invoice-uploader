@@ -245,6 +245,11 @@
               <h2><span class="no">03</span> What is being done
                 <span class="aside" id="runAside"></span></h2>
               <div class="log" id="log"></div>
+              <div class="acts" style="margin-top:14px">
+                <button class="ghost hide" id="btnRunStop" style="border-color:var(--neg);color:var(--neg)">Stop</button>
+                <button class="ghost hide" id="btnCarry">Carry on</button>
+                <button class="ghost hide" id="btnClearLog">Clear log</button>
+              </div>
             </div>
           </div>
 
@@ -967,6 +972,11 @@
     // shown for as long as the run is running on the server, from this computer
     // or another one
     $('btnStop').classList.toggle('hide', !job.running);
+    // the run's own buttons: Stop while it goes, then Carry on and Clear log
+    $('btnRunStop').classList.toggle('hide', !job.running);
+    $('btnClearLog').classList.toggle('hide', !!job.running);
+    $('btnCarry').classList.toggle('hide', !!job.running || !job.left);
+    $('btnCarry').textContent = 'Carry on (' + nf(job.left || 0) + ' left)';
     $('runAside').textContent = job.done + ' of ' + job.total +
       (job.failed ? ' — ' + job.failed + ' refused' : '');
 
@@ -1128,6 +1138,27 @@
     $('btnScanStop').disabled = true;
     say('busy', 'Stopping after the read in hand…');
     post('/api/products/stop');
+  });
+  $('btnRunStop').addEventListener('click', function(){
+    $('btnRunStop').disabled = true;
+    post('/api/products/stop').then(function(){ $('btnRunStop').disabled = false; });
+  });
+  $('btnCarry').addEventListener('click', function(){
+    $('log').innerHTML = '';
+    S.logged = 0;
+    $('btnCarry').classList.add('hide');
+    post('/api/products/apply', { carryOn: true })
+      .then(function(){ poll(); })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  $('btnClearLog').addEventListener('click', function(){
+    post('/api/products/clear-log').then(function(){
+      S.logged = 0;
+      $('log').innerHTML = '';
+      $('runSheet').classList.add('hide');
+      say('', '');
+      drawApply();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
