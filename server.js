@@ -3456,6 +3456,8 @@ app.post('/api/recat/run', async (req, res) => {
     if (st.job && st.job.running) throw new Error('That is already running');
 
     const only = Array.isArray(req.body && req.body.ids) ? req.body.ids.map(String) : null;
+    // what a finished run left refused is taken again by carrying on
+    st.rows.forEach(r => { if (r.state === 'failed') { r.state = 'ready'; r.note = ''; } });
     const rows = st.rows.filter(r =>
       r.state === 'ready' && r.qbId && (!only || only.includes(r.kind + '|' + r.qbId)));
     if (!rows.length) throw new Error('None of these are waiting to be moved');
@@ -3512,6 +3514,19 @@ app.post('/api/recat/stop', async (req, res) => {
   const st = recatStore.get(realmId);
   if (st && st.job && st.job.running) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
+  res.json({ ok: true });
+});
+
+// Only the log of a finished run goes; the transactions found stay.
+app.post('/api/recat/clear-log', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = await getRecat(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
+  if (st) {
+    st.job = null;
+    await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+  }
   res.json({ ok: true });
 });
 
@@ -3764,6 +3779,12 @@ app.post('/api/desc/run', async (req, res) => {
     if (st.job && st.job.running) throw new Error('That is already running');
 
     const body = req.body || {};
+    // carrying on takes the same descriptions to the same category as the run before
+    if (body.carryOn && st.job && st.to) {
+      body.keys = st.job.descs; body.by = st.job.by; body.to = st.to.id;
+    }
+    // what a finished run left refused is taken again by carrying on
+    st.rows.forEach(r => { if (r.state === 'failed') { r.state = 'ready'; r.note = ''; } });
     const by = descWayOf(body.by).key;
     // the keys come back as the list handed out - already levelled for case and
     // spacing, and a category keyed by its id
@@ -3803,6 +3824,16 @@ app.post('/api/desc/stop', async (req, res) => {
   const st = descStore.get(realmId);
   if (st && st.job && st.job.running) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
+  res.json({ ok: true });
+});
+
+// Only the log of a finished run goes; what was read stays.
+app.post('/api/desc/clear-log', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = descStore.get(realmId);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
+  if (st) st.job = null;
   res.json({ ok: true });
 });
 

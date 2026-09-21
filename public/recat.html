@@ -207,6 +207,8 @@
             <div class="log" id="log"></div>
             <div class="acts" style="margin-top:14px">
               <button class="ghost hide" id="btnStop">Stop</button>
+              <button class="ghost hide" id="btnCarry">Carry on</button>
+              <button class="ghost hide" id="btnClearLog">Clear log</button>
             </div>
           </div>
         </div>
@@ -646,6 +648,11 @@
     // shown for as long as the run is running on the server - started from this
     // computer or another one, before a reload or after it
     $('btnStop').classList.toggle('hide', !job.running);
+    // once the run is over: carry on with what is left, or clear the log
+    var left = Math.max(0, job.total - (job.done - job.failed));
+    $('btnClearLog').classList.toggle('hide', !!job.running);
+    $('btnCarry').classList.toggle('hide', !!job.running || !left);
+    $('btnCarry').textContent = 'Carry on (' + left + ' left)';
     if(job.running) $('btnRun').disabled = true;
     $('runSheet').classList.remove('hide');
     var pct = job.total ? Math.round(100 * job.done / job.total) : 0;
@@ -750,6 +757,24 @@
   });
   Array.prototype.forEach.call(document.querySelectorAll('.quick button'), function(b){
     b.addEventListener('click', function(){ setSpan(b.getAttribute('data-span')); });
+  });
+  $('btnCarry').addEventListener('click', function(){
+    $('log').innerHTML = '';
+    S.logged = 0;
+    $('btnCarry').classList.add('hide');
+    post('/api/recat/run', {})
+      .then(function(){ $('btnStop').classList.remove('hide'); poll(); })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  $('btnClearLog').addEventListener('click', function(){
+    post('/api/recat/clear-log').then(function(){
+      clearInterval(S.poller); S.poller = null;
+      S.logged = 0;
+      $('log').innerHTML = '';
+      say('', '');
+      $('runSheet').classList.add('hide');
+      $('btnRun').disabled = false;
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
   $('btnReset').addEventListener('click', function(){
     post('/api/recat/clear').then(function(){
