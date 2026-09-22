@@ -11,7 +11,8 @@ import {
 import { initMappings, getMappings, saveMapping } from './mappings.js';
 import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
-  initUsers, upsertUser, getUser, linkCompany, userOwns, companiesForUser
+  initUsers, upsertUser, getUser, linkCompany, userOwns, companiesForUser,
+  listUsers, setUserAccess
 } from './users.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
@@ -166,6 +167,52 @@ function currentUser(req) {
   return verify(req.cookies.uid);
 }
 
+// ==================== who is an admin ====================
+// One company, many QuickBooks sign-ins. Only the addresses named here run the app
+// as its admin; everyone else signs in and works as a user. The list lives in the
+// server's settings, never in the database, so reaching the database is not a way
+// to become an admin.
+const ADMIN_EMAILS = new Set(
+  String(process.env.ADMIN_EMAILS || 'sohailsaim6@gmail.com')
+    .split(/[,;s]+/).map(x => x.trim().toLowerCase()).filter(Boolean)
+);
+
+const whoCache = new Map();          // sub -> what they are, for half a minute
+const WHO_LIFE = 30 * 1000;
+
+async function whoIs(sub) {
+  if (!sub) return null;
+  const kept = whoCache.get(sub);
+  if (kept && Date.now() - kept.at < WHO_LIFE) return kept;
+
+  const u = await getUser(sub);
+  const who = {
+    email: (u && u.email) ? String(u.email).toLowerCase() : '',
+    name: u ? (u.name || u.email) : null,
+    allowed: u ? u.allowed !== false : true,
+    rights: (u && Array.isArray(u.rights)) ? u.rights : [],
+    at: Date.now()
+  };
+  who.admin = !!who.email && ADMIN_EMAILS.has(who.email);
+  whoCache.set(sub, who);
+  return who;
+}
+
+function forgetWho(sub) { whoCache.delete(sub); }
+
+// The admin, and nobody else. What only the admin may touch - the courier accounts
+// and their keys above all - asks for this instead of requireCompany.
+async function requireAdmin(req, res) {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return null;
+  const who = await whoIs(currentUser(req));
+  if (!who || !who.admin) {
+    res.status(403).json({ error: 'Only the admin can do this. You are signed in as a user.' });
+    return null;
+  }
+  return realmId;
+}
+
 async function requireCompany(req, res) {
   const sub = currentUser(req);
   if (!sub) { res.status(401).json({ error: 'Not signed in' }); return null; }
@@ -175,8 +222,120 @@ async function requireCompany(req, res) {
     res.status(403).json({ error: 'This company is not linked to your account' });
     return null;
   }
+  // someone the admin has turned off is signed in, and no further
+  const who = await whoIs(sub);
+  if (who && !who.allowed && !who.admin) {
+    res.status(403).json({ error: 'The admin has turned your access to this app off.' });
+    return null;
+  }
   return realmId;
 }
+
+// ==================== the people who use it ====================
+// Everyone who has ever signed in, what they are, and what the admin has let them
+// change. Only the admin sees this and only the admin changes it.
+app.get('/api/admin/users', async (req, res) => {
+  const realmId = await requireAdmin(req, res);
+  if (!realmId) return;
+  try {
+    const rows = await listUsers();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      admins: [...ADMIN_EMAILS],
+      users: rows.map(u => ({
+        sub: u.sub,
+        email: u.email || '',
+        name: u.name || '',
+        admin: !!u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase()),
+        allowed: u.allowed !== false,
+        rights: Array.isArray(u.rights) ? u.rights : [],
+        lastIn: u.last_in,
+        since: u.created_at
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/users/access', async (req, res) => {
+  const realmId = await requireAdmin(req, res);
+  if (!realmId) return;
+
+  const { sub, allowed, rights } = req.body || {};
+  if (!sub) return res.status(400).json({ error: 'Which person?' });
+
+  try {
+    const u = await getUser(sub);
+    if (u && u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase())) {
+      return res.status(400).json({ error: 'That address is an admin - change ADMIN_EMAILS on the server instead.' });
+    }
+    await setUserAccess(sub, { allowed, rights });
+    forgetWho(sub);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== what a user may not do ====================
+// A user reads everything and downloads everything; nothing they press changes
+// QuickBooks, the sheets, or the courier accounts. Reading is asked for with GET,
+// but a good deal of the reading here is asked for with POST as well - a pasted
+// list of numbers, a date range, a scan. Those are named below. Everything else
+// sent with POST is taken to be a change, so one added later is closed to users
+// until it is opened on purpose.
+const USER_MAY_POST = new Set([
+  '/auth/signout', '/auth/switch',
+  // reading QuickBooks
+  '/api/preview', '/api/gap-check', '/api/negative-items',
+  '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
+  '/api/adv/recheck', '/api/charges/preview', '/api/charges/scan',
+  '/api/void/scan',
+  // finding orders in the courier sheets - a read from end to end
+  '/api/find/start', '/api/find/resume', '/api/find/clear',
+  '/api/find/sheets', '/api/find/columns',
+  // matching a CPR against QuickBooks, before anything is posted
+  '/api/merge/upload', '/api/merge/scan', '/api/merge/paste', '/api/merge/clear',
+  '/api/shipfix/plan', '/api/shipfix/clear', '/api/shipfix/clear-log',
+  // reading the books, and narrowing what was read
+  '/api/products/scan', '/api/products/paste',
+  '/api/products/clear', '/api/products/clear-log',
+  '/api/recat/scan', '/api/recat/clear', '/api/recat/clear-log',
+  '/api/desc/scan', '/api/desc/clear', '/api/desc/clear-log',
+  '/api/replace/scan', '/api/replace/pairs', '/api/replace/pairs-keep',
+  '/api/replace/pick', '/api/replace/shopify', '/api/replace/target',
+  '/api/replace/clear', '/api/replace/clear-log',
+  '/api/swap/plan', '/api/swap/clear', '/api/swap/clear-log'
+]);
+
+// Stopping is always allowed, whoever started it. A run belongs to the company and
+// is watched from every computer, so anyone seeing one go wrong must be able to end
+// it - that is the safe direction.
+const isStop = p => /-stop$/.test(p) || p.endsWith("/stop") || p.endsWith("/pause");
+
+app.use(async (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  const path = req.path;
+  if (path.indexOf("/api/") !== 0 && path.indexOf("/auth/") !== 0) return next();
+  if (USER_MAY_POST.has(path) || isStop(path)) return next();
+
+  const sub = currentUser(req);
+  if (!sub) return next();               // not signed in - the route says so itself
+
+  try {
+    const who = await whoIs(sub);
+    if (who && who.admin) return next();
+    if (who && who.rights.includes(path)) return next();
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  res.status(403).json({
+    error: 'You are signed in as a user, so this page is read-only. ' +
+           'Ask the admin to make this change, or to give you the right to it.'
+  });
+});
 
 // ==================== OAuth ====================
 app.get('/auth/connect', (req, res) => {
@@ -247,15 +406,26 @@ app.get('/auth/callback', async (req, res) => {
     }
 
     await upsertUser(sub, email, name);
+    forgetWho(sub);
     res.cookie('uid', sign(sub), { httpOnly: true, maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
 
-    if (realmId && tokens.refresh_token) {
-      await saveCompany(realmId, null, tokens.refresh_token);
-      try {
-        const info = await getCompanyInfo(realmId, tokens.access_token);
-        await saveCompany(realmId, info.CompanyName, tokens.refresh_token);
-      } catch (e) {
-        console.error('CompanyInfo error:', e.message);
+    const isAdmin = ADMIN_EMAILS.has(String(email || '').toLowerCase());
+
+    if (realmId) {
+      // The key that every page in the app works through belongs to the admin and
+      // is only ever written by the admin. Someone else signing in with their own
+      // QuickBooks address is welcomed in as a user and their key is thrown away
+      // here - so a second sign-in can neither take the company over nor, by
+      // being disconnected later, stop the app for everyone else.
+      const known = await getCompany(realmId);
+      if (tokens.refresh_token && (isAdmin || !known)) {
+        await saveCompany(realmId, known ? known.company_name : null, tokens.refresh_token);
+        try {
+          const info = await getCompanyInfo(realmId, tokens.access_token);
+          await saveCompany(realmId, info.CompanyName, tokens.refresh_token);
+        } catch (e) {
+          console.error('CompanyInfo error:', e.message);
+        }
       }
       await linkCompany(sub, realmId);
       res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
@@ -274,12 +444,14 @@ app.get('/auth/status', async (req, res) => {
   if (!sub) return res.json({ signedIn: false, connected: false });
 
   const user = await getUser(sub);
+  const who = await whoIs(sub);
   const realmId = req.cookies.realm_id;
 
   if (!realmId || !(await userOwns(sub, realmId))) {
     return res.json({
       signedIn: true,
       connected: false,
+      admin: !!(who && who.admin),
       user: user ? (user.name || user.email) : null
     });
   }
@@ -290,6 +462,8 @@ app.get('/auth/status', async (req, res) => {
     connected: !!company,
     companyName: company ? company.company_name : null,
     realmId,
+    // the pages read this to put away every button that writes to QuickBooks
+    admin: !!(who && who.admin),
     user: user ? (user.name || user.email) : null
   });
 });

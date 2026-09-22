@@ -11,6 +11,17 @@ export async function initUsers() {
     );
   `);
 
+  // Who may use the app at all, and what they may change. Admin is not kept here -
+  // it is read from the ADMIN_EMAILS setting on the server, so nobody can make
+  // themselves an admin by reaching the database. Everyone else is a user: they
+  // see and download everything, and change nothing unless the admin says so.
+  await pool.query(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS allowed BOOLEAN NOT NULL DEFAULT TRUE,
+      ADD COLUMN IF NOT EXISTS rights  JSONB   NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS last_in TIMESTAMPTZ
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_companies (
       user_sub    TEXT NOT NULL,
@@ -23,9 +34,30 @@ export async function initUsers() {
 
 export async function upsertUser(sub, email, name) {
   await pool.query(
-    `INSERT INTO users (sub, email, name) VALUES ($1, $2, $3)
-     ON CONFLICT (sub) DO UPDATE SET email = $2, name = $3`,
+    `INSERT INTO users (sub, email, name, last_in) VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (sub) DO UPDATE SET email = $2, name = $3, last_in = NOW()`,
     [sub, email || null, name || null]
+  );
+}
+
+// Everyone who has ever signed in, for the admin's list
+export async function listUsers() {
+  const r = await pool.query(
+    `SELECT sub, email, name, allowed, rights, last_in, created_at
+     FROM users ORDER BY created_at`
+  );
+  return r.rows;
+}
+
+// The admin says whether someone may use the app, and what they may change
+export async function setUserAccess(sub, { allowed, rights }) {
+  await pool.query(
+    `UPDATE users SET
+       allowed = COALESCE($2, allowed),
+       rights  = COALESCE($3, rights)
+     WHERE sub = $1`,
+    [sub, allowed === undefined ? null : !!allowed,
+     rights === undefined ? null : JSON.stringify(rights)]
   );
 }
 
