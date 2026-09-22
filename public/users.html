@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who uses this</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+
+  .who{border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:12px}
+  .who.off{background:#FAFAFA;border-style:dashed}
+  .whohead{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    flex-wrap:wrap;padding:14px 16px}
+  .whohead b{font-size:13.5px;font-weight:600;display:block}
+  .whohead small{font-size:11.5px;color:var(--muted);display:block;margin-top:3px}
+  .tag{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;
+    border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .tag.adm{border-color:var(--qbo);color:var(--qbo)}
+  .tag.no{border-color:var(--bad);color:var(--bad)}
+
+  .rights{border-top:1px solid var(--line);padding:14px 16px;display:none}
+  .who.open .rights{display:block}
+  .rights .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+  .rights label{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;
+    border:1px solid var(--line);border-radius:7px;padding:9px 11px;cursor:pointer;
+    background:#fff;line-height:1.5}
+  .rights label:hover{border-color:var(--qbo)}
+  .rights label input{margin-top:2px}
+  .rights label span small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+  .rights .acts{margin-top:12px;display:flex;gap:8px;align-items:center}
+
+  .whohead button, .rights button{font-size:11.5px;padding:5px 12px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
+  .whohead button:hover, .rights button:hover{border-color:var(--qbo)}
+  .whohead button.danger:hover{border-color:var(--bad);color:var(--bad)}
+  .saved{font-size:11.5px;color:var(--ok)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Who uses this</h1>
+        <div class="sub">Everyone who has signed in, and what each of them may change.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="notAdmin" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>This page belongs to the admin</h2>
+        <p>You are signed in as a user. Everything else can be read and downloaded.</p>
+      </div>
+
+      <div id="body" class="hide">
+        <div class="step">
+          <h2>The people</h2>
+          <div class="hint">
+            Anyone who signs in with their own QuickBooks address arrives here as a
+            user: they read and download everything, and change nothing. Their
+            QuickBooks key is never kept, so signing in cannot take the company over
+            or stop the app for everyone else.
+            <br><br>
+            Tick a job below to let one person do it. Courier accounts and their keys
+            are not on this list &mdash; those stay with the admin. Who is an admin is
+            set on the server, not here.
+          </div>
+          <div id="list"></div>
+          <div class="stat" id="statBox"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var S = { groups: [], users: [] };
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function when(t){
+    if(!t) return 'never';
+    var d = new Date(t);
+    return d.toLocaleDateString() + ' ' +
+           d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  function jobCount(n){
+    return n ? n + (n === 1 ? ' job' : ' jobs') : 'Read only';
+  }
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  function draw(){
+    var box = $('list');
+    box.innerHTML = '';
+
+    if(!S.users.length){
+      box.innerHTML = '<div class="hint">Nobody has signed in yet.</div>';
+      return;
+    }
+
+    S.users.forEach(function(u){
+      var el = document.createElement('div');
+      el.className = 'who' + (u.allowed || u.admin ? '' : ' off');
+
+      var tags = u.admin
+        ? '<span class="tag adm">admin</span>'
+        : (u.allowed ? '' : '<span class="tag no">turned off</span>');
+
+      // the admin is named on the server, so there is nothing to press here
+      var acts = u.admin
+        ? '<small>Named on the server</small>'
+        : '<button class="b-rights">' + esc(jobCount(u.rights.length)) + '</button>' +
+          '<button class="b-allow' + (u.allowed ? ' danger' : '') + '">' +
+          (u.allowed ? 'Turn off' : 'Turn on') + '</button>';
+
+      el.innerHTML =
+        '<div class="whohead">' +
+          '<div>' +
+            '<b>' + esc(u.name || u.email || u.sub) + '</b>' +
+            '<small>' + esc(u.email || '') + ' · last signed in ' + esc(when(u.lastIn)) + '</small>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;align-items:center">' + tags + acts + '</div>' +
+        '</div>' +
+        '<div class="rights">' +
+          '<div class="grid">' +
+            S.groups.map(function(g){
+              return '<label><input type="checkbox" value="' + esc(g.key) + '"' +
+                     (u.rights.indexOf(g.key) > -1 ? ' checked' : '') + '>' +
+                     '<span>' + esc(g.label) +
+                     '<small>' + esc(g.what) + '</small></span></label>';
+            }).join('') +
+          '</div>' +
+          '<div class="acts"><button class="b-save">Save</button>' +
+          '<span class="saved" style="display:none">Saved</span></div>' +
+        '</div>';
+
+      var open = el.querySelector('.b-rights');
+      if(open){
+        open.addEventListener('click', function(){ el.classList.toggle('open'); });
+      }
+
+      var allow = el.querySelector('.b-allow');
+      if(allow){
+        allow.addEventListener('click', function(){
+          allow.disabled = true;
+          post('/api/admin/users/access', { sub: u.sub, allowed: !u.allowed })
+            .then(function(){ u.allowed = !u.allowed; draw(); })
+            .catch(function(e){
+              allow.disabled = false;
+              say('bad', '<b>' + esc(e.message) + '</b>');
+            });
+        });
+      }
+
+      var save = el.querySelector('.b-save');
+      if(save){
+        save.addEventListener('click', function(){
+          var picked = [];
+          el.querySelectorAll('.rights input:checked').forEach(function(i){
+            picked.push(i.value);
+          });
+          save.disabled = true;
+          post('/api/admin/users/access', { sub: u.sub, rights: picked })
+            .then(function(){
+              u.rights = picked;
+              var ok = el.querySelector('.saved');
+              ok.style.display = '';
+              // the count on the button is the quick answer, so it is put right here
+              if(open) open.textContent = jobCount(picked.length);
+              setTimeout(function(){ ok.style.display = 'none'; }, 1800);
+            })
+            .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); })
+            .then(function(){ save.disabled = false; });
+        });
+      }
+
+      box.appendChild(el);
+    });
+  }
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    if(!s.admin){ $('notAdmin').classList.remove('hide'); return; }
+
+    $('body').classList.remove('hide');
+
+    Promise.all([get('/api/admin/rights'), get('/api/admin/users')])
+      .then(function(out){
+        S.groups = out[0].groups || [];
+        S.users = out[1].users || [];
+        draw();
+      })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+})();
+</script>
+</body>
+</html>

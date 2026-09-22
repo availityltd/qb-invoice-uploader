@@ -26,7 +26,9 @@
       // Product, Category and Description are tabs of one page, not three
       // lines in the rail - a new kind of change is a new tab, not a new link
       { href:'/replace.html',  label:'Changes',          icon:'swap' },
-      { href:'/void.html',     label:'Void invoices',    icon:'ban' }
+      { href:'/void.html',     label:'Void invoices',    icon:'ban' },
+      // the admin's own: who may sign in, and what each of them may change
+      { href:'/users.html',    label:'Who uses this',    icon:'people', admin:true }
     ]}
   ];
 
@@ -43,6 +45,7 @@
         search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
     swap:   '<path d="M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3"/>',
     cart:   '<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.4 11.2a2 2 0 002 1.6h7.7a2 2 0 002-1.6L21 7H6"/>',
+    people: '<path d="M16 19v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="3.2"/><path d="M22 19v-2a4 4 0 00-3-3.8"/><path d="M16.5 3.9a4 4 0 010 6.2"/>',
     tag:    '<path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0l-7-7A2 2 0 013 12.2V5a2 2 0 012-2h7.2a2 2 0 011.4.6l7 7a2 2 0 010 2.8z"/><circle cx="7.5" cy="7.5" r="1.2"/>'
   };
 
@@ -75,7 +78,9 @@
                // every tab of the changes page lights up the one link
                (it.href === '/replace.html' &&
                 (path === '/swap.html' || path === '/recat.html' || path === '/desc.html'));
-      html += '<a href="' + it.href + '"' + (on ? ' class="on"' : '') +
+      html += '<a href="' + it.href + '"' +
+              (on ? ' class="on"' : (it.admin ? ' class="admin-only"' : '')) +
+              (on && it.admin ? ' data-admin="1"' : '') +
               (it.tree ? ' id="couriersLink"' : '') + '>' +
               svg(it.icon) + it.label +
               (it.tree ? '<span class="tcar" id="couriersCar">\u25B8</span>' : '') + '</a>';
@@ -262,7 +267,9 @@
   (function(){
     var st = document.createElement('style');
     st.textContent =
-      'html.as-user .add, html.as-user .admin-only { display: none !important; }' +
+      'html.as-user .add, html.as-user .admin-only,' +
+      ' html.as-user [data-admin] { display: none !important; }' +
+      'html.as-user [data-need] { display: none !important; }' +
       '.readonly-tag { display:none; margin-top:6px; font-size:11px; letter-spacing:.04em;' +
       ' text-transform:uppercase; color:var(--faint,#8a8a8a) }' +
       'html.as-user .readonly-tag { display:block }';
@@ -274,6 +281,20 @@
     .then(function(r){ return r.json(); })
     .then(function(s){
       document.documentElement.classList.add(s.admin ? 'as-admin' : 'as-user');
+
+      // A button marked with the job it belongs to is put away unless this person
+      // has been given that job. The rule above hides them all; these are the ones
+      // handed back. Done as a rule too, so what the page draws later obeys it.
+      var mine = (s.rights || []);
+      window.APP.rights = mine;
+      window.APP.may = function(job){ return !!s.admin || mine.indexOf(job) > -1; };
+      if(!s.admin && mine.length){
+        var back = document.createElement('style');
+        back.textContent = mine.map(function(k){
+          return 'html.as-user [data-need="' + k + '"] { display: revert !important; }';
+        }).join('');
+        document.head.appendChild(back);
+      }
 
       var dot = document.getElementById('dot');
       var txt = document.getElementById('connText');
