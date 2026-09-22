@@ -256,10 +256,25 @@
   })();
 
   /* ---------- connection state ---------- */
+  // Signed in as a user rather than the admin, everything that writes is put away
+  // from the rail and from the pages. A rule rather than a sweep, so it holds for
+  // what the page draws later too.
+  (function(){
+    var st = document.createElement('style');
+    st.textContent =
+      'html.as-user .add, html.as-user .admin-only { display: none !important; }' +
+      '.readonly-tag { display:none; margin-top:6px; font-size:11px; letter-spacing:.04em;' +
+      ' text-transform:uppercase; color:var(--faint,#8a8a8a) }' +
+      'html.as-user .readonly-tag { display:block }';
+    document.head.appendChild(st);
+  })();
+
   window.APP = window.APP || {};
   window.APP.ready = fetch('/auth/status')
     .then(function(r){ return r.json(); })
     .then(function(s){
+      document.documentElement.classList.add(s.admin ? 'as-admin' : 'as-user');
+
       var dot = document.getElementById('dot');
       var txt = document.getElementById('connText');
       if(s.connected){
@@ -267,6 +282,16 @@
         if(txt) txt.textContent = s.companyName || s.realmId;
       } else {
         if(txt) txt.textContent = 'Not connected';
+      }
+
+      // said once, where the company name is, so it is never a surprise later
+      if(!s.admin && txt && txt.parentNode && !document.querySelector('.readonly-tag')){
+        var tag = document.createElement('div');
+        tag.className = 'readonly-tag';
+        tag.textContent = 'Read only';
+        tag.title = 'You are signed in as a user. Everything can be read and ' +
+                    'downloaded; changes belong to the admin.';
+        txt.parentNode.appendChild(tag);
       }
       return s;
     })
