@@ -234,6 +234,14 @@ async function requireCompany(req, res) {
 // ==================== the people who use it ====================
 // Everyone who has ever signed in, what they are, and what the admin has let them
 // change. Only the admin sees this and only the admin changes it.
+// the jobs that can be handed out, for the admin's page to draw
+app.get('/api/admin/rights', async (req, res) => {
+  const realmId = await requireAdmin(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ groups: RIGHT_GROUPS.map(g => ({ key: g.key, label: g.label, what: g.what })) });
+});
+
 app.get('/api/admin/users', async (req, res) => {
   const realmId = await requireAdmin(req, res);
   if (!realmId) return;
@@ -309,6 +317,80 @@ const USER_MAY_POST = new Set([
   '/api/swap/plan', '/api/swap/clear', '/api/swap/clear-log'
 ]);
 
+// What the admin can hand out, by the name of the job rather than the route behind
+// it. A person is given whole jobs - "may receive payments" - not a list of
+// addresses. The courier accounts and their keys are not here on purpose: those
+// stay with the admin whatever else is given away.
+const RIGHT_GROUPS = [
+  { key: 'upload', label: 'Upload invoices',
+    what: 'Create the invoices in QuickBooks from a converted file.',
+    paths: ['/api/upload/start', '/api/upload/retry', '/api/upload/resume',
+            '/api/upload/handover', '/api/upload/clear'] },
+
+  { key: 'payments', label: 'Receive payments',
+    what: 'Record the payments on a CPR against the invoices, and put a payment right.',
+    paths: ['/api/cpr/receive', '/api/cpr/receive-clear', '/api/cpr/receive-resume',
+            '/api/cpr/bank', '/api/cpr/settled', '/api/cpr/colour',
+            '/api/cpr/duplicate', '/api/cpr/fix-payment', '/api/cpr/columns',
+            '/api/cpr/root', '/api/sheets/paint',
+            '/api/receipts/receive', '/api/receipts/mark', '/api/receipts/bank',
+            '/api/receipts/duplicate'] },
+
+  { key: 'advance', label: 'Advance payments',
+    what: 'Part payments taken before delivery.',
+    paths: ['/api/adv/receive', '/api/adv/receive-one', '/api/adv/receive-clear',
+            '/api/adv/receive-resume', '/api/adv/banks', '/api/adv/columns',
+            '/api/adv/columns-reset', '/api/adv/root', '/api/adv/mark-posted',
+            '/api/adv/fix-payment', '/api/adv/delete-payment'] },
+
+  { key: 'charges', label: 'Delivery charges',
+    what: 'Post the courier fees and taxes as journal entries.',
+    paths: ['/api/charges/post', '/api/charges/post-lines', '/api/charges/lines',
+            '/api/charges/accounts', '/api/charges/columns', '/api/charges/dc-root'] },
+
+  { key: 'void', label: 'Void invoices',
+    what: 'Set returned orders to zero, keeping the invoice number.',
+    paths: ['/api/void/start', '/api/void/resume', '/api/void/clear',
+            '/api/void/sheet-root'] },
+
+  { key: 'merge', label: 'Merge payments and take shipping off',
+    what: 'Group the orders of one customer against a CPR and take the extra shipping off.',
+    paths: ['/api/merge/strip', '/api/merge/strip-clear-log', '/api/merge/columns',
+            '/api/shipfix/run'] },
+
+  { key: 'changes', label: 'Change product, category or description',
+    what: 'Swap the product, or move transactions to another heading, across a date range.',
+    paths: ['/api/replace/run', '/api/swap/run', '/api/recat/run', '/api/desc/run',
+            '/api/recat/history/clear'] },
+
+  { key: 'products', label: 'Product health changes',
+    what: 'Put a cost on, put stock right, put an item away, merge two items into one.',
+    paths: ['/api/products/apply', '/api/products/record/clear'] },
+
+  { key: 'purchases', label: 'Purchase orders and bills',
+    what: 'Make a purchase order or bill, and attach the supplier paper.',
+    paths: ['/api/purchases/create', '/api/purchases/attach'] },
+
+  { key: 'delete', label: 'Delete invoices',
+    what: 'Remove invoices from QuickBooks for good. There is no undo for this.',
+    paths: ['/api/invoice-delete-start', '/api/invoice-delete-clear',
+            '/api/invoice-delete-resume', '/api/invoice-rename'] },
+
+  { key: 'couriersync', label: 'Bring courier data in',
+    what: 'Sync and backfill orders and receipts from a courier. Not the accounts or their keys.',
+    paths: ['/api/courier/sync', '/api/courier/backfill', '/api/courier/cpr-chase',
+            '/api/courier/keeper-now', '/api/courier/backfill-clear',
+            '/api/courier/backfill-resume', '/api/receipts/login', '/api/receipts/logout'] },
+
+  { key: 'settings', label: 'SKU and column settings',
+    what: 'The remembered SKU mappings the Convert page matches against.',
+    paths: ['/api/mappings'] }
+];
+
+// route -> the job it belongs to, worked out once
+const RIGHT_OF_PATH = new Map();
+RIGHT_GROUPS.forEach(g => g.paths.forEach(p => RIGHT_OF_PATH.set(p, g.key)));
+
 // Stopping is always allowed, whoever started it. A run belongs to the company and
 // is watched from every computer, so anyone seeing one go wrong must be able to end
 // it - that is the safe direction.
@@ -326,7 +408,9 @@ app.use(async (req, res, next) => {
   try {
     const who = await whoIs(sub);
     if (who && who.admin) return next();
-    if (who && who.rights.includes(path)) return next();
+    // the admin may have handed this whole job to them
+    const need = RIGHT_OF_PATH.get(path);
+    if (need && who && who.rights.includes(need)) return next();
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -462,8 +546,9 @@ app.get('/auth/status', async (req, res) => {
     connected: !!company,
     companyName: company ? company.company_name : null,
     realmId,
-    // the pages read this to put away every button that writes to QuickBooks
+    // the pages read these two to put away every button the person may not press
     admin: !!(who && who.admin),
+    rights: (who && who.rights) || [],
     user: user ? (user.name || user.email) : null
   });
 });
