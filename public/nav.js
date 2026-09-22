@@ -269,7 +269,6 @@
     st.textContent =
       'html.as-user .add, html.as-user .admin-only,' +
       ' html.as-user [data-admin] { display: none !important; }' +
-      'html.as-user [data-need] { display: none !important; }' +
       '.readonly-tag { display:none; margin-top:6px; font-size:11px; letter-spacing:.04em;' +
       ' text-transform:uppercase; color:var(--faint,#8a8a8a) }' +
       'html.as-user .readonly-tag { display:block }';
@@ -282,18 +281,21 @@
     .then(function(s){
       document.documentElement.classList.add(s.admin ? 'as-admin' : 'as-user');
 
-      // A button marked with the job it belongs to is put away unless this person
-      // has been given that job. The rule above hides them all; these are the ones
-      // handed back. Done as a rule too, so what the page draws later obeys it.
+      // A button carries the job it belongs to. Only the jobs this person was not
+      // given are hidden - never the whole set, because a page shows and hides its
+      // own buttons as a run goes, and a rule that forced them back would undo that.
       var mine = (s.rights || []);
       window.APP.rights = mine;
       window.APP.may = function(job){ return !!s.admin || mine.indexOf(job) > -1; };
-      if(!s.admin && mine.length){
-        var back = document.createElement('style');
-        back.textContent = mine.map(function(k){
-          return 'html.as-user [data-need="' + k + '"] { display: revert !important; }';
-        }).join('');
-        document.head.appendChild(back);
+      if(!s.admin){
+        var notMine = (s.jobs || []).filter(function(k){ return mine.indexOf(k) < 0; });
+        if(notMine.length){
+          var off = document.createElement('style');
+          off.textContent = notMine.map(function(k){
+            return '[data-need="' + k + '"]';
+          }).join(',') + '{ display: none !important }';
+          document.head.appendChild(off);
+        }
       }
 
       var dot = document.getElementById('dot');

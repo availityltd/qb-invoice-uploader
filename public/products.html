@@ -209,7 +209,7 @@
               <div class="acts hide" id="applyBar" style="margin-top:12px">
                 <button class="mini" id="btnAll">Tick all shown</button>
                 <button class="mini" id="btnNone">Untick all</button>
-                <button class="solid" id="btnApply" disabled>Nothing ticked</button>
+                <button class="solid" id="btnApply" data-need="products" disabled>Nothing ticked</button>
                 <button class="ghost hide" id="btnStop">Stop</button>
               </div>
               <p class="hint hide" id="applyHint" style="margin:8px 0 0"></p>
@@ -247,8 +247,8 @@
               <div class="log" id="log"></div>
               <div class="acts" style="margin-top:14px">
                 <button class="ghost hide" id="btnRunStop" style="border-color:var(--neg);color:var(--neg)">Stop</button>
-                <button class="ghost hide" id="btnCarry">Carry on</button>
-                <button class="ghost hide" id="btnClearLog">Clear log</button>
+                <button class="ghost hide" id="btnCarry" data-need="products">Carry on</button>
+                <button class="ghost hide" id="btnClearLog" data-need="products">Clear log</button>
               </div>
             </div>
           </div>
@@ -274,7 +274,7 @@
                 </table>
               </div>
               <div class="acts" style="margin-top:12px">
-                <button class="mini" id="btnRecClear">Clear log</button>
+                <button class="mini" id="btnRecClear" data-need="products">Clear log</button>
               </div>
             </div>
           </div>

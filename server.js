@@ -546,9 +546,10 @@ app.get('/auth/status', async (req, res) => {
     connected: !!company,
     companyName: company ? company.company_name : null,
     realmId,
-    // the pages read these two to put away every button the person may not press
+    // the pages read these to put away every button the person may not press
     admin: !!(who && who.admin),
     rights: (who && who.rights) || [],
+    jobs: RIGHT_GROUPS.map(g => g.key),
     user: user ? (user.name || user.email) : null
   });
 });

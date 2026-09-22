@@ -252,7 +252,7 @@
               <select id="method"></select>
             </div>
           </div>
-          <button class="solid" id="btnPay">Receive payments</button>
+          <button class="solid" id="btnPay" data-need="payments">Receive payments</button>
           <button class="solid" id="btnStop" style="display:none;background:var(--neg)">Stop</button>
           <div id="runBox" class="hide">
             <div class="prog"><i id="bar"></i></div>
@@ -260,7 +260,7 @@
             <div class="paylog" id="paylog"></div>
           </div>
           <div id="payOut"></div>
-          <div class="acts"><button class="mini" id="btnResume" style="display:none">Carry on</button> <button class="mini" id="btnClearRun" style="display:none">Clear log</button></div>
+          <div class="acts"><button class="mini" id="btnResume" data-need="payments" style="display:none">Carry on</button> <button class="mini" id="btnClearRun" data-need="payments" style="display:none">Clear log</button></div>
         </div>
 
         <div class="stat" id="statBox"></div>

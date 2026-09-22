@@ -238,7 +238,7 @@
               <input type="date" id="payDate">
             </div>
           </div>
-          <button class="solid" id="btnPay">Receive payments</button>
+          <button class="solid" id="btnPay" data-need="advance">Receive payments</button>
           <button class="solid" id="btnStop" style="display:none;background:var(--neg)">Stop</button>
 
           <div id="runBox" class="hide">
@@ -250,8 +250,8 @@
           <div class="acts" id="afterActs" style="display:none">
             <button class="mini" id="btnCopyLog">Copy log</button>
             <button class="mini" id="btnCsv">Download what was received</button>
-            <button class="mini" id="btnResume" style="display:none">Carry on</button>
-            <button class="mini" id="btnClearRun">Clear log</button>
+            <button class="mini" id="btnResume" data-need="advance" style="display:none">Carry on</button>
+            <button class="mini" id="btnClearRun" data-need="advance">Clear log</button>
           </div>
         </div>
 

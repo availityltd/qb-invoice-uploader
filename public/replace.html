@@ -261,7 +261,7 @@
 
           <div class="sec">
             <p class="hint" style="margin:0 0 12px" id="promise"></p>
-            <button class="run" id="btnRun" disabled>Replace them</button>
+            <button class="run" id="btnRun" data-need="changes" disabled>Replace them</button>
             <p class="runhint" id="runHint"></p>
           </div>
         </div>
@@ -271,8 +271,8 @@
             <h2><span class="no">05</span> The run
               <span class="aside" id="runAside"></span></h2>
             <div class="acts"><button class="ghost hide" id="btnStop" style="border-color:var(--neg);color:var(--neg)">Stop after this one</button>
-              <button class="ghost hide" id="btnCarry">Carry on</button>
-              <button class="ghost hide" id="btnClearLog">Clear log</button></div>
+              <button class="ghost hide" id="btnCarry" data-need="changes">Carry on</button>
+              <button class="ghost hide" id="btnClearLog" data-need="changes">Clear log</button></div>
             <div class="stat" id="doneStat"></div>
             <div class="log" id="log"></div>
           </div>

@@ -80,8 +80,8 @@
             </div>
 
             <div class="runbtns">
-              <button class="run" id="btnStart">Start upload</button>
-              <button class="run" id="btnResume" style="display:none">Carry on from here</button>
+              <button class="run" id="btnStart" data-need="upload">Start upload</button>
+              <button class="run" id="btnResume" data-need="upload" style="display:none">Carry on from here</button>
               <button class="side" id="btnPause" style="display:none">Pause</button>
               <button class="side" id="btnStop" style="display:none;border-color:var(--neg);color:var(--neg)">Stop</button>
             </div>
@@ -90,9 +90,9 @@
             <div class="runhint" id="stat">Ready</div>
             <div class="log" id="log"></div>
             <div class="acts" style="margin-top:12px;margin-bottom:0">
-              <button class="mini" id="btnRetry" style="display:none">Retry failed only</button>
+              <button class="mini" id="btnRetry" data-need="upload" style="display:none">Retry failed only</button>
               <button class="mini" id="btnCopyLog">Copy log</button>
-              <button class="mini" id="btnClear">Clear log</button>
+              <button class="mini" id="btnClear" data-need="upload">Clear log</button>
             </div>
           </div>
 

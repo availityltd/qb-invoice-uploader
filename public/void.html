@@ -199,7 +199,7 @@
 
           <div id="dangerBox"></div>
 
-          <button class="solid" id="btnVoid">Void them</button>
+          <button class="solid" id="btnVoid" data-need="void">Void them</button>
           <button class="solid" id="btnStop" style="display:none;background:var(--neg)">Stop</button>
 
           <div id="runBox" class="hide">
@@ -207,11 +207,11 @@
             <div class="runline" id="runline"></div>
             <div class="vlog" id="vlog"></div>
             <div class="acts">
-              <button class="mini" id="btnRetry" style="display:none">Carry on</button>
+              <button class="mini" id="btnRetry" data-need="void" style="display:none">Carry on</button>
               <button class="mini" id="btnCopyLog">Copy log</button>
               <button class="mini" id="btnDlVoided">Download voided</button>
               <button class="mini" id="btnDlLeft">Download not voided</button>
-              <button class="mini" id="btnClearRun">Clear log</button>
+              <button class="mini" id="btnClearRun" data-need="void">Clear log</button>
             </div>
           </div>
         </div>
