@@ -142,6 +142,18 @@ recat, desc, shipping off, product health, find, backfill, upload); Clear log sh
 once the run is over, wipes that run's history on the server for every computer, and
 leaves what was read so a new run shows only itself. A new kind of run brings all three.
 
+**One admin; everyone else reads.** Many people sign in to one company with their
+own QuickBooks address. Only an address named in `ADMIN_EMAILS` on the server is the
+admin - never a column in the database - and only an admin's refresh token is written
+to `companies`, so a second sign-in can neither take the company over nor stop the
+app for everyone by disconnecting later. A user reads and downloads everything. Every
+POST is refused to them unless it is named in `USER_MAY_POST` (the reads: scan, plan,
+preview, paste, find) or it is a Stop, so a route added later is closed until it is
+opened on purpose. The admin hands out whole jobs, not routes: `RIGHT_GROUPS` names
+them, `/users.html` ticks them, a button carries `data-need="<job>"` and `nav.js`
+hides the jobs that person was not given. Courier accounts and their keys are never
+in `RIGHT_GROUPS` - they stay with the admin.
+
 **Long runs survive a deploy.** Upload (`jobstore.js`), the category change
 (`recatstore.js`) and product replacement (`replacestore.js`) are written to
 Postgres as they go and carried on after a restart. The others - description

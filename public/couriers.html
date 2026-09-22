@@ -96,6 +96,14 @@
         <button class="solid" id="btnConnect">Connect to QuickBooks</button>
       </div>
 
+      <div id="notAdmin" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>This page belongs to the admin</h2>
+        <p>A courier account holds the keys that read the courier's data, so it is
+           the admin who adds and changes one. Everything a courier sends back is
+           still yours to read on the courier pages.</p>
+      </div>
+
       <div id="body" class="hide">
 
         <div class="step">
@@ -195,6 +203,8 @@
 
   window.APP.ready.then(function(s){
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    // the keys live here, so this page is the admin's whatever else was handed out
+    if(!s.admin){ $('notAdmin').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
 
     var today = new Date().toISOString().slice(0, 10);
