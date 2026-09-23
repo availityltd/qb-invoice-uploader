@@ -541,9 +541,10 @@
       // the cookie said so before the page drew; the server has the last word
       document.documentElement.classList.toggle('signed-out', !s.signedIn);
 
-      // Signed in, but no company picked yet - the app has nothing to show until
-      // there is one, so the question is asked rather than a bare gate shown.
-      if(s.signedIn && !s.connected && location.pathname !== '/choose.html'){
+      // Signed in, but either nobody has let them in yet or no company is picked.
+      // Both are the same screen: one waits there until the admin says yes, the
+      // other chooses. Neither is a page of the app, so neither is shown one.
+      if(s.signedIn && (!s.connected || !s.letIn) && location.pathname !== '/choose.html'){
         location.replace('/choose.html');
         return s;
       }

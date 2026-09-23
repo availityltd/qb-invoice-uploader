@@ -35,6 +35,9 @@
   .note{color:var(--muted);font-size:12px;line-height:1.6;margin:16px 0 0;text-align:center}
   .note a{color:var(--qbo)}
   .empty{color:var(--muted);font-size:13.5px;line-height:1.65;text-align:center;padding:6px 0 2px}
+  .empty b{color:var(--text);font-weight:600}
+  .pulse{color:var(--qbo);animation:fade 1.6s ease-in-out infinite}
+  @keyframes fade{0%,100%{opacity:.35}50%{opacity:1}}
 </style>
 </head>
 <body>
@@ -57,7 +60,7 @@
 (function(){
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
-  var all = [], current = null;
+  var all = [], current = null, waitTimer = null;
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -102,11 +105,54 @@
     });
   }
 
-  fetch('/auth/companies', { cache:'no-store' })
+  // Nobody has said yet whether this person may come in. They wait here rather
+  // than at a page of the app they cannot use - and they wait without having to
+  // do anything: the question is asked again every few seconds, so the moment the
+  // admin says yes the screen moves on by itself.
+  function waitForAdmin(who){
+    $('sub').textContent = 'Nothing is open yet.';
+    $('cap').style.display = 'none';
+    $('find').style.display = 'none';
+    $('list').innerHTML =
+      '<div class="empty"><b>Ask the admin to let you in.</b><br><br>' +
+      'They have been told you are here' + (who ? ', as ' + esc(who) : '') + '. ' +
+      'Once they have said which companies you work in, this page opens by ' +
+      'itself - there is nothing to press.</div>';
+    $('note').innerHTML = '<span class="pulse">Waiting…</span>';
+
+    if(!waitTimer) waitTimer = setInterval(look, 4000);
+  }
+
+  function look(){
+    fetch('/auth/status', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(st){
+        if(!st.signedIn){ location.href = '/'; return; }
+        if(!st.letIn || !st.companyCount) return waitForAdmin(st.user);
+
+        if(waitTimer){ clearInterval(waitTimer); waitTimer = null; }
+        return offer();
+      })
+      .catch(function(){});
+  }
+
+  function offer(){
+  return fetch('/auth/companies', { cache:'no-store' })
     .then(function(r){ return r.json(); })
     .then(function(d){
       all = d.companies || [];
       current = d.current || null;
+
+      // One company is not a choice. They are put into it and the app opens.
+      if(all.length === 1 && !d.admin){
+        $('sub').textContent = 'Opening ' + all[0].name + '…';
+        $('cap').style.display = 'none';
+        $('list').innerHTML = '<div class="empty">One moment.</div>';
+        return fetch('/auth/switch', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ realmId: all[0].realmId })
+        }).then(function(){ location.replace('/'); });
+      }
 
       if(!all.length){
         $('sub').textContent = d.admin ? 'Nothing is connected yet.' : 'Nothing yet.';
@@ -134,6 +180,9 @@
     .catch(function(){
       $('list').innerHTML = '<div class="empty">Could not reach the server.</div>';
     });
+  }
+
+  look();
 
   // this page carries the update watcher too, like every other
   var s = document.createElement('script');

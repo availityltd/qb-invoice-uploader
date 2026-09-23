@@ -345,18 +345,33 @@ app.post('/api/admin/users/access', async (req, res) => {
     await setUserAccess(sub, { allowed, rights, role });
     forgetWho(sub);
 
-    // Told only when it actually changed, so the bell means something.
-    if (role !== undefined && String(role) !== String(before.role || '')) {
-      const named = ROLES.find(r => r.key === String(role));
+    // Told that something changed, never what the role is. Which role a person
+    // holds, and what it carries, is the admin's to know; the person finds out by
+    // what opens in front of them, which is the same thing said more usefully.
+    const wasOn = before.allowed !== false && String(before.role || '') !== 'none';
+    const nowOn = (allowed === undefined ? before.allowed !== false : !!allowed) &&
+                  String(role === undefined ? before.role : role) !== 'none';
+
+    if (!wasOn && nowOn) {
       await notify(sub, {
-        kind: 'role',
-        title: (role === 'none')
-          ? 'Your access to the app has been turned off'
-          : 'You are now ' + (named ? named.label : String(role)),
-        body: (role === 'none')
-          ? 'The admin has turned your access off. Nothing opens until it is turned back on.'
-          : (named ? named.what : ''),
-        link: '/settings.html#profile'
+        kind: 'access',
+        title: 'You have been let in',
+        body: 'The admin has given you access to the app.',
+        link: '/'
+      });
+    } else if (wasOn && !nowOn) {
+      await notify(sub, {
+        kind: 'access',
+        title: 'Your access to the app has been turned off',
+        body: 'Nothing opens until the admin turns it back on.',
+        link: '/'
+      });
+    } else if (nowOn && role !== undefined && String(role) !== String(before.role || '')) {
+      await notify(sub, {
+        kind: 'access',
+        title: 'What you may do in the app has changed',
+        body: 'The admin has changed your access.',
+        link: '/'
       });
     }
     res.json({ ok: true });
@@ -854,10 +869,17 @@ app.get('/auth/status', async (req, res) => {
   const who = await whoIs(sub);
   const realmId = req.cookies.realm_id;
 
+  // May they come in at all, and is there anywhere for them to go? Both, because
+  // an account the admin has allowed but given no company to has nowhere to land.
+  const letIn = !!(who && (who.admin || (who.allowed && who.role !== 'none')));
+  const mine = letIn ? await companiesFor(sub) : [];
+
   if (!realmId || !(await userOwns(sub, realmId))) {
     return res.json({
       signedIn: true,
       connected: false,
+      letIn,
+      companyCount: mine.length,
       admin: !!(who && who.admin),
       email: (who && who.email) || null,
       adminCount: ADMIN_EMAILS.size,
@@ -873,11 +895,14 @@ app.get('/auth/status', async (req, res) => {
     realmId,
     // the pages read these to put away every button the person may not press
     admin: !!(who && who.admin),
+    letIn,
+    companyCount: mine.length,
     // what the server knows you by, and how many addresses it holds as admin -
     // the two things worth seeing when a sign-in is not the admin it should be
     email: (who && who.email) || null,
     adminCount: ADMIN_EMAILS.size,
-    role: (who && who.role) || 'viewer',
+    // The role itself is not sent. The pages have no use for its name, and the
+    // person it belongs to is not told it - what they may do shows in what opens.
     // a standard user has every job; anyone else has what was ticked
     rights: (who && who.role === 'standard')
       ? RIGHT_GROUPS.map(g => g.key)

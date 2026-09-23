@@ -93,9 +93,10 @@
           <dl class="me">
             <dt>Name</dt><dd id="mName">&mdash;</dd>
             <dt>Email</dt><dd id="mMail">&mdash;</dd>
-            <dt>Role</dt><dd id="mRole">&mdash;</dd>
-            <!-- What each person may change is the admin's business, kept on the
-                 Manage users page. It is not spelled out to them here. -->
+            <!-- Neither the role nor what it carries is spelled out here. Which of
+                 the two a person holds, and what each may change, is the admin's
+                 to know and the Manage users page to hold. The company is theirs
+                 to know, because it is the one they are working in. -->
             <dt>Company</dt><dd id="mCo">&mdash;</dd>
           </dl>
           <div class="acts">
@@ -320,15 +321,9 @@
       .catch(function(){ location.href = '/'; });
   });
 
-  var ROLE_NAMES = {
-    admin: 'Company admin', standard: 'Standard user',
-    custom: 'Standard, limited', viewer: 'Reports only', none: 'No access'
-  };
-
   window.APP.ready.then(function(s){
     $('mName').textContent = s.user || 'Not signed in';
     $('mMail').textContent = s.email || '—';
-    $('mRole').textContent = ROLE_NAMES[s.role] || s.role || '—';
     $('mCo').textContent = s.companyName || (s.connected ? s.realmId : 'Not connected');
   });
 
