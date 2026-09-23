@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Who uses this</title>
+<title>Manage users</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0F2E24">
@@ -15,35 +15,50 @@
   .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
     padding:20px 24px;margin-bottom:16px}
   .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
-  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:16px;line-height:1.6}
 
-  .who{border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:12px}
-  .who.off{background:#FAFAFA;border-style:dashed}
-  .whohead{display:flex;justify-content:space-between;align-items:center;gap:14px;
-    flex-wrap:wrap;padding:14px 16px}
-  .whohead b{font-size:13.5px;font-weight:600;display:block}
-  .whohead small{font-size:11.5px;color:var(--muted);display:block;margin-top:3px}
-  .tag{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;
+  table.users{width:100%;border-collapse:collapse}
+  table.users th{text-align:left;font-size:10.5px;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--faint);font-weight:600;
+    padding:0 14px 9px;border-bottom:1px solid var(--line)}
+  table.users td{padding:13px 14px;border-bottom:1px solid var(--line);
+    font-size:13px;vertical-align:middle}
+  table.users tr.off td{color:var(--muted)}
+  table.users td.nm b{font-weight:600;display:block}
+  table.users td.nm small{color:var(--muted);font-size:11.5px;display:block;margin-top:2px}
+  table.users td.act{text-align:right;white-space:nowrap}
+
+  .pill{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 9px;
     border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-  .tag.adm{border-color:var(--qbo);color:var(--qbo)}
-  .tag.no{border-color:var(--bad);color:var(--bad)}
+  .pill.ok{border-color:var(--ok);color:var(--ok)}
+  .pill.no{border-color:var(--bad);color:var(--bad)}
+  .pill.wait{border-color:var(--warn,#8a6d3b);color:var(--warn,#8a6d3b)}
 
-  .rights{border-top:1px solid var(--line);padding:14px 16px;display:none}
-  .who.open .rights{display:block}
-  .rights .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
-  .rights label{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;
+  button.mini{font-size:11.5px;padding:5px 13px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
+  button.mini:hover{border-color:var(--qbo)}
+
+  tr.editrow td{background:#FAFCFE;padding:0}
+  .editbox{padding:16px 14px 18px}
+  .roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:9px}
+  .roles label,.jobs label{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;
     border:1px solid var(--line);border-radius:7px;padding:9px 11px;cursor:pointer;
     background:#fff;line-height:1.5}
-  .rights label:hover{border-color:var(--qbo)}
-  .rights label input{margin-top:2px}
-  .rights label span small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
-  .rights .acts{margin-top:12px;display:flex;gap:8px;align-items:center}
+  .roles label:hover,.jobs label:hover{border-color:var(--qbo)}
+  .roles label.on{border-color:var(--qbo);box-shadow:inset 0 0 0 1px var(--qbo)}
+  .roles label input,.jobs label input{margin-top:2px}
+  .roles label span small,.jobs label span small{display:block;color:var(--muted);
+    font-size:11.5px;margin-top:2px}
 
-  .whohead button, .rights button{font-size:11.5px;padding:5px 12px;border-radius:6px;
-    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
-  .whohead button:hover, .rights button:hover{border-color:var(--qbo)}
-  .whohead button.danger:hover{border-color:var(--bad);color:var(--bad)}
-  .saved{font-size:11.5px;color:var(--ok)}
+  .jobs{margin-top:14px;display:none}
+  .jobs.show{display:block}
+  .jobs .cap{font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:8px}
+  .jobs .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:9px}
+
+  .editacts{margin-top:16px;display:flex;gap:8px;align-items:center}
+  .editacts .solid{font-size:12px;padding:7px 16px}
+  .note{font-size:11.5px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -54,8 +69,8 @@
   <div class="main">
     <div class="topline">
       <div>
-        <h1>Who uses this</h1>
-        <div class="sub">Everyone who has signed in, and what each of them may change.</div>
+        <h1>Manage users</h1>
+        <div class="sub">Who may open this app, and what each of them may change.</div>
       </div>
     </div>
 
@@ -69,24 +84,36 @@
 
       <div id="notAdmin" class="gate hide">
         <img src="/logo.svg" alt="">
-        <h2>This page belongs to the admin</h2>
-        <p>You are signed in as a user. Everything else can be read and downloaded.</p>
+        <h2>This page belongs to the company admin</h2>
+        <p>Everything else can be read and downloaded.</p>
       </div>
 
       <div id="body" class="hide">
         <div class="step">
-          <h2>The people</h2>
+          <h2>Users</h2>
           <div class="hint">
-            Anyone who signs in with their own QuickBooks address arrives here as a
-            user: they read and download everything, and change nothing. Their
-            QuickBooks key is never kept, so signing in cannot take the company over
-            or stop the app for everyone else.
+            Anyone who signs in with their own QuickBooks address lands here as
+            <b>Reports only</b>: they read and download everything and change nothing,
+            until you say otherwise. Their QuickBooks key is never kept, so signing in
+            can neither take the company over nor stop the app for everyone else.
             <br><br>
-            Tick a job below to let one person do it. Courier accounts and their keys
-            are not on this list &mdash; those stay with the admin. Who is an admin is
-            set on the server, not here.
+            A company admin is named on the server, not on this page. Courier accounts
+            and their keys stay with the admin whatever else is given away.
           </div>
-          <div id="list"></div>
+
+          <table class="users">
+            <thead>
+              <tr>
+                <th style="width:32%">Name</th>
+                <th style="width:18%">Role</th>
+                <th style="width:14%">Status</th>
+                <th style="width:20%">Last signed in</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+
           <div class="stat" id="statBox"></div>
         </div>
       </div>
@@ -100,11 +127,12 @@
 (function(){
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
-  var S = { groups: [], users: [] };
+  var S = { roles: [], groups: [], users: [], openSub: null };
 
   function esc(s){
     return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
   function say(cls, html){
     $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
@@ -132,98 +160,143 @@
     return d.toLocaleDateString() + ' ' +
            d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
-  function jobCount(n){
-    return n ? n + (n === 1 ? ' job' : ' jobs') : 'Read only';
+  function roleLabel(key){
+    for(var i = 0; i < S.roles.length; i++){
+      if(S.roles[i].key === key) return S.roles[i].label;
+    }
+    return key;
   }
 
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
 
+  function statusOf(u){
+    if(u.admin) return '<span class="pill ok">Active</span>';
+    if(!u.allowed || u.role === 'none') return '<span class="pill no">No access</span>';
+    if(u.role === 'viewer') return '<span class="pill wait">Reports only</span>';
+    return '<span class="pill ok">Active</span>';
+  }
+
+  // The row that opens underneath: the role, and where the role is the limited one,
+  // the jobs to tick. Built fresh each time so it always shows what is saved.
+  function editRow(u){
+    var tr = document.createElement('tr');
+    tr.className = 'editrow';
+
+    var roles = S.roles.filter(function(r){ return r.key !== 'admin'; });
+
+    tr.innerHTML =
+      '<td colspan="5"><div class="editbox">' +
+        '<div class="roles">' +
+          roles.map(function(r){
+            return '<label class="' + (u.role === r.key ? 'on' : '') + '">' +
+              '<input type="radio" name="role-' + esc(u.sub) + '" value="' + esc(r.key) + '"' +
+              (u.role === r.key ? ' checked' : '') + '>' +
+              '<span>' + esc(r.label) + '<small>' + esc(r.what) + '</small></span></label>';
+          }).join('') +
+        '</div>' +
+        '<div class="jobs' + (u.role === 'custom' ? ' show' : '') + '">' +
+          '<div class="cap">The jobs they may do</div>' +
+          '<div class="grid">' +
+            S.groups.map(function(g){
+              return '<label><input type="checkbox" value="' + esc(g.key) + '"' +
+                (u.rights.indexOf(g.key) > -1 ? ' checked' : '') + '>' +
+                '<span>' + esc(g.label) + '<small>' + esc(g.what) + '</small></span></label>';
+            }).join('') +
+          '</div>' +
+        '</div>' +
+        '<div class="editacts">' +
+          '<button class="solid b-save">Save</button>' +
+          '<button class="mini b-cancel">Cancel</button>' +
+          '<span class="note b-note"></span>' +
+        '</div>' +
+      '</div></td>';
+
+    var jobs = tr.querySelector('.jobs');
+
+    tr.querySelectorAll('.roles input').forEach(function(radio){
+      radio.addEventListener('change', function(){
+        tr.querySelectorAll('.roles label').forEach(function(l){ l.classList.remove('on'); });
+        radio.parentNode.classList.add('on');
+        // the ticks are only asked for when the role is the limited one
+        jobs.classList.toggle('show', radio.value === 'custom');
+      });
+    });
+
+    tr.querySelector('.b-cancel').addEventListener('click', function(){
+      S.openSub = null;
+      draw();
+    });
+
+    var save = tr.querySelector('.b-save');
+    save.addEventListener('click', function(){
+      var role = (tr.querySelector('.roles input:checked') || {}).value || u.role;
+      var picked = [];
+      tr.querySelectorAll('.jobs input:checked').forEach(function(i){ picked.push(i.value); });
+
+      save.disabled = true;
+      tr.querySelector('.b-note').textContent = 'Saving...';
+
+      post('/api/admin/users/access', {
+        sub: u.sub,
+        role: role,
+        rights: role === 'custom' ? picked : [],
+        allowed: role !== 'none'
+      })
+        .then(function(){
+          u.role = role;
+          u.rights = role === 'custom' ? picked : [];
+          u.allowed = role !== 'none';
+          S.openSub = null;
+          draw();
+          say('ok', '<b>' + esc(u.name || u.email) + '</b> is now ' + esc(roleLabel(role)) + '.');
+        })
+        .catch(function(e){
+          save.disabled = false;
+          tr.querySelector('.b-note').textContent = '';
+          say('bad', '<b>' + esc(e.message) + '</b>');
+        });
+    });
+
+    return tr;
+  }
+
   function draw(){
-    var box = $('list');
+    var box = $('rows');
     box.innerHTML = '';
 
     if(!S.users.length){
-      box.innerHTML = '<div class="hint">Nobody has signed in yet.</div>';
+      box.innerHTML = '<tr><td colspan="5" class="note">Nobody has signed in yet.</td></tr>';
       return;
     }
 
     S.users.forEach(function(u){
-      var el = document.createElement('div');
-      el.className = 'who' + (u.allowed || u.admin ? '' : ' off');
+      var tr = document.createElement('tr');
+      if(!u.admin && (!u.allowed || u.role === 'none')) tr.className = 'off';
 
-      var tags = u.admin
-        ? '<span class="tag adm">admin</span>'
-        : (u.allowed ? '' : '<span class="tag no">turned off</span>');
+      var jobsNote = (u.role === 'custom' && u.rights.length)
+        ? '<small>' + u.rights.length + (u.rights.length === 1 ? ' job' : ' jobs') + '</small>'
+        : '';
 
-      // the admin is named on the server, so there is nothing to press here
-      var acts = u.admin
-        ? '<small>Named on the server</small>'
-        : '<button class="b-rights">' + esc(jobCount(u.rights.length)) + '</button>' +
-          '<button class="b-allow' + (u.allowed ? ' danger' : '') + '">' +
-          (u.allowed ? 'Turn off' : 'Turn on') + '</button>';
+      tr.innerHTML =
+        '<td class="nm"><b>' + esc(u.name || u.email || u.sub) + '</b>' +
+          '<small>' + esc(u.email || '') + '</small></td>' +
+        '<td>' + esc(roleLabel(u.role)) + jobsNote + '</td>' +
+        '<td>' + statusOf(u) + '</td>' +
+        '<td class="note">' + esc(when(u.lastIn)) + '</td>' +
+        '<td class="act">' + (u.admin
+          ? '<span class="note">Named on the server</span>'
+          : '<button class="mini b-edit">Edit</button>') + '</td>';
 
-      el.innerHTML =
-        '<div class="whohead">' +
-          '<div>' +
-            '<b>' + esc(u.name || u.email || u.sub) + '</b>' +
-            '<small>' + esc(u.email || '') + ' · last signed in ' + esc(when(u.lastIn)) + '</small>' +
-          '</div>' +
-          '<div style="display:flex;gap:8px;align-items:center">' + tags + acts + '</div>' +
-        '</div>' +
-        '<div class="rights">' +
-          '<div class="grid">' +
-            S.groups.map(function(g){
-              return '<label><input type="checkbox" value="' + esc(g.key) + '"' +
-                     (u.rights.indexOf(g.key) > -1 ? ' checked' : '') + '>' +
-                     '<span>' + esc(g.label) +
-                     '<small>' + esc(g.what) + '</small></span></label>';
-            }).join('') +
-          '</div>' +
-          '<div class="acts"><button class="b-save">Save</button>' +
-          '<span class="saved" style="display:none">Saved</span></div>' +
-        '</div>';
-
-      var open = el.querySelector('.b-rights');
-      if(open){
-        open.addEventListener('click', function(){ el.classList.toggle('open'); });
-      }
-
-      var allow = el.querySelector('.b-allow');
-      if(allow){
-        allow.addEventListener('click', function(){
-          allow.disabled = true;
-          post('/api/admin/users/access', { sub: u.sub, allowed: !u.allowed })
-            .then(function(){ u.allowed = !u.allowed; draw(); })
-            .catch(function(e){
-              allow.disabled = false;
-              say('bad', '<b>' + esc(e.message) + '</b>');
-            });
+      var edit = tr.querySelector('.b-edit');
+      if(edit){
+        edit.addEventListener('click', function(){
+          S.openSub = (S.openSub === u.sub) ? null : u.sub;
+          draw();
         });
       }
 
-      var save = el.querySelector('.b-save');
-      if(save){
-        save.addEventListener('click', function(){
-          var picked = [];
-          el.querySelectorAll('.rights input:checked').forEach(function(i){
-            picked.push(i.value);
-          });
-          save.disabled = true;
-          post('/api/admin/users/access', { sub: u.sub, rights: picked })
-            .then(function(){
-              u.rights = picked;
-              var ok = el.querySelector('.saved');
-              ok.style.display = '';
-              // the count on the button is the quick answer, so it is put right here
-              if(open) open.textContent = jobCount(picked.length);
-              setTimeout(function(){ ok.style.display = 'none'; }, 1800);
-            })
-            .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); })
-            .then(function(){ save.disabled = false; });
-        });
-      }
-
-      box.appendChild(el);
+      box.appendChild(tr);
+      if(S.openSub === u.sub) box.appendChild(editRow(u));
     });
   }
 
@@ -233,10 +306,14 @@
 
     $('body').classList.remove('hide');
 
-    Promise.all([get('/api/admin/rights'), get('/api/admin/users')])
-      .then(function(out){
-        S.groups = out[0].groups || [];
-        S.users = out[1].users || [];
+    get('/api/admin/rights')
+      .then(function(d){
+        S.roles = d.roles || [];
+        S.groups = d.groups || [];
+        return get('/api/admin/users');
+      })
+      .then(function(d){
+        S.users = d.users || [];
         draw();
       })
       .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });

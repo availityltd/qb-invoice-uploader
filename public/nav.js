@@ -28,7 +28,7 @@
       { href:'/replace.html',  label:'Changes',          icon:'swap' },
       { href:'/void.html',     label:'Void invoices',    icon:'ban' },
       // the admin's own: who may sign in, and what each of them may change
-      { href:'/users.html',    label:'Who uses this',    icon:'people', admin:true }
+      { href:'/users.html',    label:'Manage users',     icon:'people', admin:true }
     ]}
   ];
 
@@ -258,6 +258,34 @@
         });
       })
       .catch(function(){});
+  })();
+
+  /* ---------- the two doors ---------- */
+  // Every page that can ask you to sign in shows the same pair, put here rather
+  // than in each of them. Signing in asks Intuit only who you are: it does not
+  // connect the app to the company, so Intuit never offers to make you its admin.
+  // Connecting is the admin's own door, and the one the company's key comes from.
+  (function twoDoors(){
+    var connect = document.getElementById('btnConnect');
+    if(!connect) return;
+
+    connect.textContent = 'Connect QuickBooks (admin)';
+    connect.classList.remove('solid');
+    connect.classList.add('ghost');
+
+    var signin = document.createElement('button');
+    signin.className = 'solid';
+    signin.id = 'btnSignIn';
+    signin.textContent = 'Sign in';
+    signin.style.marginRight = '8px';
+    signin.addEventListener('click', function(){ location.href = '/auth/signin'; });
+    connect.parentNode.insertBefore(signin, connect);
+
+    var note = document.createElement('div');
+    note.style.cssText = 'margin-top:12px;font-size:12px;color:var(--muted);line-height:1.6';
+    note.innerHTML = 'Sign in with your own QuickBooks address to read and download ' +
+      'everything. Connecting the company is the admin’s.';
+    if(connect.parentNode) connect.parentNode.appendChild(note);
   })();
 
   /* ---------- connection state ---------- */
