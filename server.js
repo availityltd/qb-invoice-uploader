@@ -730,14 +730,15 @@ app.get('/auth/callback', async (req, res) => {
         title: label + ' is waiting to be let in',
         body: (email || 'no address') + ' signed in for the first time and has no ' +
               'access yet. Choose their companies and their role on Manage users.',
-        link: '/users.html',
+        link: '/users.html?who=' + encodeURIComponent(sub),
         subject: label + ' is waiting to be let in - Shopify to QuickBooks',
         lines: [
           label + ' (' + (email || 'no address') + ') has signed in to the app for ' +
           'the first time.',
-          'They have no access and no company until you say so. Open Manage users, ' +
-          'tick the companies they may work in, and choose what they may do.',
-          BASE_URL + '/users.html'
+          'They have no access and no company until you say so. Open the link below ' +
+          'on any phone: it lands on them, with the companies to tick and what they ' +
+          'may do. Saving is all it takes - their screen opens by itself.',
+          BASE_URL + '/users.html?who=' + encodeURIComponent(sub)
         ]
       });
     }
