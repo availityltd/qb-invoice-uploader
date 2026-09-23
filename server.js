@@ -13,8 +13,11 @@ import { listCompanies } from './companies.js';
 import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
   initUsers, upsertUser, getUser, linkCompany, userOwns,
-  listUsers, setUserAccess, setUserCompanies, realmsForUser
+  listUsers, setUserAccess, setUserCompanies, realmsForUser, usersByEmails
 } from './users.js';
+import {
+  initNotify, notify, listFor, unreadCount, markAllRead, clearFor, sendMail
+} from './notify.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
   getOrCreateCustomer, postInvoice, qbQuery, qbReport
@@ -308,6 +311,7 @@ app.get('/api/admin/users', async (req, res) => {
           ? 'admin' : (u.role || 'viewer'),
         rights: Array.isArray(u.rights) ? u.rights : [],
         realms: byUser.get(u.sub) || [],
+        decided: !!u.decided_at,
         lastIn: u.last_in,
         since: u.created_at
       })),
@@ -337,8 +341,24 @@ app.post('/api/admin/users/access', async (req, res) => {
     if (u && u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase())) {
       return res.status(400).json({ error: 'That address is an admin - change ADMIN_EMAILS on the server instead.' });
     }
+    const before = u || {};
     await setUserAccess(sub, { allowed, rights, role });
     forgetWho(sub);
+
+    // Told only when it actually changed, so the bell means something.
+    if (role !== undefined && String(role) !== String(before.role || '')) {
+      const named = ROLES.find(r => r.key === String(role));
+      await notify(sub, {
+        kind: 'role',
+        title: (role === 'none')
+          ? 'Your access to the app has been turned off'
+          : 'You are now ' + (named ? named.label : String(role)),
+        body: (role === 'none')
+          ? 'The admin has turned your access off. Nothing opens until it is turned back on.'
+          : (named ? named.what : ''),
+        link: '/settings.html#profile'
+      });
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -361,8 +381,84 @@ app.post('/api/admin/users/companies', async (req, res) => {
       return res.status(400).json({ error: 'An admin has every company the app is connected to.' });
     }
     // only companies the app actually holds, whatever was sent
-    const connected = new Set((await listCompanies()).map(c => c.realmId));
-    await setUserCompanies(sub, realms.filter(r => connected.has(String(r))));
+    const all = await listCompanies();
+    const connected = new Set(all.map(c => c.realmId));
+    const want = realms.map(String).filter(r => connected.has(r));
+
+    const had = new Set(await realmsForUser(sub));
+    await setUserCompanies(sub, want);
+
+    const added = all.filter(c => want.indexOf(c.realmId) > -1 && !had.has(c.realmId));
+    const gone  = all.filter(c => want.indexOf(c.realmId) < 0 && had.has(c.realmId));
+
+    if (added.length) {
+      await notify(sub, {
+        kind: 'company',
+        title: added.length === 1
+          ? 'You can now work in ' + added[0].name
+          : 'You can now work in ' + added.length + ' more companies',
+        body: added.map(c => c.name).join(', ') +
+              ' - choose it from the name at the foot of the rail.',
+        link: '/choose.html'
+      });
+      const person = u || await getUser(sub);
+      if (person && person.email) {
+        sendMail(person.email,
+          'You have been given ' + added.map(c => c.name).join(', ') +
+          ' - Shopify to QuickBooks',
+          ['The admin has given you ' + added.map(c => c.name).join(', ') + ' in the app.',
+           'Sign in and choose the company from the name at the foot of the rail.',
+           BASE_URL + '/']
+        ).catch(() => {});
+      }
+    }
+    if (gone.length) {
+      await notify(sub, {
+        kind: 'company',
+        title: gone.length === 1
+          ? 'You no longer work in ' + gone[0].name
+          : gone.length + ' companies have been taken back',
+        body: gone.map(c => c.name).join(', ') + ' is no longer yours to open.',
+        link: '/choose.html'
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== the bell ====================
+// Everybody's own, and nobody else's: the person is taken from the session, never
+// from what the page sent, so there is no address to ask for somebody else's.
+app.get('/api/notifications', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.json({ items: [], unread: 0 });
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ items: await listFor(sub), unread: await unreadCount(sub) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/notifications/read', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.status(401).json({ error: 'Not signed in' });
+  try {
+    await markAllRead(sub);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/notifications/clear', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.status(401).json({ error: 'Not signed in' });
+  try {
+    await clearFor(sub);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -378,6 +474,8 @@ app.post('/api/admin/users/companies', async (req, res) => {
 // until it is opened on purpose.
 const USER_MAY_POST = new Set([
   '/auth/signout', '/auth/switch', '/auth/disconnect',
+  // a person's own bell: reading it and emptying it are their own business
+  '/api/notifications/read', '/api/notifications/clear',
   // reading QuickBooks
   '/api/preview', '/api/gap-check', '/api/negative-items',
   '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
@@ -607,8 +705,27 @@ app.get('/auth/callback', async (req, res) => {
       return res.status(400).send('Could not identify your Intuit account. Please try signing in again.');
     }
 
-    await upsertUser(sub, email, name);
+    const firstTime = await upsertUser(sub, email, name);
     forgetWho(sub);
+
+    if (firstTime) {
+      const label = name || email || 'Somebody';
+      await tellAdmins({
+        kind: 'signin',
+        title: label + ' is waiting to be let in',
+        body: (email || 'no address') + ' signed in for the first time and has no ' +
+              'access yet. Choose their companies and their role on Manage users.',
+        link: '/users.html',
+        subject: label + ' is waiting to be let in - Shopify to QuickBooks',
+        lines: [
+          label + ' (' + (email || 'no address') + ') has signed in to the app for ' +
+          'the first time.',
+          'They have no access and no company until you say so. Open Manage users, ' +
+          'tick the companies they may work in, and choose what they may do.',
+          BASE_URL + '/users.html'
+        ]
+      });
+    }
     res.cookie('uid', sign(sub), { httpOnly: true, maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
     // The same fact again, in a cookie the pages themselves can read, so the rail
     // knows at once - before it has asked the server - that there is somebody here
@@ -683,6 +800,22 @@ async function companiesFor(sub) {
 
   const mine = new Set(await realmsForUser(sub));
   return connected.filter(c => mine.has(c.realmId));
+}
+
+// Telling the admins something, in the app and by email both. An address named in
+// ADMIN_EMAILS that has never signed in has no row to hang a notification on, so
+// it gets the email alone.
+async function tellAdmins({ kind, title, body, link, subject, lines }) {
+  const emails = [...ADMIN_EMAILS];
+  try {
+    const rows = await usersByEmails(emails);
+    for (const a of rows) await notify(a.sub, { kind, title, body, link });
+  } catch (e) {
+    console.error('admin notice failed:', e.message);
+  }
+  for (const to of emails) {
+    sendMail(to, subject || title, lines || [title, body || '']).catch(() => {});
+  }
 }
 
 // What to call a company on screen. A row saved before its name could be read
@@ -8388,12 +8521,54 @@ async function resumeReplace() {
   }
 }
 
+// Everybody except the admins starts again.
+//
+// Access was being handed out by the act of signing in: whoever arrived was let
+// in, and where the app held a single company they were put into it. Nobody asked
+// for that and nobody granted it. So it is taken back once - every company any
+// user was in, and the access that came with it - and from here each person waits
+// for the admin, who is told they are waiting. It runs a single time; the mark is
+// kept in the database so a restart is not a second clearing out.
+async function resetNonAdminAccess() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS once_done (
+        what TEXT PRIMARY KEY,
+        at   TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    const mark = 'reset-non-admin-access-2026-09';
+    const seen = await pool.query('SELECT 1 FROM once_done WHERE what = $1', [mark]);
+    if (seen.rowCount) return;
+
+    const admins = [...ADMIN_EMAILS];
+    const r = await pool.query(
+      `UPDATE users SET allowed = FALSE, role = 'none', rights = '[]'::jsonb,
+              decided_at = NULL
+       WHERE LOWER(COALESCE(email, '')) <> ALL($1) RETURNING sub`,
+      [admins]
+    );
+    await pool.query(
+      `DELETE FROM user_companies WHERE user_sub IN (
+         SELECT sub FROM users WHERE LOWER(COALESCE(email, '')) <> ALL($1))`,
+      [admins]
+    );
+    await pool.query('INSERT INTO once_done (what) VALUES ($1)', [mark]);
+    whoCache.clear();
+    console.log(`Access reset: ${r.rowCount} account(s) now wait for the admin`);
+  } catch (e) {
+    console.error('access reset failed:', e.message);
+  }
+}
+
 // ==================== Start ====================
 const PORT = process.env.PORT || 3000;
 
 initDb()
   .then(() => initMappings())
   .then(() => initUsers())
+  .then(() => initNotify())
+  .then(() => resetNonAdminAccess())
   .then(() => initSettings())
   .then(() => initCache())
   .then(() => initCouriers())

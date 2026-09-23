@@ -20,8 +20,16 @@ export async function initUsers() {
       ADD COLUMN IF NOT EXISTS allowed BOOLEAN NOT NULL DEFAULT TRUE,
       ADD COLUMN IF NOT EXISTS rights  JSONB   NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS role    TEXT    NOT NULL DEFAULT 'viewer',
-      ADD COLUMN IF NOT EXISTS last_in TIMESTAMPTZ
+      ADD COLUMN IF NOT EXISTS last_in TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ
   `);
+
+  // Everybody who was already here had been let in by the old rule, which let
+  // anyone in who signed in. They are not waiting for a decision; the decision
+  // about them is being taken again, once, when the server next starts.
+  await pool.query(
+    "UPDATE users SET decided_at = COALESCE(decided_at, created_at, NOW()) WHERE decided_at IS NULL"
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_companies (
@@ -33,18 +41,25 @@ export async function initUsers() {
   `);
 }
 
+// Somebody signing in for the first time is not let in by signing in. They wait,
+// with no access and no company, until the admin says who they are - and the
+// admin is told they are waiting. Signing in again only moves the clock on; it
+// never gives anybody anything they were not given.
 export async function upsertUser(sub, email, name) {
-  await pool.query(
-    `INSERT INTO users (sub, email, name, last_in) VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (sub) DO UPDATE SET email = $2, name = $3, last_in = NOW()`,
+  const r = await pool.query(
+    `INSERT INTO users (sub, email, name, last_in, allowed, role)
+     VALUES ($1, $2, $3, NOW(), FALSE, 'none')
+     ON CONFLICT (sub) DO UPDATE SET email = $2, name = $3, last_in = NOW()
+     RETURNING (xmax = 0) AS first_time`,
     [sub, email || null, name || null]
   );
+  return !!(r.rows[0] && r.rows[0].first_time);
 }
 
 // Everyone who has ever signed in, for the admin's list
 export async function listUsers() {
   const r = await pool.query(
-    `SELECT sub, email, name, allowed, rights, role, last_in, created_at
+    `SELECT sub, email, name, allowed, rights, role, last_in, decided_at, created_at
      FROM users ORDER BY created_at`
   );
   return r.rows;
@@ -54,9 +69,10 @@ export async function listUsers() {
 export async function setUserAccess(sub, { allowed, rights, role }) {
   await pool.query(
     `UPDATE users SET
-       allowed = COALESCE($2, allowed),
-       rights  = COALESCE($3, rights),
-       role    = COALESCE($4, role)
+       allowed    = COALESCE($2, allowed),
+       rights     = COALESCE($3, rights),
+       role       = COALESCE($4, role),
+       decided_at = NOW()
      WHERE sub = $1`,
     [sub, allowed === undefined ? null : !!allowed,
      rights === undefined ? null : JSON.stringify(rights),
@@ -126,4 +142,16 @@ export async function realmsForUser(sub) {
     'SELECT realm_id FROM user_companies WHERE user_sub = $1', [sub]
   );
   return r.rows.map(x => x.realm_id);
+}
+
+// The admins, found among the people who have signed in, so they can be told
+// things. An address named on the server that has never signed in has no row
+// here and nothing to be told on - it is emailed instead.
+export async function usersByEmails(emails) {
+  const want = [...new Set((emails || []).map(e => String(e).toLowerCase()))];
+  if (!want.length) return [];
+  const r = await pool.query(
+    'SELECT sub, email, name FROM users WHERE LOWER(email) = ANY($1)', [want]
+  );
+  return r.rows;
 }

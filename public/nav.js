@@ -197,7 +197,37 @@
       '  text-transform:uppercase;color:var(--faint);padding:10px 16px 5px}',
       '.setmenu a{display:block;padding:7px 16px;font-size:13px;text-decoration:none;',
       '  color:var(--text)}',
-      '.setmenu a:hover{background:var(--panel-2);color:var(--qbo)}'
+      '.setmenu a:hover{background:var(--panel-2);color:var(--qbo)}',
+      '.bellwrap{position:relative;display:flex}',
+      '.belldot{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;',
+      '  padding:0 4px;border-radius:9px;background:var(--neg,#9A2E24);color:#fff;',
+      '  font-size:10px;line-height:16px;text-align:center;font-family:var(--mono);',
+      '  display:none;pointer-events:none}',
+      '.belldot.on{display:block}',
+      '.bellmenu{position:absolute;top:36px;right:0;z-index:200;width:340px;',
+      '  max-height:420px;overflow-y:auto;background:var(--panel);',
+      '  border:1px solid var(--line);border-radius:10px;',
+      '  box-shadow:0 12px 30px rgba(15,46,36,.14);padding:0;display:none}',
+      '.bellmenu.open{display:block}',
+      '.bellmenu .top{display:flex;align-items:center;gap:8px;padding:11px 14px;',
+      '  border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}',
+      '.bellmenu .top b{font-size:12.5px;font-weight:600;flex:1}',
+      '.bellmenu .top button{font-size:11px;padding:3px 9px;border-radius:6px;',
+      '  border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--muted);',
+      '  font-family:inherit}',
+      '.bellmenu .top button:hover{border-color:var(--qbo);color:var(--qbo)}',
+      '.bellmenu .n{display:block;padding:11px 14px;border-bottom:1px solid var(--line);',
+      '  text-decoration:none;color:var(--text)}',
+      '.bellmenu .n:last-child{border-bottom:0}',
+      '.bellmenu .n:hover{background:var(--panel-2)}',
+      '.bellmenu .n.new{background:#F1F8EF}',
+      '.bellmenu .n.new:hover{background:#E9F4E6}',
+      '.bellmenu .n b{display:block;font-size:12.5px;font-weight:600;line-height:1.45}',
+      '.bellmenu .n p{margin:3px 0 0;font-size:11.5px;color:var(--muted);line-height:1.5}',
+      '.bellmenu .n time{display:block;margin-top:4px;font-family:var(--mono);',
+      '  font-size:10px;color:var(--faint)}',
+      '.bellmenu .none{padding:26px 16px;text-align:center;font-size:12.5px;',
+      '  color:var(--muted)}'
     ].join('');
     document.head.appendChild(css);
 
@@ -213,6 +243,22 @@
       btn('Back',    '<path d="M15 18l-6-6 6-6"/>') +
       btn('Forward', '<path d="M9 18l6-6-6-6"/>') +
       btn('Refresh this page', '<path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6"/>');
+
+    // The bell sits beside the gear: what the app has had to tell this person, and
+    // nobody else's - a role that changed, a company handed over, an address
+    // waiting to be let in if they are the one who lets people in.
+    var bell = document.createElement('div');
+    bell.className = 'bellwrap';
+    bell.innerHTML =
+      btn('Notifications', '<path d="M18 8a6 6 0 10-12 0c0 7-3 8-3 8h18s-3-1-3-8"/>' +
+        '<path d="M13.7 21a2 2 0 01-3.4 0"/>') +
+      '<span class="belldot" id="bellDot"></span>' +
+      '<div class="bellmenu" id="bellMenu">' +
+        '<div class="top"><b>Notifications</b>' +
+          '<button id="bellClear">Clear</button></div>' +
+        '<div id="bellList"><div class="none">Loading…</div></div>' +
+      '</div>';
+    box.appendChild(bell);
 
     // Settings sits with them, the way QuickBooks keeps its own gear up here: the
     // company's list of people, your own profile, and how the app looks to you.
@@ -234,7 +280,12 @@
 
     top.appendChild(box);
 
-    var b = box.querySelectorAll('button');
+    // by where they sit, not by how many buttons happen to be in the box - the
+    // bell's own menu has one inside it, and counting would have found that first
+    var b = box.querySelectorAll(':scope > button');
+    var bellBtn = box.querySelector('.bellwrap > button');
+    var gearBtn = box.querySelector('.setwrap > button');
+
     b[0].addEventListener('click', function(){ history.back(); });
     b[1].addEventListener('click', function(){ history.forward(); });
     b[2].addEventListener('click', function(){
@@ -243,12 +294,81 @@
     });
 
     var menu = document.getElementById('setMenu');
-    b[3].addEventListener('click', function(ev){
+    var bellMenu = document.getElementById('bellMenu');
+
+    gearBtn.addEventListener('click', function(ev){
       ev.stopPropagation();
       menu.classList.toggle('open');
+      bellMenu.classList.remove('open');
     });
-    document.addEventListener('click', function(){ menu.classList.remove('open'); });
+    document.addEventListener('click', function(){
+      menu.classList.remove('open');
+      bellMenu.classList.remove('open');
+    });
     menu.addEventListener('click', function(ev){ ev.stopPropagation(); });
+    bellMenu.addEventListener('click', function(ev){ ev.stopPropagation(); });
+
+    /* ---------- what the bell holds ---------- */
+
+    function ago(t){
+      var s = Math.max(0, (Date.now() - new Date(t).getTime()) / 1000);
+      if(s < 60) return 'just now';
+      if(s < 3600) return Math.floor(s / 60) + ' min ago';
+      if(s < 86400) return Math.floor(s / 3600) + ' hr ago';
+      if(s < 7 * 86400) return Math.floor(s / 86400) + ' d ago';
+      return new Date(t).toLocaleDateString();
+    }
+
+    function paint(d){
+      var items = d.items || [];
+      var dot = document.getElementById('bellDot');
+      dot.textContent = d.unread > 99 ? '99+' : String(d.unread || '');
+      dot.classList.toggle('on', !!d.unread);
+
+      document.getElementById('bellList').innerHTML = items.length
+        ? items.map(function(n){
+            return '<a class="n' + (n.read_at ? '' : ' new') + '" href="' +
+              esc(n.link || '#') + '"><b>' + esc(n.title) + '</b>' +
+              (n.body ? '<p>' + esc(n.body) + '</p>' : '') +
+              '<time>' + esc(ago(n.created_at)) + '</time></a>';
+          }).join('')
+        : '<div class="none">Nothing to tell you.</div>';
+    }
+
+    function load(){
+      return fetch('/api/notifications', { cache:'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(paint)
+        .catch(function(){});
+    }
+
+    bellBtn.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      menu.classList.remove('open');
+      var opening = !bellMenu.classList.contains('open');
+      bellMenu.classList.toggle('open', opening);
+      if(!opening) return;
+
+      load().then(function(){
+        // opening the list is reading it
+        fetch('/api/notifications/read', { method:'POST' }).then(function(){
+          var dot = document.getElementById('bellDot');
+          dot.classList.remove('on');
+          dot.textContent = '';
+        });
+      });
+    });
+
+    document.getElementById('bellClear').addEventListener('click', function(ev){
+      ev.stopPropagation();
+      fetch('/api/notifications/clear', { method:'POST' }).then(load);
+    });
+
+    // the count on its own, quietly, so the bell is right without being opened
+    fetch('/api/notifications', { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(paint)
+      .catch(function(){});
   })();
 
   /* ---------- the courier tree ---------- */
