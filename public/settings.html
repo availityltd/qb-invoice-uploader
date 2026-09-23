@@ -117,13 +117,13 @@
           <div class="row">
             <div class="what">
               <b>Text size</b>
-              <small>Everything grows or shrinks with it, including the tables.</small>
+              <small>The whole page grows or shrinks with it, tables and charts too.</small>
             </div>
             <div class="pick" id="pText">
-              <button data-v="13">Small</button>
-              <button data-v="14.5">Normal</button>
-              <button data-v="16">Large</button>
-              <button data-v="17.5">Larger</button>
+              <button data-v="0.9">Small</button>
+              <button data-v="1">Normal</button>
+              <button data-v="1.1">Large</button>
+              <button data-v="1.25">Larger</button>
             </div>
           </div>
 
@@ -258,7 +258,7 @@
   }
 
   function paintPicks(){
-    paintPick('pText', 'text', true);
+    paintPick('pText', 'zoom', true);
     paintPick('pRail', 'rail', true);
     paintPick('pTight', 'tight', false);
     $('cInk').value = look.ink;
@@ -270,7 +270,7 @@
     });
   }
 
-  wirePick('pText', 'text', true);
+  wirePick('pText', 'zoom', true);
   wirePick('pRail', 'rail', true);
   wirePick('pTight', 'tight', false);
 
@@ -301,7 +301,7 @@
   });
 
   $('btnStyleReset').addEventListener('click', function(){
-    look.text = LOOK.base.text; look.rail = LOOK.base.rail; look.tight = LOOK.base.tight;
+    look.zoom = LOOK.base.zoom; look.rail = LOOK.base.rail; look.tight = LOOK.base.tight;
     LOOK.keep(look); paintPicks();
   });
   $('btnThemeReset').addEventListener('click', function(){

@@ -107,7 +107,10 @@
   // they are kept in this browser rather than on the server and put on at once, before
   // the page has drawn, so nothing has to change under the eye.
   var LOOK_KEY = 'app:look';
-  var LOOK_BASE = { text: 14.5, rail: 236, tight: false, ink: '#0F2E24', accent: '#2CA01C' };
+  // The app writes its sizes in pixels throughout, so growing the body text alone
+  // would move almost nothing. The whole page is scaled instead, which takes the
+  // tables, the rail and the charts with it.
+  var LOOK_BASE = { zoom: 1, rail: 236, tight: false, ink: '#0F2E24', accent: '#2CA01C' };
 
   function readLook(){
     try {
@@ -123,9 +126,7 @@
     r.setProperty('--rail', look.rail + 'px');
     r.setProperty('--ink', look.ink);
     r.setProperty('--qbo', look.accent);
-    document.documentElement.style.fontSize = '';
-    var body = document.body || document.documentElement;
-    body.style.fontSize = look.text + 'px';
+    r.zoom = (Number(look.zoom) === 1) ? '' : String(look.zoom);
     document.documentElement.classList.toggle('tight', !!look.tight);
   }
 
