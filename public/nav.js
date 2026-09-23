@@ -102,6 +102,51 @@
   var rail = document.querySelector('.rail');
   if(rail) rail.innerHTML = html;
 
+  /* ---------- how it looks on this computer ---------- */
+  // Text size, rail width and colours are one person's own taste on one machine, so
+  // they are kept in this browser rather than on the server and put on at once, before
+  // the page has drawn, so nothing has to change under the eye.
+  var LOOK_KEY = 'app:look';
+  var LOOK_BASE = { text: 14.5, rail: 236, tight: false, ink: '#0F2E24', accent: '#2CA01C' };
+
+  function readLook(){
+    try {
+      var kept = JSON.parse(localStorage.getItem(LOOK_KEY) || '{}');
+      var out = {};
+      for (var k in LOOK_BASE) out[k] = (kept && kept[k] !== undefined) ? kept[k] : LOOK_BASE[k];
+      return out;
+    } catch (e) { return JSON.parse(JSON.stringify(LOOK_BASE)); }
+  }
+
+  function wearLook(look){
+    var r = document.documentElement.style;
+    r.setProperty('--rail', look.rail + 'px');
+    r.setProperty('--ink', look.ink);
+    r.setProperty('--qbo', look.accent);
+    document.documentElement.style.fontSize = '';
+    var body = document.body || document.documentElement;
+    body.style.fontSize = look.text + 'px';
+    document.documentElement.classList.toggle('tight', !!look.tight);
+  }
+
+  function keepLook(look){
+    try { localStorage.setItem(LOOK_KEY, JSON.stringify(look)); } catch (e) {}
+    wearLook(look);
+  }
+
+  window.APP = window.APP || {};
+  window.APP.look = { read: readLook, wear: wearLook, keep: keepLook, base: LOOK_BASE };
+
+  (function(){
+    var tight = document.createElement('style');
+    tight.textContent =
+      'html.tight td, html.tight th { padding-top:7px; padding-bottom:7px }' +
+      'html.tight .rail nav a { padding-top:6px; padding-bottom:6px }' +
+      'html.tight .step, html.tight .sheet, html.tight .sec { padding-top:14px; padding-bottom:14px }';
+    document.head.appendChild(tight);
+    wearLook(readLook());
+  })();
+
   /* ---------- back, forward, refresh ---------- */
 
   (function pageTools(){
@@ -117,7 +162,17 @@
       '.ptools button:hover{border-color:var(--qbo);color:var(--qbo)}',
       '.ptools button svg{width:15px;height:15px}',
       '.ptools button.spin svg{animation:ptspin .7s linear infinite}',
-      '@keyframes ptspin{to{transform:rotate(360deg)}}'
+      '@keyframes ptspin{to{transform:rotate(360deg)}}',
+      '.setwrap{position:relative;display:flex}',
+      '.setmenu{position:absolute;top:36px;right:0;z-index:200;min-width:230px;',
+      '  background:var(--panel);border:1px solid var(--line);border-radius:10px;',
+      '  box-shadow:0 12px 30px rgba(15,46,36,.14);padding:10px 0;display:none}',
+      '.setmenu.open{display:block}',
+      '.setmenu .cap{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;',
+      '  text-transform:uppercase;color:var(--faint);padding:10px 16px 5px}',
+      '.setmenu a{display:block;padding:7px 16px;font-size:13px;text-decoration:none;',
+      '  color:var(--text)}',
+      '.setmenu a:hover{background:var(--panel-2);color:var(--qbo)}'
     ].join('');
     document.head.appendChild(css);
 
@@ -134,6 +189,24 @@
       btn('Forward', '<path d="M9 18l6-6-6-6"/>') +
       btn('Refresh this page', '<path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6"/>');
 
+    // Settings sits with them, the way QuickBooks keeps its own gear up here: the
+    // company's list of people, your own profile, and how the app looks to you.
+    var wrap = document.createElement('div');
+    wrap.className = 'setwrap';
+    wrap.innerHTML =
+      btn('Settings', '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.8M12 18.7v2.8' +
+        'M2.5 12h2.8M18.7 12h2.8M5.2 5.2l2 2M16.8 16.8l2 2M18.8 5.2l-2 2M7.2 16.8l-2 2"/>') +
+      '<div class="setmenu" id="setMenu">' +
+        '<div class="cap admin-only">Your company</div>' +
+        '<a class="admin-only" href="/users.html">Manage users</a>' +
+        '<div class="cap">Profile</div>' +
+        '<a href="/settings.html#profile">Your profile</a>' +
+        '<div class="cap">Custom changes</div>' +
+        '<a href="/settings.html#style">Custom form style</a>' +
+        '<a href="/settings.html#theme">Custom theme</a>' +
+      '</div>';
+    box.appendChild(wrap);
+
     top.appendChild(box);
 
     var b = box.querySelectorAll('button');
@@ -143,6 +216,14 @@
       b[2].classList.add('spin');
       location.reload();
     });
+
+    var menu = document.getElementById('setMenu');
+    b[3].addEventListener('click', function(ev){
+      ev.stopPropagation();
+      menu.classList.toggle('open');
+    });
+    document.addEventListener('click', function(){ menu.classList.remove('open'); });
+    menu.addEventListener('click', function(ev){ ev.stopPropagation(); });
   })();
 
   /* ---------- the courier tree ---------- */
