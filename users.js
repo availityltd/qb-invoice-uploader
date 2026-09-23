@@ -104,3 +104,26 @@ export async function companiesForUser(sub) {
     })(x.company_name)
   }));
 }
+
+// Which companies this person may work in. QuickBooks will not say - it has no
+// list to ask for, and a user cannot be sent to Intuit to pick one because only
+// an admin may connect an app to a company. So the admin says it here, once per
+// person, and the chooser shows them that and nothing else.
+export async function setUserCompanies(sub, realmIds) {
+  const want = [...new Set((realmIds || []).map(String))];
+  await pool.query('DELETE FROM user_companies WHERE user_sub = $1', [sub]);
+  for (const realmId of want) {
+    await pool.query(
+      'INSERT INTO user_companies (user_sub, realm_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [sub, realmId]
+    );
+  }
+}
+
+// just the numbers, for the admin's page to tick
+export async function realmsForUser(sub) {
+  const r = await pool.query(
+    'SELECT realm_id FROM user_companies WHERE user_sub = $1', [sub]
+  );
+  return r.rows.map(x => x.realm_id);
+}

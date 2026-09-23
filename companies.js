@@ -8,13 +8,18 @@ function nameOf(n) {
 }
 
 
+// A company is connected when it has a realm number that QuickBooks would
+// recognise and a key to reach it with. A row that has neither is wreckage from a
+// sign-in that went wrong, and has no business being offered to anybody.
 export async function listCompanies() {
   const r = await pool.query(
-    'SELECT realm_id, company_name, updated_at FROM companies ORDER BY company_name NULLS LAST'
+    'SELECT realm_id, company_name, refresh_token, updated_at FROM companies ORDER BY company_name NULLS LAST'
   );
-  return r.rows.map(x => ({
-    realmId: x.realm_id,
-    name: nameOf(x.company_name) || x.realm_id,
-    updatedAt: x.updated_at
-  }));
+  return r.rows
+    .filter(x => /^[0-9]+$/.test(String(x.realm_id || '')) && x.refresh_token)
+    .map(x => ({
+      realmId: x.realm_id,
+      name: nameOf(x.company_name) || x.realm_id,
+      updatedAt: x.updated_at
+    }));
 }

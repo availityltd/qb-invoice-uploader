@@ -109,9 +109,15 @@
       current = d.current || null;
 
       if(!all.length){
-        $('sub').textContent = 'Nothing is connected yet.';
-        $('list').innerHTML = '<div class="empty">The app works through a company file ' +
-          'that an admin connects, once. Ask the admin to connect yours.</div>';
+        $('sub').textContent = d.admin ? 'Nothing is connected yet.' : 'Nothing yet.';
+        $('list').innerHTML = '<div class="empty">' + (d.admin
+          ? 'The app works through a company file, connected once. Connect one to ' +
+            'begin.'
+          : 'No company has been given to you yet. The admin says who works in ' +
+            'which company, on the Manage users page.') + '</div>';
+        if(d.admin){
+          $('note').innerHTML = '<a href="/auth/connect">Connect a QuickBooks company</a>';
+        }
         return;
       }
 
@@ -122,7 +128,8 @@
       draw();
 
       $('note').innerHTML = 'You can change company later from the name at the ' +
-        'bottom of the rail.';
+        'bottom of the rail.' + (d.admin
+          ? ' <a href="/auth/connect">Connect another company</a>' : '');
     })
     .catch(function(){
       $('list').innerHTML = '<div class="empty">Could not reach the server.</div>';

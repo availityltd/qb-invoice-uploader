@@ -12,8 +12,8 @@ import { initMappings, getMappings, saveMapping } from './mappings.js';
 import { listCompanies } from './companies.js';
 import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
-  initUsers, upsertUser, getUser, linkCompany, userOwns, companiesForUser,
-  listUsers, setUserAccess
+  initUsers, upsertUser, getUser, linkCompany, userOwns,
+  listUsers, setUserAccess, setUserCompanies, realmsForUser
 } from './users.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
@@ -293,6 +293,8 @@ app.get('/api/admin/users', async (req, res) => {
   if (!realmId) return;
   try {
     const rows = await listUsers();
+    const byUser = new Map();
+    for (const u of rows) byUser.set(u.sub, await realmsForUser(u.sub));
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       admins: [...ADMIN_EMAILS],
@@ -305,9 +307,12 @@ app.get('/api/admin/users', async (req, res) => {
         role: (!!u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase()))
           ? 'admin' : (u.role || 'viewer'),
         rights: Array.isArray(u.rights) ? u.rights : [],
+        realms: byUser.get(u.sub) || [],
         lastIn: u.last_in,
         since: u.created_at
-      }))
+      })),
+      // the shelf to tick from, so the page need not ask twice
+      companies: await listCompanies()
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -334,6 +339,30 @@ app.post('/api/admin/users/access', async (req, res) => {
     }
     await setUserAccess(sub, { allowed, rights, role });
     forgetWho(sub);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Which companies a person may work in. Said here because QuickBooks will not say
+// it, and said by the admin because connecting a company was the admin's doing.
+app.post('/api/admin/users/companies', async (req, res) => {
+  const realmId = await requireAdmin(req, res);
+  if (!realmId) return;
+
+  const { sub, realms } = req.body || {};
+  if (!sub) return res.status(400).json({ error: 'Which person?' });
+  if (!Array.isArray(realms)) return res.status(400).json({ error: 'Which companies?' });
+
+  try {
+    const u = await getUser(sub);
+    if (u && u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase())) {
+      return res.status(400).json({ error: 'An admin has every company the app is connected to.' });
+    }
+    // only companies the app actually holds, whatever was sent
+    const connected = new Set((await listCompanies()).map(c => c.realmId));
+    await setUserCompanies(sub, realms.filter(r => connected.has(String(r))));
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -596,9 +625,9 @@ app.get('/auth/callback', async (req, res) => {
     // nothing to choose; several and the chooser is where they land.
     let joinTo = realmId;
     if (!joinTo) {
-      const all = await listCompanies();
-      if (all.length === 1) joinTo = all[0].realmId;
-      else if (all.length > 1) return res.redirect('/choose.html');
+      const mine = await companiesFor(sub);
+      if (mine.length === 1) joinTo = mine[0].realmId;
+      else if (mine.length > 1) return res.redirect('/choose.html');
       else if (isAdmin) return res.redirect('/auth/connect');
       else return res.redirect('/choose.html');
     }
@@ -637,6 +666,24 @@ app.get('/auth/callback', async (req, res) => {
     res.status(500).send('Connection failed: ' + err.message);
   }
 });
+
+// Which companies this person may work in.
+//
+// QuickBooks cannot be asked. It has no endpoint that lists a user's companies,
+// and the person cannot be sent to Intuit's own chooser to pick one either,
+// because Intuit lets only a listed admin of a company connect an app to it. So
+// the admin says it, on the Manage users page, and everyone is shown that and
+// nothing else - never the whole shelf of companies the app happens to hold.
+//
+// The admin is the exception, because connecting them is the admin's own doing.
+async function companiesFor(sub) {
+  const connected = await listCompanies();
+  const who = await whoIs(sub);
+  if (who && who.admin) return connected;
+
+  const mine = new Set(await realmsForUser(sub));
+  return connected.filter(c => mine.has(c.realmId));
+}
 
 // What to call a company on screen. A row saved before its name could be read
 // carries nothing, or the word "null" written where a name should have been, and
@@ -723,8 +770,13 @@ app.get('/auth/companies', async (req, res) => {
   const sub = currentUser(req);
   if (!sub) return res.json({ companies: [], current: null });
   try {
-    const list = await listCompanies();
-    res.json({ companies: list, current: req.cookies.realm_id || null });
+    const list = await companiesFor(sub);
+    const who = await whoIs(sub);
+    res.json({
+      companies: list,
+      current: req.cookies.realm_id || null,
+      admin: !!(who && who.admin)
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -742,13 +794,16 @@ app.post('/auth/switch', async (req, res) => {
     return res.status(403).json({ error: 'The admin has not let this account in.' });
   }
 
-  // A company the app is connected to is a company the people of this company may
-  // work in, the way they can open any of their files in QuickBooks itself. What
-  // they may do once inside is their role's business, not this one's.
+  // The chooser only offered what this person may enter; asked for anything else -
+  // by another window, or an address kept from before - the answer is the same.
+  const mine = await companiesFor(sub);
+  if (!mine.some(c => c.realmId === String(realmId))) {
+    return res.status(403).json({ error: 'That company was not given to you. Ask the admin.' });
+  }
+
   const company = await getCompany(realmId);
   if (!company) return res.status(404).json({ error: 'Company not connected' });
 
-  await linkCompany(sub, realmId);
   res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
   res.json({ ok: true, companyName: await companyLabel(company) });
 });
