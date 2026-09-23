@@ -353,7 +353,17 @@ app.post('/api/admin/users/access', async (req, res) => {
     const nowOn = (allowed === undefined ? before.allowed !== false : !!allowed) &&
                   String(role === undefined ? before.role : role) !== 'none';
 
-    if (!wasOn && nowOn) {
+    const wasDecided = !!before.decided_at;
+
+    if (!wasDecided && !nowOn) {
+      await tell(sub, {
+        kind: 'access',
+        title: 'Your access has been turned down',
+        body: 'The admin has not given you access to this app. Speak to them if ' +
+              'you think that is a mistake.',
+        link: '/'
+      });
+    } else if (!wasOn && nowOn) {
       await tell(sub, {
         kind: 'access',
         title: 'You have been let in',
@@ -780,10 +790,6 @@ app.get('/auth/callback', async (req, res) => {
       });
     }
     res.cookie('uid', sign(sub), { httpOnly: true, maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
-    // The same fact again, in a cookie the pages themselves can read, so the rail
-    // knows at once - before it has asked the server - that there is somebody here
-    // and does not flash past a sign-in screen it should never have shown.
-    res.cookie('signed', '1', { maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
 
     const isAdmin = ADMIN_EMAILS.has(String(email || '').toLowerCase());
     res.clearCookie('oauth_door');
@@ -828,6 +834,7 @@ app.get('/auth/callback', async (req, res) => {
 
     await linkCompany(sub, joinTo);
     res.cookie('realm_id', joinTo, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+    inside(res, true);
 
     res.redirect('/?connected=1');
 
@@ -836,6 +843,20 @@ app.get('/auth/callback', async (req, res) => {
     res.status(500).send('Connection failed: ' + err.message);
   }
 });
+
+// The one fact the pages need before they have asked anything: is this browser
+// all the way in - signed in, let in, and in a company - or not?
+//
+// It has to be a cookie, and it has to mean exactly that. The rail, the toolbar
+// and the whole frame are drawn on the strength of it at the first line of
+// nav.js, before any round trip. A cookie that meant only "has a session" drew
+// the frame for somebody the server was about to send back to the door, and the
+// frame flashed past on its way out. So it is set when they land in a company
+// and cleared the moment they are anywhere else.
+function inside(res, yes) {
+  if (yes) res.cookie('signed', '1', { maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
+  else res.clearCookie('signed');
+}
 
 // Which companies this person may work in.
 //
@@ -909,7 +930,7 @@ async function companyLabel(company) {
 
 app.get('/auth/status', async (req, res) => {
   const sub = currentUser(req);
-  if (!sub) return res.json({ signedIn: false, connected: false });
+  if (!sub) { inside(res, false); return res.json({ signedIn: false, connected: false }); }
 
   const user = await getUser(sub);
   const who = await whoIs(sub);
@@ -921,10 +942,14 @@ app.get('/auth/status', async (req, res) => {
   const mine = letIn ? await companiesFor(sub) : [];
 
   if (!realmId || !(await userOwns(sub, realmId))) {
+    inside(res, false);
     return res.json({
       signedIn: true,
       connected: false,
       letIn,
+      // an address nobody has decided about yet is waiting; one that was decided
+      // about and still may not come in was turned away, which reads differently
+      decided: !!(user && user.decided_at),
       companyCount: mine.length,
       admin: !!(who && who.admin),
       email: (who && who.email) || null,
@@ -934,9 +959,11 @@ app.get('/auth/status', async (req, res) => {
   }
 
   const company = await getCompany(realmId);
+  inside(res, letIn && !!company);
   res.json({
     signedIn: true,
     connected: !!company,
+    decided: !!(user && user.decided_at),
     companyName: company ? await companyLabel(company) : null,
     realmId,
     // the pages read these to put away every button the person may not press
@@ -960,13 +987,14 @@ app.get('/auth/status', async (req, res) => {
 
 app.post('/auth/disconnect', (req, res) => {
   res.clearCookie('realm_id');
+  inside(res, false);
   res.json({ ok: true });
 });
 
 app.post('/auth/signout', (req, res) => {
   res.clearCookie('realm_id');
   res.clearCookie('uid');
-  res.clearCookie('signed');
+  inside(res, false);
   res.json({ ok: true });
 });
 
@@ -1009,6 +1037,7 @@ app.post('/auth/switch', async (req, res) => {
   if (!company) return res.status(404).json({ error: 'Company not connected' });
 
   res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+  inside(res, true);
   res.json({ ok: true, companyName: await companyLabel(company) });
 });
 

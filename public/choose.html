@@ -36,11 +36,34 @@
   .note a{color:var(--qbo)}
   .empty{color:var(--muted);font-size:13.5px;line-height:1.65;text-align:center;padding:6px 0 2px}
   .empty b{color:var(--text);font-weight:600}
+  .empty.no b{color:var(--neg)}
+
+  /* The same three buttons every page of the app carries, because this is still
+     a page and going back from it should not mean the browser's own chrome. */
+  .tools{position:fixed;top:14px;left:16px;display:flex;gap:6px;z-index:5}
+  .tools button{width:30px;height:30px;border:1px solid var(--line);background:#fff;
+    border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    color:var(--muted);padding:0}
+  .tools button:hover{border-color:var(--qbo);color:var(--qbo)}
+  .tools button svg{width:15px;height:15px}
+  .out{display:block;width:100%;margin-top:14px;padding:9px;border-radius:8px;
+    border:1px solid var(--line);background:#fff;font:inherit;font-size:12.5px;
+    color:var(--muted);cursor:pointer}
+  .out:hover{border-color:var(--neg);color:var(--neg)}
   .pulse{color:var(--qbo);animation:fade 1.6s ease-in-out infinite}
   @keyframes fade{0%,100%{opacity:.35}50%{opacity:1}}
 </style>
 </head>
 <body>
+
+<div class="tools">
+  <button id="tBack" title="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+  <button id="tFwd" title="Forward"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+  <button id="tRef" title="Refresh this page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-3-6.7M21 3v6h-6"/></svg></button>
+</div>
 
 <div class="pick">
   <div class="card">
@@ -53,6 +76,7 @@
     <div id="list"><div class="empty">Loading…</div></div>
 
     <p class="note" id="note"></p>
+    <button class="out" id="btnOut" style="display:none">Cancel and sign out</button>
   </div>
 </div>
 
@@ -113,6 +137,7 @@
     $('sub').textContent = 'Nothing is open yet.';
     $('cap').style.display = 'none';
     $('find').style.display = 'none';
+    $('btnOut').style.display = '';
     $('list').innerHTML =
       '<div class="empty"><b>Ask the admin to let you in.</b><br><br>' +
       'They have been told you are here' + (who ? ', as ' + esc(who) : '') + '. ' +
@@ -123,11 +148,27 @@
     if(!waitTimer) waitTimer = setInterval(look, 4000);
   }
 
+  // The admin has decided, and the answer was no. Said plainly, and said once -
+  // there is nothing to wait for, so the asking stops.
+  function turnedAway(){
+    if(waitTimer){ clearInterval(waitTimer); waitTimer = null; }
+    $('sub').textContent = 'The admin has answered.';
+    $('cap').style.display = 'none';
+    $('find').style.display = 'none';
+    $('btnOut').style.display = '';
+    $('list').innerHTML =
+      '<div class="empty no"><b>Your access has been turned down.</b><br><br>' +
+      'The admin has not given you access to this app. If you think that is a ' +
+      'mistake, speak to them - they can turn it on at any time.</div>';
+    $('note').textContent = '';
+  }
+
   function look(){
     fetch('/auth/status', { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(st){
         if(!st.signedIn){ location.href = '/'; return; }
+        if(!st.letIn && st.decided) return turnedAway();
         if(!st.letIn || !st.companyCount) return waitForAdmin(st.user);
 
         if(waitTimer){ clearInterval(waitTimer); waitTimer = null; }
@@ -173,6 +214,7 @@
       $('find').addEventListener('input', draw);
       draw();
 
+      $('btnOut').style.display = '';
       $('note').innerHTML = 'You can change company later from the name at the ' +
         'bottom of the rail.' + (d.admin
           ? ' <a href="/auth/connect">Connect another company</a>' : '');
@@ -181,6 +223,17 @@
       $('list').innerHTML = '<div class="empty">Could not reach the server.</div>';
     });
   }
+
+  $('tBack').addEventListener('click', function(){ history.back(); });
+  $('tFwd').addEventListener('click', function(){ history.forward(); });
+  $('tRef').addEventListener('click', function(){ location.reload(); });
+
+  $('btnOut').addEventListener('click', function(){
+    if(waitTimer){ clearInterval(waitTimer); waitTimer = null; }
+    fetch('/auth/signout', { method:'POST' })
+      .then(function(){ location.href = '/'; })
+      .catch(function(){ location.href = '/'; });
+  });
 
   look();
 

@@ -27,6 +27,7 @@
   table.users td.nm b{font-weight:600;display:block}
   table.users td.nm small{color:var(--muted);font-size:11.5px;display:block;margin-top:2px}
   table.users td.act{text-align:right;white-space:nowrap}
+  table.users td.act button.mini + button.mini{margin-left:6px}
 
   .pill{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 9px;
     border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
@@ -75,8 +76,8 @@
       padding:4px 0;background:#fff}
     table.users td{border-bottom:0;padding:5px 13px}
     table.users td:empty{display:none}
-    table.users td.act{text-align:left;padding-bottom:11px}
-    table.users td.act button.mini{width:100%;padding:9px}
+    table.users td.act{text-align:left;padding-bottom:11px;display:flex;gap:8px}
+    table.users td.act button.mini{flex:1;padding:9px}
     table.users td[data-lab]::before{content:attr(data-lab);display:block;
       font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);
       margin-bottom:2px}
@@ -200,9 +201,16 @@
   function statusOf(u){
     if(u.admin) return '<span class="pill ok">Active</span>';
     if(!u.decided) return '<span class="pill wait">Waiting for you</span>';
-    if(!u.allowed || u.role === 'none') return '<span class="pill no">No access</span>';
+    if(!u.allowed || u.role === 'none') return '<span class="pill no">Turned down</span>';
     if(u.role === 'viewer') return '<span class="pill wait">Reports only</span>';
     return '<span class="pill ok">Active</span>';
+  }
+
+  // Somebody who is waiting, or who is in, can be turned away. Somebody already
+  // turned away is put back through Edit instead - that asks the questions that
+  // letting them in needs answered.
+  function canSay(u){
+    return !u.decided || u.allowed || u.role !== 'none';
   }
 
   // An admin works in every company the app holds, so there is nothing to list
@@ -349,7 +357,46 @@
         '<td class="note" data-lab="Last signed in">' + esc(when(u.lastIn)) + '</td>' +
         '<td class="act">' + (u.admin
           ? '<span class="note">Named on the server</span>'
-          : '<button class="mini b-edit">Edit</button>') + '</td>';
+          : '<button class="mini b-edit">Edit</button>' +
+            // Turning somebody away is one press, from the row, because that is
+            // usually the whole answer. Letting them in is the longer form -
+            // which companies, and what they may do - so that stays behind Edit.
+            (canSay(u)
+              ? '<button class="mini b-deny">' +
+                  (u.allowed && u.role !== 'none' ? 'Turn off' : 'Turn down') +
+                '</button>'
+              : '<button class="mini b-undeny">Undo</button>')) + '</td>';
+
+      var deny = tr.querySelector('.b-deny');
+      if(deny){
+        deny.addEventListener('click', function(){
+          deny.disabled = true;
+          deny.textContent = 'Saving…';
+          post('/api/admin/users/access', {
+            sub: u.sub, role: 'none', rights: [], allowed: false
+          })
+            .then(function(){
+              u.role = 'none'; u.rights = []; u.allowed = false; u.decided = true;
+              S.openSub = null;
+              draw();
+              say('ok', '<b>' + esc(u.name || u.email) + '</b> has been turned down. ' +
+                'They are told on their own screen, and can be let in at any time.');
+            })
+            .catch(function(e){
+              deny.disabled = false;
+              draw();
+              say('bad', '<b>' + esc(e.message) + '</b>');
+            });
+        });
+      }
+
+      var undeny = tr.querySelector('.b-undeny');
+      if(undeny){
+        undeny.addEventListener('click', function(){
+          S.openSub = u.sub;
+          draw();
+        });
+      }
 
       var edit = tr.querySelector('.b-edit');
       if(edit){
