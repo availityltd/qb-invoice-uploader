@@ -227,7 +227,14 @@
       '.bellmenu .n time{display:block;margin-top:4px;font-family:var(--mono);',
       '  font-size:10px;color:var(--faint)}',
       '.bellmenu .none{padding:26px 16px;text-align:center;font-size:12.5px;',
-      '  color:var(--muted)}'
+      '  color:var(--muted)}',
+      '.bellmenu .ask{display:none;padding:12px 14px;border-bottom:1px solid var(--line);',
+      '  background:var(--panel-2)}',
+      '.bellmenu .ask.on{display:block}',
+      '.bellmenu .ask p{margin:0 0 9px;font-size:11.5px;color:var(--muted);line-height:1.55}',
+      '.bellmenu .ask button{width:100%;padding:8px;border-radius:7px;border:0;',
+      '  background:var(--qbo);color:#fff;font:inherit;font-size:12.5px;cursor:pointer}',
+      '.bellmenu .ask button:disabled{opacity:.6;cursor:default}'
     ].join('');
     document.head.appendChild(css);
 
@@ -256,6 +263,7 @@
       '<div class="bellmenu" id="bellMenu">' +
         '<div class="top"><b>Notifications</b>' +
           '<button id="bellClear">Clear</button></div>' +
+        '<div class="ask" id="pushAsk"></div>' +
         '<div id="bellList"><div class="none">Loading…</div></div>' +
       '</div>';
     box.appendChild(bell);
@@ -349,6 +357,7 @@
       bellMenu.classList.toggle('open', opening);
       if(!opening) return;
 
+      checkPush();
       load().then(function(){
         // opening the list is reading it
         fetch('/api/notifications/read', { method:'POST' }).then(function(){
@@ -358,6 +367,113 @@
         });
       });
     });
+
+    /* ---------- notices on the phone ---------- */
+    // The app makes its own keypair and signs with it; there is no account here
+    // and no password of anybody's. The phone is asked once, on a press - never
+    // on its own, because a browser refuses a prompt nobody asked for, and
+    // rightly. Once it has said yes, the notices arrive with the app closed.
+
+    function b64(s){
+      var pad = '='.repeat((4 - s.length % 4) % 4);
+      var raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+      var out = new Uint8Array(raw.length);
+      for(var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+      return out;
+    }
+
+    function pushReady(){
+      return 'serviceWorker' in navigator && 'PushManager' in window &&
+             typeof Notification !== 'undefined';
+    }
+
+    function askBox(){ return document.getElementById('pushAsk'); }
+
+    function showAsk(state){
+      var box = askBox();
+      if(!box) return;
+
+      if(state === 'hide'){ box.classList.remove('on'); return; }
+
+      if(state === 'blocked'){
+        box.classList.add('on');
+        box.innerHTML = '<p>Notifications are blocked for this site. Turn them ' +
+          'back on in the browser’s settings for this page.</p>';
+        return;
+      }
+
+      box.classList.add('on');
+      box.innerHTML =
+        '<p>Be told on this phone when somebody is waiting to be let in, or when ' +
+        'something of yours changes — even with the app closed.</p>' +
+        '<button id="pushOn">Turn on notifications</button>';
+
+      document.getElementById('pushOn').addEventListener('click', function(ev){
+        ev.stopPropagation();
+        var btn = this;
+        btn.disabled = true;
+        btn.textContent = 'Asking…';
+
+        Notification.requestPermission().then(function(p){
+          if(p !== 'granted'){
+            btn.disabled = false;
+            btn.textContent = 'Turn on notifications';
+            if(p === 'denied') showAsk('blocked');
+            return;
+          }
+          return signUp().then(function(ok){
+            if(ok) showAsk('hide');
+            else {
+              btn.disabled = false;
+              btn.textContent = 'Turn on notifications';
+            }
+          });
+        }).catch(function(){
+          btn.disabled = false;
+          btn.textContent = 'Turn on notifications';
+        });
+      });
+    }
+
+    function signUp(){
+      return fetch('/api/push/key', { cache:'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(!d.key) return false;
+          return navigator.serviceWorker.ready.then(function(reg){
+            return reg.pushManager.getSubscription().then(function(had){
+              if(had) return had;
+              return reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: b64(d.key)
+              });
+            });
+          }).then(function(s){
+            return fetch('/api/push/subscribe', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify(s)
+            }).then(function(){ return true; });
+          });
+        })
+        .catch(function(){ return false; });
+    }
+
+    // Asked for once the bell is opened, so the offer is in front of somebody who
+    // is already thinking about notices.
+    function checkPush(){
+      if(!pushReady()) return showAsk('hide');
+      if(Notification.permission === 'denied') return showAsk('blocked');
+      if(Notification.permission !== 'granted') return showAsk('ask');
+
+      // Already said yes here - but a cleared browser, or a sign-in on a phone
+      // this account has not used before, leaves the server without the phone.
+      navigator.serviceWorker.ready.then(function(reg){
+        return reg.pushManager.getSubscription();
+      }).then(function(s){
+        if(s) return signUp().then(function(){ showAsk('hide'); });
+        showAsk('ask');
+      }).catch(function(){ showAsk('hide'); });
+    }
 
     document.getElementById('bellClear').addEventListener('click', function(ev){
       ev.stopPropagation();

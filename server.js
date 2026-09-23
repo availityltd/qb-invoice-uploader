@@ -18,6 +18,7 @@ import {
 import {
   initNotify, notify, listFor, unreadCount, markAllRead, clearFor, sendMail
 } from './notify.js';
+import { initPush, publicKey, addSub, dropSub, hasSub, pushTo } from './push.js';
 import {
   getAccessToken, getCompanyInfo, loadItems, loadTerms,
   getOrCreateCustomer, postInvoice, qbQuery, qbReport
@@ -353,21 +354,21 @@ app.post('/api/admin/users/access', async (req, res) => {
                   String(role === undefined ? before.role : role) !== 'none';
 
     if (!wasOn && nowOn) {
-      await notify(sub, {
+      await tell(sub, {
         kind: 'access',
         title: 'You have been let in',
         body: 'The admin has given you access to the app.',
         link: '/'
       });
     } else if (wasOn && !nowOn) {
-      await notify(sub, {
+      await tell(sub, {
         kind: 'access',
         title: 'Your access to the app has been turned off',
         body: 'Nothing opens until the admin turns it back on.',
         link: '/'
       });
     } else if (nowOn && role !== undefined && String(role) !== String(before.role || '')) {
-      await notify(sub, {
+      await tell(sub, {
         kind: 'access',
         title: 'What you may do in the app has changed',
         body: 'The admin has changed your access.',
@@ -407,7 +408,7 @@ app.post('/api/admin/users/companies', async (req, res) => {
     const gone  = all.filter(c => want.indexOf(c.realmId) < 0 && had.has(c.realmId));
 
     if (added.length) {
-      await notify(sub, {
+      await tell(sub, {
         kind: 'company',
         title: added.length === 1
           ? 'You can now work in ' + added[0].name
@@ -428,7 +429,7 @@ app.post('/api/admin/users/companies', async (req, res) => {
       }
     }
     if (gone.length) {
-      await notify(sub, {
+      await tell(sub, {
         kind: 'company',
         title: gone.length === 1
           ? 'You no longer work in ' + gone[0].name
@@ -480,6 +481,40 @@ app.post('/api/notifications/clear', async (req, res) => {
   }
 });
 
+// ==================== this phone ====================
+// The public half of the app's own keypair. There is nothing secret in it - the
+// phone needs it to check that a notice really came from here.
+app.get('/api/push/key', async (req, res) => {
+  const sub = currentUser(req);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    key: publicKey(),
+    on: sub ? await hasSub(sub) : false
+  });
+});
+
+app.post('/api/push/subscribe', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.status(401).json({ error: 'Not signed in' });
+  try {
+    await addSub(sub, req.body);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/push/unsubscribe', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.status(401).json({ error: 'Not signed in' });
+  try {
+    await dropSub((req.body || {}).endpoint);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== what a user may not do ====================
 // A user reads everything and downloads everything; nothing they press changes
 // QuickBooks, the sheets, or the courier accounts. Reading is asked for with GET,
@@ -491,6 +526,8 @@ const USER_MAY_POST = new Set([
   '/auth/signout', '/auth/switch', '/auth/disconnect',
   // a person's own bell: reading it and emptying it are their own business
   '/api/notifications/read', '/api/notifications/clear',
+  // signing this phone up for notices, and off again
+  '/api/push/subscribe', '/api/push/unsubscribe',
   // reading QuickBooks
   '/api/preview', '/api/gap-check', '/api/negative-items',
   '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
@@ -818,6 +855,14 @@ async function companiesFor(sub) {
   return connected.filter(c => mine.has(c.realmId));
 }
 
+// A notice kept, and the same notice put on the person's phone. Everything that
+// tells anybody anything goes through here, so there is one place that decides
+// what a notice is and one place that sends it.
+async function tell(sub, n) {
+  await notify(sub, n);
+  pushTo(sub, n).catch(() => {});
+}
+
 // Telling the admins something, in the app and by email both. An address named in
 // ADMIN_EMAILS that has never signed in has no row to hang a notification on, so
 // it gets the email alone.
@@ -825,7 +870,7 @@ async function tellAdmins({ kind, title, body, link, subject, lines }) {
   const emails = [...ADMIN_EMAILS];
   try {
     const rows = await usersByEmails(emails);
-    for (const a of rows) await notify(a.sub, { kind, title, body, link });
+    for (const a of rows) await tell(a.sub, { kind, title, body, link });
   } catch (e) {
     console.error('admin notice failed:', e.message);
   }
@@ -8594,6 +8639,7 @@ initDb()
   .then(() => initMappings())
   .then(() => initUsers())
   .then(() => initNotify())
+  .then(() => initPush())
   .then(() => resetNonAdminAccess())
   .then(() => initSettings())
   .then(() => initCache())
