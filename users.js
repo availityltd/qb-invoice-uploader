@@ -96,6 +96,11 @@ export async function companiesForUser(sub) {
   );
   return r.rows.map(x => ({
     realmId: x.realm_id,
-    name: x.company_name || x.realm_id
+    // a company saved before its name could be read shows its number, never the
+    // word that was written where the name should have been
+    name: (function(n){
+      const t = String(n == null ? '' : n).trim();
+      return (!t || t === 'null' || t === 'undefined') ? x.realm_id : t;
+    })(x.company_name)
   }));
 }

@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import XLSX from 'xlsx';
 import crypto from 'crypto';
 import {
-  pool, initDb, saveCompany, getCompany, logUpload,
+  pool, initDb, saveCompany, getCompany, renameCompany, logUpload,
   getNegativeItems, setNegativeItems
 } from './db.js';
 
@@ -499,12 +499,16 @@ app.get('/auth/connect', async (req, res) => {
   res.redirect(`${AUTH_URL}?${params}`);
 });
 
-// The door everyone else comes through. It asks Intuit only who the person is -
-// not for the accounting scope, which is what "connect this app to the company"
-// means and what brings up Intuit's own Assign admin screen. So someone signing in
-// here never sees that screen, never touches the company's key, and cannot later
-// stop the app for everyone by disconnecting it. They do not need a QuickBooks
-// seat either; an Intuit account is enough.
+// The door everybody comes through, admin and user alike. It asks Intuit for the
+// company as well as the name, so the person is shown QuickBooks' own "Choose
+// your company" screen first and says which file they are here for - exactly as
+// they would opening QuickBooks itself. What they may then do inside the app is a
+// separate question, answered by their role.
+//
+// The key that comes back with it is a different matter: the callback keeps it
+// only from an admin. A user's is read once, to learn who they are, and thrown
+// away - so a user can neither take the company over nor, by disconnecting the
+// app later, stop it for everyone else.
 app.get('/auth/signin', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   res.cookie('oauth_state', state, { httpOnly: true, maxAge: 600000, sameSite: 'lax' });
@@ -513,7 +517,7 @@ app.get('/auth/signin', (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.QB_CLIENT_ID,
     response_type: 'code',
-    scope: 'openid profile email',
+    scope: 'com.intuit.quickbooks.accounting openid profile email',
     redirect_uri: `${BASE_URL}/auth/callback`,
     state
   });
@@ -582,49 +586,46 @@ app.get('/auth/callback', async (req, res) => {
     res.cookie('signed', '1', { maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
 
     const isAdmin = ADMIN_EMAILS.has(String(email || '').toLowerCase());
-    const userDoor = req.cookies.oauth_door === 'user';
     res.clearCookie('oauth_door');
 
-    // Signing in the plain way brings no company back with it, because nothing was
-    // connected. Where the app holds one company, that is the one they are for; a
-    // second one and the admin says which on the Who uses this page.
+    // Nobody picked a company - Intuit sometimes comes back without one. If the
+    // app holds exactly one, that is plainly the one they are here for.
     let joinTo = realmId;
-    if (!joinTo && userDoor) {
+    if (!joinTo) {
       const all = await listCompanies();
       if (all.length === 1) joinTo = all[0].realmId;
     }
 
-    // There is one door on the screen now, and it asks Intuit only who you are.
-    // That is all a user ever needs. An admin address - one of the ones named in
-    // ADMIN_EMAILS on the server - needs the company behind it as well, so when
-    // no company is connected yet an admin is walked straight on to Intuit's own
-    // connect screen. Everyone else stops here, as a user.
-    if (userDoor && isAdmin && !joinTo) return res.redirect('/auth/connect');
-
-    if (joinTo && !realmId) {
-      await linkCompany(sub, joinTo);
-      res.cookie('realm_id', joinTo, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+    if (!joinTo) {
+      return res.redirect('/?nocompany=1');
     }
 
-    if (realmId) {
-      // The key that every page in the app works through belongs to the admin and
-      // is only ever written by the admin. Someone else signing in with their own
-      // QuickBooks address is welcomed in as a user and their key is thrown away
-      // here - so a second sign-in can neither take the company over nor, by
-      // being disconnected later, stop the app for everyone else.
-      const known = await getCompany(realmId);
-      if (tokens.refresh_token && (isAdmin || !known)) {
-        await saveCompany(realmId, known ? known.company_name : null, tokens.refresh_token);
+    const known = await getCompany(joinTo);
+
+    if (isAdmin) {
+      // The key every page in the app works through, and the admin is the only
+      // one who ever writes it. The company's name is read with it, so the rail
+      // has something to say other than a number.
+      if (tokens.refresh_token) {
+        await saveCompany(joinTo, known ? known.company_name : null, tokens.refresh_token);
         try {
-          const info = await getCompanyInfo(realmId, tokens.access_token);
-          await saveCompany(realmId, info.CompanyName, tokens.refresh_token);
+          const info = await getCompanyInfo(joinTo, tokens.access_token);
+          if (info && info.CompanyName) {
+            await saveCompany(joinTo, info.CompanyName, tokens.refresh_token);
+          }
         } catch (e) {
           console.error('CompanyInfo error:', e.message);
         }
       }
-      await linkCompany(sub, realmId);
-      res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+    } else if (!known) {
+      // A user picked a company the app has never been connected to. Their key is
+      // not the one to connect it with, so they are told plainly whose it is.
+      return res.redirect('/?nocompany=1');
     }
+    // a user's key is read once, for the name and address above, and kept nowhere
+
+    await linkCompany(sub, joinTo);
+    res.cookie('realm_id', joinTo, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
 
     res.redirect('/?connected=1');
 
@@ -633,6 +634,34 @@ app.get('/auth/callback', async (req, res) => {
     res.status(500).send('Connection failed: ' + err.message);
   }
 });
+
+// What to call a company on screen. A row saved before its name could be read
+// carries nothing, or the word "null" written where a name should have been, and
+// either one has been showing up in the rail as if it were the company's name.
+// So the name is asked of QuickBooks once, the answer is kept, and a company that
+// still will not say is shown by its number rather than by a word.
+function realName(n) {
+  const s = String(n == null ? '' : n).trim();
+  return (!s || s === 'null' || s === 'undefined') ? '' : s;
+}
+
+async function companyLabel(company) {
+  const kept = realName(company.company_name);
+  if (kept) return kept;
+
+  try {
+    const token = await getAccessToken(company.realm_id);
+    const info = await getCompanyInfo(company.realm_id, token);
+    const got = realName(info && info.CompanyName);
+    if (got) {
+      await renameCompany(company.realm_id, got);
+      return got;
+    }
+  } catch (e) {
+    console.error('company name lookup:', e.message);
+  }
+  return company.realm_id;
+}
 
 app.get('/auth/status', async (req, res) => {
   const sub = currentUser(req);
@@ -657,7 +686,7 @@ app.get('/auth/status', async (req, res) => {
   res.json({
     signedIn: true,
     connected: !!company,
-    companyName: company ? company.company_name : null,
+    companyName: company ? await companyLabel(company) : null,
     realmId,
     // the pages read these to put away every button the person may not press
     admin: !!(who && who.admin),

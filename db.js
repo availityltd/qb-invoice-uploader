@@ -91,3 +91,12 @@ export async function setNegativeItems(realmId, items) {
     [realmId, ...items]
   );
 }
+
+// Only the name, never the key. The key is rotated by QuickBooks as the app works
+// and writing a remembered copy of it back would sign the company out.
+export async function renameCompany(realmId, companyName) {
+  await pool.query(
+    'UPDATE companies SET company_name = $1 WHERE realm_id = $2',
+    [companyName, realmId]
+  );
+}

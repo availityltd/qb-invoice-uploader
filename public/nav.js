@@ -11,7 +11,12 @@
     var st = document.createElement('style');
     st.textContent =
       'html.signed-out .rail, html.signed-out .topline { display:none !important }' +
-      'html.signed-out .main { margin-left:0 !important }';
+      'html.signed-out .main { margin-left:0 !important }' +
+      // nothing else is on the screen, so the one thing that is sits in the
+      // middle of it - not up in the corner where the rail used to hold it
+      'html.signed-out .shell { max-width:none; min-height:100vh; padding:24px;' +
+      '  display:flex; align-items:center; justify-content:center }' +
+      'html.signed-out .gate { margin:0; width:100%; max-width:420px }';
     (document.head || document.documentElement).appendChild(st);
 
     if(!/(?:^|;\s*)signed=1(?:;|$)/.test(document.cookie)){
@@ -388,9 +393,23 @@
 
     var note = document.createElement('div');
     note.style.cssText = 'margin-top:12px;font-size:12px;color:var(--muted);line-height:1.6';
-    note.textContent = 'Use your own QuickBooks address. What you may do in the app ' +
-      'is decided by the company admin.';
+    note.textContent = 'Use your own QuickBooks address, and choose the company you ' +
+      'work in. What you may do in the app is the admin’s to decide.';
     if(connect.parentNode) connect.parentNode.appendChild(note);
+
+    // Somebody signed in and chose a company the app has never been connected to.
+    // Their key is not the one to connect it with, so they are told whose it is
+    // rather than left at a screen that looks like it should have worked.
+    if(/[?&]nocompany=1/.test(location.search)){
+      var gate = connect.closest ? connect.closest('.gate') : null;
+      var h = gate && gate.querySelector('h2');
+      var p = gate && gate.querySelector('p');
+      if(h) h.textContent = 'That company is not connected yet';
+      if(p) p.textContent = 'The app works through the company file its admin ' +
+        'connected. Ask the admin to connect this one, or sign in again and choose ' +
+        'a company you already work in here.';
+      connect.textContent = 'Sign in again';
+    }
   })();
 
   /* ---------- connection state ---------- */
