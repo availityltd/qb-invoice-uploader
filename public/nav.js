@@ -1,6 +1,24 @@
 (function(){
   "use strict";
 
+  /* ---------- before anyone has signed in ---------- */
+  // A sign-in screen is not a page of the app, so it is not framed like one: no
+  // rail, no toolbar, nothing to click until there is somebody here. The server
+  // leaves a plain cookie beside the session one purely so this can be decided
+  // now, at the first line, instead of after a round trip that the eye would
+  // catch as a flash of the whole navigation.
+  (function signedOutFrame(){
+    var st = document.createElement('style');
+    st.textContent =
+      'html.signed-out .rail, html.signed-out .topline { display:none !important }' +
+      'html.signed-out .main { margin-left:0 !important }';
+    (document.head || document.documentElement).appendChild(st);
+
+    if(!/(?:^|;\s*)signed=1(?:;|$)/.test(document.cookie)){
+      document.documentElement.classList.add('signed-out');
+    }
+  })();
+
   var ITEMS = [
     { group: null, items: [
       { href:'/',              label:'Dashboard',        icon:'grid' }
@@ -26,9 +44,10 @@
       // Product, Category and Description are tabs of one page, not three
       // lines in the rail - a new kind of change is a new tab, not a new link
       { href:'/replace.html',  label:'Changes',          icon:'swap' },
-      { href:'/void.html',     label:'Void invoices',    icon:'ban' },
-      // the admin's own: who may sign in, and what each of them may change
-      { href:'/users.html',    label:'Manage users',     icon:'people', admin:true }
+      { href:'/void.html',     label:'Void invoices',    icon:'ban' }
+      // Who may sign in, and what each of them may change, is not a line in this
+      // rail. It sits under the settings gear with the rest of the company's own
+      // settings, the way QuickBooks keeps it, and only the admin sees it there.
     ]}
   ];
 
@@ -342,31 +361,35 @@
       .catch(function(){});
   })();
 
-  /* ---------- the two doors ---------- */
-  // Every page that can ask you to sign in shows the same pair, put here rather
-  // than in each of them. Signing in asks Intuit only who you are: it does not
-  // connect the app to the company, so Intuit never offers to make you its admin.
-  // Connecting is the admin's own door, and the one the company's key comes from.
-  (function twoDoors(){
+  /* ---------- the one door ---------- */
+  // Everybody comes in the same way, so there is one button to press and no choice
+  // to get wrong. It asks Intuit only who you are. The server knows which addresses
+  // are the company's admins, and walks those - and only those - on to QuickBooks'
+  // own connect screen when the company still needs connecting. Every other address
+  // arrives as a user: reads and downloads everything, changes what the admin says.
+  (function oneDoor(){
     var connect = document.getElementById('btnConnect');
     if(!connect) return;
 
-    connect.textContent = 'Connect QuickBooks (admin)';
-    connect.classList.remove('solid');
-    connect.classList.add('ghost');
+    connect.textContent = 'Sign in with QuickBooks';
+    connect.classList.remove('ghost');
+    connect.classList.add('solid');
 
-    var signin = document.createElement('button');
-    signin.className = 'solid';
-    signin.id = 'btnSignIn';
-    signin.textContent = 'Sign in';
-    signin.style.marginRight = '8px';
-    signin.addEventListener('click', function(){ location.href = '/auth/signin'; });
-    connect.parentNode.insertBefore(signin, connect);
+    // Every page still wires this button to /auth/connect further down its own
+    // script, and the id has to stay for that line not to break. The press is
+    // taken here first instead, on the way down, so the page's own handler never
+    // runs and the accounting door is never opened from a button again.
+    document.addEventListener('click', function(ev){
+      if(!connect.contains(ev.target)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      location.href = '/auth/signin';
+    }, true);
 
     var note = document.createElement('div');
     note.style.cssText = 'margin-top:12px;font-size:12px;color:var(--muted);line-height:1.6';
-    note.innerHTML = 'Sign in with your own QuickBooks address to read and download ' +
-      'everything. Connecting the company is the admin’s.';
+    note.textContent = 'Use your own QuickBooks address. What you may do in the app ' +
+      'is decided by the company admin.';
     if(connect.parentNode) connect.parentNode.appendChild(note);
   })();
 
@@ -389,6 +412,8 @@
   window.APP.ready = fetch('/auth/status')
     .then(function(r){ return r.json(); })
     .then(function(s){
+      // the cookie said so before the page drew; the server has the last word
+      document.documentElement.classList.toggle('signed-out', !s.signedIn);
       document.documentElement.classList.add(s.admin ? 'as-admin' : 'as-user');
 
       // A button carries the job it belongs to. Only the jobs this person was not
@@ -458,8 +483,9 @@
           sw.appendChild(b);
         });
 
+        // connecting a company is still the admin's, wherever it is offered from
         var add = document.createElement('button');
-        add.className = 'add';
+        add.className = 'add admin-only';
         add.textContent = '+ Connect another company';
         add.addEventListener('click', function(ev){
           ev.stopPropagation(); location.href = '/auth/connect';

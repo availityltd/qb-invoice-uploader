@@ -94,7 +94,8 @@
             <dt>Name</dt><dd id="mName">&mdash;</dd>
             <dt>Email</dt><dd id="mMail">&mdash;</dd>
             <dt>Role</dt><dd id="mRole">&mdash;</dd>
-            <dt>What you may change</dt><dd id="mCan">&mdash;</dd>
+            <!-- What each person may change is the admin's business, kept on the
+                 Manage users page. It is not spelled out to them here. -->
             <dt>Company</dt><dd id="mCo">&mdash;</dd>
           </dl>
           <div class="acts">
@@ -329,14 +330,6 @@
     $('mMail').textContent = s.email || '—';
     $('mRole').textContent = ROLE_NAMES[s.role] || s.role || '—';
     $('mCo').textContent = s.companyName || (s.connected ? s.realmId : 'Not connected');
-
-    var can = s.admin
-      ? 'Everything, including the courier accounts and the list of people.'
-      : ((s.rights && s.rights.length)
-          ? s.rights.length + (s.rights.length === 1 ? ' job' : ' jobs') +
-            ' the admin has given you.'
-          : 'Nothing. You read and download everything, and change nothing.');
-    $('mCan').textContent = can;
   });
 
   show((location.hash || '#profile').slice(1) || 'profile');

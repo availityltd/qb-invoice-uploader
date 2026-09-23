@@ -132,6 +132,17 @@ app.get('/api/version', (req, res) => {
   res.json({ version: BUILD, at: BUILD_AT });
 });
 
+// The company's list of people belongs to the admin. Anyone else who reaches for
+// it - by typing the address, or from a link they kept - is sent back to the
+// dashboard, so the page is never served rather than merely hidden in the rail.
+app.get(['/users.html', '/users'], async (req, res, next) => {
+  try {
+    const who = await whoIs(currentUser(req));
+    if (who && who.admin) return next();
+  } catch (e) { /* fall through to the dashboard */ }
+  res.redirect('/');
+});
+
 // Pages, scripts and styles are asked for again on every load rather than served
 // from a copy the browser or the installed app kept - so what was deployed is what
 // every computer runs, the moment it reloads.
@@ -464,7 +475,16 @@ app.use(async (req, res, next) => {
 });
 
 // ==================== OAuth ====================
-app.get('/auth/connect', (req, res) => {
+// The company's own door, and the only place its key comes from. There is no
+// button for it any more: an admin is walked here by the sign-in below, and
+// anyone else who types the address is turned away, so a user can neither take
+// the company over nor, by disconnecting later, stop the app for everyone.
+app.get('/auth/connect', async (req, res) => {
+  const who = await whoIs(currentUser(req));
+  if (!who || !who.admin) {
+    return res.redirect('/auth/signin');
+  }
+
   const state = crypto.randomBytes(16).toString('hex');
   res.cookie('oauth_state', state, { httpOnly: true, maxAge: 600000, sameSite: 'lax' });
 
@@ -556,6 +576,10 @@ app.get('/auth/callback', async (req, res) => {
     await upsertUser(sub, email, name);
     forgetWho(sub);
     res.cookie('uid', sign(sub), { httpOnly: true, maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
+    // The same fact again, in a cookie the pages themselves can read, so the rail
+    // knows at once - before it has asked the server - that there is somebody here
+    // and does not flash past a sign-in screen it should never have shown.
+    res.cookie('signed', '1', { maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
 
     const isAdmin = ADMIN_EMAILS.has(String(email || '').toLowerCase());
     const userDoor = req.cookies.oauth_door === 'user';
@@ -569,6 +593,13 @@ app.get('/auth/callback', async (req, res) => {
       const all = await listCompanies();
       if (all.length === 1) joinTo = all[0].realmId;
     }
+
+    // There is one door on the screen now, and it asks Intuit only who you are.
+    // That is all a user ever needs. An admin address - one of the ones named in
+    // ADMIN_EMAILS on the server - needs the company behind it as well, so when
+    // no company is connected yet an admin is walked straight on to Intuit's own
+    // connect screen. Everyone else stops here, as a user.
+    if (userDoor && isAdmin && !joinTo) return res.redirect('/auth/connect');
 
     if (joinTo && !realmId) {
       await linkCompany(sub, joinTo);
@@ -652,6 +683,7 @@ app.post('/auth/disconnect', (req, res) => {
 app.post('/auth/signout', (req, res) => {
   res.clearCookie('realm_id');
   res.clearCookie('uid');
+  res.clearCookie('signed');
   res.json({ ok: true });
 });
 
