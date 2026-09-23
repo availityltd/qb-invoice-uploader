@@ -200,6 +200,7 @@
 
   function statusOf(u){
     if(u.admin) return '<span class="pill ok">Active</span>';
+    if(!u.decided && u.asking === false) return '<span class="pill">Withdrew</span>';
     if(!u.decided) return '<span class="pill wait">Waiting for you</span>';
     if(!u.allowed || u.role === 'none') return '<span class="pill no">Turned down</span>';
     if(u.role === 'viewer') return '<span class="pill wait">Reports only</span>';

@@ -21,7 +21,8 @@ export async function initUsers() {
       ADD COLUMN IF NOT EXISTS rights  JSONB   NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS role    TEXT    NOT NULL DEFAULT 'viewer',
       ADD COLUMN IF NOT EXISTS last_in TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ
+      ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS asked BOOLEAN NOT NULL DEFAULT TRUE
   `);
 
   // Everybody who was already here had been let in by the old rule, which let
@@ -59,7 +60,7 @@ export async function upsertUser(sub, email, name) {
 // Everyone who has ever signed in, for the admin's list
 export async function listUsers() {
   const r = await pool.query(
-    `SELECT sub, email, name, allowed, rights, role, last_in, decided_at, created_at
+    `SELECT sub, email, name, allowed, rights, role, last_in, decided_at, asked, created_at
      FROM users ORDER BY created_at`
   );
   return r.rows;
@@ -161,8 +162,31 @@ export async function usersByEmails(emails) {
 // admin's list as one nobody has answered yet.
 export async function askAgain(sub) {
   const r = await pool.query(
-    `UPDATE users SET decided_at = NULL WHERE sub = $1 AND decided_at IS NOT NULL
+    `UPDATE users SET decided_at = NULL, asked = TRUE
+     WHERE sub = $1 AND (decided_at IS NOT NULL OR asked = FALSE)
      RETURNING sub`,
+    [sub]
+  );
+  return r.rowCount > 0;
+}
+
+// Somebody who withdrew and has signed in again is asking by being here. Only
+// them: an address the admin has already answered - let in or turned down - is
+// left exactly as it was, because signing in is not a way to rub out an answer.
+export async function resumeAsking(sub) {
+  await pool.query(
+    'UPDATE users SET asked = TRUE WHERE sub = $1 AND asked = FALSE AND decided_at IS NULL',
+    [sub]
+  );
+}
+
+// Withdrawing, which is not the same as being turned down. The admin has not
+// answered and is no longer being asked to; the person can ask again whenever
+// they like, and until they do there is nothing on anybody's list.
+export async function stopAsking(sub) {
+  const r = await pool.query(
+    `UPDATE users SET asked = FALSE
+     WHERE sub = $1 AND decided_at IS NULL AND asked = TRUE RETURNING sub`,
     [sub]
   );
   return r.rowCount > 0;

@@ -387,6 +387,20 @@
              typeof Notification !== 'undefined';
     }
 
+    // An iPhone will not deliver a notice to a page in a Safari tab, however many
+    // times it is asked. Apple gives web push only to a site the person has added
+    // to their Home Screen, and a tab has no way to ask on its own. So the tab is
+    // told what to do rather than shown a button that cannot work.
+    function onIPhone(){
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
+
+    function installed(){
+      return window.navigator.standalone === true ||
+             (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    }
+
     function askBox(){ return document.getElementById('pushAsk'); }
 
     function showAsk(state){
@@ -399,6 +413,25 @@
         box.classList.add('on');
         box.innerHTML = '<p>Notifications are blocked for this site. Turn them ' +
           'back on in the browser’s settings for this page.</p>';
+        return;
+      }
+
+      if(state === 'install'){
+        box.classList.add('on');
+        box.innerHTML =
+          '<p><b>On an iPhone or iPad, add this app to the Home Screen first.</b> ' +
+          'Apple only sends notifications to an app that has been added — a ' +
+          'Safari tab never gets them, whatever it is asked.</p>' +
+          '<p>In Safari, press <b>Share</b> (the square with the arrow), choose ' +
+          '<b>Add to Home Screen</b>, then open the app from its new icon and ' +
+          'turn notifications on from this bell.</p>';
+        return;
+      }
+
+      if(state === 'unsupported'){
+        box.classList.add('on');
+        box.innerHTML = '<p>This browser cannot show notifications. The bell still ' +
+          'holds everything, and the count is there whenever you open the app.</p>';
         return;
       }
 
@@ -461,7 +494,8 @@
     // Asked for once the bell is opened, so the offer is in front of somebody who
     // is already thinking about notices.
     function checkPush(){
-      if(!pushReady()) return showAsk('hide');
+      if(onIPhone() && !installed()) return showAsk('install');
+      if(!pushReady()) return showAsk(onIPhone() ? 'install' : 'unsupported');
       if(Notification.permission === 'denied') return showAsk('blocked');
       if(Notification.permission !== 'granted') return showAsk('ask');
 
@@ -480,11 +514,41 @@
       fetch('/api/notifications/clear', { method:'POST' }).then(load);
     });
 
-    // the count on its own, quietly, so the bell is right without being opened
-    fetch('/api/notifications', { cache:'no-store' })
-      .then(function(r){ return r.json(); })
-      .then(paint)
-      .catch(function(){});
+    /* ---------- keeping the count honest ---------- */
+    // The count was read once, when the page loaded, and then left. A notice that
+    // arrived a minute later sat on the server until something else was opened.
+    // It is asked for again on a quiet loop, and at once whenever the window is
+    // come back to - which is the moment somebody would look at the bell anyway.
+    //
+    // A window nobody is looking at asks for nothing. There is no one to tell.
+    var COUNT_EVERY = 20000;
+    var beat = null;
+
+    function look(){
+      if(document.hidden) return;
+      fetch('/api/notifications', { cache:'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(paint)
+        .catch(function(){});
+    }
+
+    function start(){
+      if(beat) clearInterval(beat);
+      beat = setInterval(look, COUNT_EVERY);
+    }
+
+    document.addEventListener('visibilitychange', function(){
+      if(document.hidden){
+        if(beat){ clearInterval(beat); beat = null; }
+      } else {
+        look();
+        start();
+      }
+    });
+
+    // a notice that arrived while the app was shut is on the screen as it opens
+    look();
+    start();
   })();
 
   /* ---------- the courier tree ---------- */

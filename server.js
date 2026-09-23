@@ -13,7 +13,8 @@ import { listCompanies } from './companies.js';
 import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
   initUsers, upsertUser, getUser, linkCompany, userOwns,
-  listUsers, setUserAccess, setUserCompanies, realmsForUser, usersByEmails, askAgain
+  listUsers, setUserAccess, setUserCompanies, realmsForUser, usersByEmails,
+  askAgain, stopAsking, resumeAsking
 } from './users.js';
 import {
   initNotify, notify, listFor, unreadCount, markAllRead, clearFor, sendMail
@@ -354,6 +355,7 @@ app.get('/api/admin/users', async (req, res) => {
         rights: Array.isArray(u.rights) ? u.rights : [],
         realms: byUser.get(u.sub) || [],
         decided: !!u.decided_at,
+        asking: u.asked !== false,
         lastIn: u.last_in,
         since: u.created_at
       })),
@@ -573,6 +575,34 @@ app.post('/api/access/request', async (req, res) => {
   }
 });
 
+// Withdrawing, which is not the same as being turned down. The admin has not
+// answered and is no longer being asked to.
+app.post('/api/access/cancel', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.status(401).json({ error: 'Not signed in' });
+
+  try {
+    const moved = await stopAsking(sub);
+    forgetWho(sub);
+    if (moved) {
+      const u = await getUser(sub);
+      const label = (u && (u.name || u.email)) || 'Somebody';
+      await tellAdmins({
+        kind: 'signin',
+        title: label + ' has withdrawn',
+        body: 'They are no longer asking to be let in. Nothing to do.',
+        link: '/users.html?who=' + encodeURIComponent(sub),
+        subject: label + ' has withdrawn - Shopify to QuickBooks',
+        lines: [label + ' is no longer asking to be let in to the app.',
+                'Nothing to do. They can ask again at any time.']
+      });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== this phone ====================
 // The public half of the app's own keypair. There is nothing secret in it - the
 // phone needs it to check that a notice really came from here.
@@ -620,8 +650,8 @@ const USER_MAY_POST = new Set([
   '/api/notifications/read', '/api/notifications/clear',
   // signing this phone up for notices, and off again
   '/api/push/subscribe', '/api/push/unsubscribe',
-  // asking the admin again after being turned away
-  '/api/access/request',
+  // asking the admin, and withdrawing the asking
+  '/api/access/request', '/api/access/cancel',
   // reading QuickBooks
   '/api/preview', '/api/gap-check', '/api/negative-items',
   '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
@@ -854,6 +884,10 @@ app.get('/auth/callback', async (req, res) => {
     const firstTime = await upsertUser(sub, email, name);
     forgetWho(sub);
 
+    // Somebody who withdrew and has come back is asking again by being here. An
+    // address already answered is untouched - signing in rubs out no answer.
+    if (!firstTime) await resumeAsking(sub).catch(() => {});
+
     if (firstTime) {
       const label = name || email || 'Somebody';
       await tellAdmins({
@@ -1034,6 +1068,7 @@ app.get('/auth/status', async (req, res) => {
       // an address nobody has decided about yet is waiting; one that was decided
       // about and still may not come in was turned away, which reads differently
       decided: !!(user && user.decided_at),
+      asking: !(user && user.asked === false),
       companyCount: mine.length,
       admin: !!(who && who.admin),
       email: (who && who.email) || null,
@@ -1048,6 +1083,7 @@ app.get('/auth/status', async (req, res) => {
     signedIn: true,
     connected: !!company,
     decided: !!(user && user.decided_at),
+    asking: !(user && user.asked === false),
     companyName: company ? await companyLabel(company) : null,
     realmId,
     // the pages read these to put away every button the person may not press

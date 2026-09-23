@@ -82,6 +82,7 @@
 
     <p class="note" id="note"></p>
     <button class="go" id="btnAsk" style="display:none">Ask the admin again</button>
+    <button class="out" id="btnStop" style="display:none">Cancel waiting</button>
     <button class="out" id="btnOut" style="display:none">Cancel and sign out</button>
   </div>
 </div>
@@ -142,6 +143,9 @@
   function waitForAdmin(who){
     $('head').textContent = 'Waiting to be let in';
     $('btnAsk').style.display = 'none';
+    $('btnStop').style.display = '';
+    $('btnStop').disabled = false;
+    $('btnStop').textContent = 'Cancel waiting';
     $('sub').textContent = 'Nothing is open yet.';
     $('cap').style.display = 'none';
     $('find').style.display = 'none';
@@ -156,11 +160,32 @@
     if(!waitTimer) waitTimer = setInterval(look, 4000);
   }
 
+  // Withdrawn - the admin is no longer being asked, and nothing is waiting on
+  // anybody. Asking again is one press away whenever they want it.
+  function withdrawn(){
+    if(waitTimer){ clearInterval(waitTimer); waitTimer = null; }
+    $('head').textContent = 'Not asking';
+    $('sub').textContent = 'Nothing is waiting on anybody.';
+    $('cap').style.display = 'none';
+    $('find').style.display = 'none';
+    $('btnStop').style.display = 'none';
+    $('btnOut').style.display = '';
+    $('btnAsk').style.display = '';
+    $('btnAsk').disabled = false;
+    $('btnAsk').textContent = 'Ask the admin to let me in';
+    $('list').innerHTML =
+      '<div class="empty"><b>You have withdrawn.</b><br><br>' +
+      'The admin is not being asked to let you in. Ask again below whenever ' +
+      'you want to.</div>';
+    $('note').textContent = '';
+  }
+
   // The admin has decided, and the answer was no. Said plainly, and said once -
   // there is nothing to wait for, so the asking stops.
   function turnedAway(){
     if(waitTimer){ clearInterval(waitTimer); waitTimer = null; }
     $('head').textContent = 'Not let in';
+    $('btnStop').style.display = 'none';
     $('sub').textContent = 'The admin has answered.';
     $('cap').style.display = 'none';
     $('find').style.display = 'none';
@@ -178,6 +203,7 @@
   function chooser(){
     $('head').textContent = 'Choose your company';
     $('btnAsk').style.display = 'none';
+    $('btnStop').style.display = 'none';
   }
 
   function look(){
@@ -186,6 +212,7 @@
       .then(function(st){
         if(!st.signedIn){ location.href = '/'; return; }
         if(!st.letIn && st.decided) return turnedAway();
+        if(!st.letIn && !st.asking) return withdrawn();
         if(!st.letIn || !st.companyCount) return waitForAdmin(st.user);
 
         if(waitTimer){ clearInterval(waitTimer); waitTimer = null; }
@@ -259,13 +286,31 @@
         if(d.error) throw new Error(d.error);
         waitForAdmin(null);
         $('list').innerHTML =
-          '<div class="empty"><b>The admin has been asked again.</b><br><br>' +
+          '<div class="empty"><b>The admin has been asked.</b><br><br>' +
           'They have been told on their own screen. Once they answer, this page ' +
           'moves on by itself - there is nothing to press.</div>';
       })
       .catch(function(e){
         b.disabled = false;
         b.textContent = 'Ask the admin again';
+        $('note').textContent = e.message;
+      });
+  });
+
+  $('btnStop').addEventListener('click', function(){
+    var b = $('btnStop');
+    b.disabled = true;
+    b.textContent = 'Cancelling…';
+
+    fetch('/api/access/cancel', { method:'POST' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.error) throw new Error(d.error);
+        withdrawn();
+      })
+      .catch(function(e){
+        b.disabled = false;
+        b.textContent = 'Cancel waiting';
         $('note').textContent = e.message;
       });
   });
