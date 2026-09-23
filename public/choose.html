@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choose your company</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  /* One thing on the screen, so it sits in the middle of it. The shape is the one
+     QuickBooks uses for the same question, because it is the same question. */
+  .pick{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{width:100%;max-width:430px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:30px 28px 24px;box-shadow:0 10px 34px rgba(15,46,36,.07)}
+  .card img{width:52px;height:52px;border-radius:12px;display:block;margin:0 auto 18px}
+  .card h1{font-size:20px;font-weight:600;text-align:center;margin:0 0 4px}
+  .card .sub{text-align:center;color:var(--muted);font-size:13px;margin:0 0 20px}
+  .find{width:100%;padding:10px 13px;border:1px solid var(--line-2);border-radius:9px;
+    font:inherit;font-size:14px;margin-bottom:14px}
+  .find:focus{outline:none;border-color:var(--qbo)}
+  .cap{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--faint);margin:0 0 9px}
+  .co{width:100%;text-align:left;display:block;background:var(--panel);cursor:pointer;
+    border:1px solid var(--line);border-radius:10px;padding:13px 15px;margin-bottom:9px;
+    font:inherit;color:var(--text)}
+  .co:hover{border-color:var(--qbo);background:var(--panel-2)}
+  .co b{display:block;font-size:14.5px;font-weight:600}
+  .co span{display:block;font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:2px}
+  .co.cur{border-color:var(--qbo)}
+  .note{color:var(--muted);font-size:12px;line-height:1.6;margin:16px 0 0;text-align:center}
+  .note a{color:var(--qbo)}
+  .empty{color:var(--muted);font-size:13.5px;line-height:1.65;text-align:center;padding:6px 0 2px}
+</style>
+</head>
+<body>
+
+<div class="pick">
+  <div class="card">
+    <img src="/logo.svg" alt="">
+    <h1>Choose your company</h1>
+    <p class="sub" id="sub">&nbsp;</p>
+
+    <input class="find" id="find" type="search" placeholder="Search…" style="display:none">
+    <p class="cap" id="cap" style="display:none">QuickBooks companies</p>
+    <div id="list"><div class="empty">Loading…</div></div>
+
+    <p class="note" id="note"></p>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var all = [], current = null;
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function draw(){
+    var q = ($('find').value || '').trim().toLowerCase();
+    var show = all.filter(function(c){
+      return !q || c.name.toLowerCase().indexOf(q) > -1 || String(c.realmId).indexOf(q) > -1;
+    });
+
+    if(!show.length){
+      $('list').innerHTML = '<div class="empty">No company by that name.</div>';
+      return;
+    }
+
+    $('list').innerHTML = show.map(function(c){
+      return '<button class="co' + (c.realmId === current ? ' cur' : '') +
+             '" data-id="' + esc(c.realmId) + '">' +
+             '<b>' + esc(c.name) + '</b><span>' + esc(c.realmId) + '</span></button>';
+    }).join('');
+
+    Array.prototype.forEach.call($('list').querySelectorAll('.co'), function(b){
+      b.addEventListener('click', function(){
+        b.disabled = true;
+        b.querySelector('b').textContent = 'Opening…';
+        fetch('/auth/switch', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ realmId: b.getAttribute('data-id') })
+        })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d.error) throw new Error(d.error);
+          location.href = '/';
+        })
+        .catch(function(e){
+          b.disabled = false;
+          $('note').textContent = e.message;
+        });
+      });
+    });
+  }
+
+  fetch('/auth/companies', { cache:'no-store' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      all = d.companies || [];
+      current = d.current || null;
+
+      if(!all.length){
+        $('sub').textContent = 'Nothing is connected yet.';
+        $('list').innerHTML = '<div class="empty">The app works through a company file ' +
+          'that an admin connects, once. Ask the admin to connect yours.</div>';
+        return;
+      }
+
+      $('sub').textContent = 'Everything you see in the app comes from the one you pick.';
+      $('cap').style.display = '';
+      if(all.length > 6) $('find').style.display = '';
+      $('find').addEventListener('input', draw);
+      draw();
+
+      $('note').innerHTML = 'You can change company later from the name at the ' +
+        'bottom of the rail.';
+    })
+    .catch(function(){
+      $('list').innerHTML = '<div class="empty">Could not reach the server.</div>';
+    });
+
+  // this page carries the update watcher too, like every other
+  var s = document.createElement('script');
+  s.src = '/update.js';
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>

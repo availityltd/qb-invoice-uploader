@@ -499,16 +499,17 @@ app.get('/auth/connect', async (req, res) => {
   res.redirect(`${AUTH_URL}?${params}`);
 });
 
-// The door everybody comes through, admin and user alike. It asks Intuit for the
-// company as well as the name, so the person is shown QuickBooks' own "Choose
-// your company" screen first and says which file they are here for - exactly as
-// they would opening QuickBooks itself. What they may then do inside the app is a
-// separate question, answered by their role.
+// The door everybody comes through. It asks Intuit only who the person is.
 //
-// The key that comes back with it is a different matter: the callback keeps it
-// only from an admin. A user's is read once, to learn who they are, and thrown
-// away - so a user can neither take the company over nor, by disconnecting the
-// app later, stop it for everyone else.
+// It cannot ask for the company as well, and this is Intuit's rule rather than a
+// choice made here: only a listed admin of a QuickBooks company may connect an
+// app to it. Everybody else is stopped at Intuit's own screen with "You're not a
+// listed admin for this company" - however many companies they work in, and
+// whatever the admin has let them do inside those companies.
+//
+// So the company is asked for here instead, on the app's own Choose your company
+// screen, out of the ones an admin has already connected. Connecting is done once
+// per company, by an admin; choosing between them is everyone's, every day.
 app.get('/auth/signin', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   res.cookie('oauth_state', state, { httpOnly: true, maxAge: 600000, sameSite: 'lax' });
@@ -517,7 +518,7 @@ app.get('/auth/signin', (req, res) => {
   const params = new URLSearchParams({
     client_id: process.env.QB_CLIENT_ID,
     response_type: 'code',
-    scope: 'com.intuit.quickbooks.accounting openid profile email',
+    scope: 'openid profile email',
     redirect_uri: `${BASE_URL}/auth/callback`,
     state
   });
@@ -588,16 +589,18 @@ app.get('/auth/callback', async (req, res) => {
     const isAdmin = ADMIN_EMAILS.has(String(email || '').toLowerCase());
     res.clearCookie('oauth_door');
 
-    // Nobody picked a company - Intuit sometimes comes back without one. If the
-    // app holds exactly one, that is plainly the one they are here for.
+    // Coming back from the admin's own connect door, Intuit says which company was
+    // connected. Coming back from the plain sign-in it says nothing, because only
+    // an admin may connect one - so the company is chosen afterwards, on the app's
+    // own screen, out of the ones already connected. One of them and there is
+    // nothing to choose; several and the chooser is where they land.
     let joinTo = realmId;
     if (!joinTo) {
       const all = await listCompanies();
       if (all.length === 1) joinTo = all[0].realmId;
-    }
-
-    if (!joinTo) {
-      return res.redirect('/?nocompany=1');
+      else if (all.length > 1) return res.redirect('/choose.html');
+      else if (isAdmin) return res.redirect('/auth/connect');
+      else return res.redirect('/choose.html');
     }
 
     const known = await getCompany(joinTo);
@@ -618,9 +621,9 @@ app.get('/auth/callback', async (req, res) => {
         }
       }
     } else if (!known) {
-      // A user picked a company the app has never been connected to. Their key is
-      // not the one to connect it with, so they are told plainly whose it is.
-      return res.redirect('/?nocompany=1');
+      // A company the app has never been connected to. Connecting one is an
+      // admin's, so the chooser says so rather than leaving them at a dead end.
+      return res.redirect('/choose.html');
     }
     // a user's key is read once, for the name and address above, and kept nowhere
 
@@ -720,7 +723,7 @@ app.get('/auth/companies', async (req, res) => {
   const sub = currentUser(req);
   if (!sub) return res.json({ companies: [], current: null });
   try {
-    const list = await companiesForUser(sub);
+    const list = await listCompanies();
     res.json({ companies: list, current: req.cookies.realm_id || null });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -733,15 +736,21 @@ app.post('/auth/switch', async (req, res) => {
 
   const { realmId } = req.body;
   if (!realmId) return res.status(400).json({ error: 'realmId required' });
-  if (!(await userOwns(sub, realmId))) {
-    return res.status(403).json({ error: 'This company is not linked to your account' });
+
+  const who = await whoIs(sub);
+  if (!who || who.allowed === false) {
+    return res.status(403).json({ error: 'The admin has not let this account in.' });
   }
 
+  // A company the app is connected to is a company the people of this company may
+  // work in, the way they can open any of their files in QuickBooks itself. What
+  // they may do once inside is their role's business, not this one's.
   const company = await getCompany(realmId);
   if (!company) return res.status(404).json({ error: 'Company not connected' });
 
+  await linkCompany(sub, realmId);
   res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
-  res.json({ ok: true, companyName: company.company_name });
+  res.json({ ok: true, companyName: await companyLabel(company) });
 });
 
 // ==================== Helpers ====================

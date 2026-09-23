@@ -397,19 +397,6 @@
       'work in. What you may do in the app is the admin’s to decide.';
     if(connect.parentNode) connect.parentNode.appendChild(note);
 
-    // Somebody signed in and chose a company the app has never been connected to.
-    // Their key is not the one to connect it with, so they are told whose it is
-    // rather than left at a screen that looks like it should have worked.
-    if(/[?&]nocompany=1/.test(location.search)){
-      var gate = connect.closest ? connect.closest('.gate') : null;
-      var h = gate && gate.querySelector('h2');
-      var p = gate && gate.querySelector('p');
-      if(h) h.textContent = 'That company is not connected yet';
-      if(p) p.textContent = 'The app works through the company file its admin ' +
-        'connected. Ask the admin to connect this one, or sign in again and choose ' +
-        'a company you already work in here.';
-      connect.textContent = 'Sign in again';
-    }
   })();
 
   /* ---------- connection state ---------- */
@@ -433,6 +420,13 @@
     .then(function(s){
       // the cookie said so before the page drew; the server has the last word
       document.documentElement.classList.toggle('signed-out', !s.signedIn);
+
+      // Signed in, but no company picked yet - the app has nothing to show until
+      // there is one, so the question is asked rather than a bare gate shown.
+      if(s.signedIn && !s.connected && location.pathname !== '/choose.html'){
+        location.replace('/choose.html');
+        return s;
+      }
       document.documentElement.classList.add(s.admin ? 'as-admin' : 'as-user');
 
       // A button carries the job it belongs to. Only the jobs this person was not
