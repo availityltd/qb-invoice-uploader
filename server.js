@@ -9,6 +9,7 @@ import {
 } from './db.js';
 
 import { initMappings, getMappings, saveMapping } from './mappings.js';
+import { listCompanies } from './companies.js';
 import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
   initUsers, upsertUser, getUser, linkCompany, userOwns, companiesForUser,
@@ -177,6 +178,24 @@ const ADMIN_EMAILS = new Set(
     .split(/[,;s]+/).map(x => x.trim().toLowerCase()).filter(Boolean)
 );
 
+// The roles, said the way QuickBooks says them on its own Manage users page, so
+// nobody has to learn a second vocabulary. QuickBooks does not hand a person's role
+// out through its API - there is no User to ask for - so the app keeps its own, and
+// the admin sets them here.
+const ROLES = [
+  { key: 'admin',    label: 'Company admin',
+    what: 'Everything, including the courier accounts and this list.' },
+  { key: 'standard', label: 'Standard user',
+    what: 'Every day-to-day change: upload, payments, void, changes, purchases.' },
+  { key: 'custom',   label: 'Standard, limited',
+    what: 'Only the jobs ticked for them.' },
+  { key: 'viewer',   label: 'Reports only',
+    what: 'Reads and downloads everything. Changes nothing.' },
+  { key: 'none',     label: 'No access',
+    what: 'Signed in, and no further.' }
+];
+const ROLE_KEYS = new Set(ROLES.map(r => r.key));
+
 const whoCache = new Map();          // sub -> what they are, for half a minute
 const WHO_LIFE = 30 * 1000;
 
@@ -191,11 +210,22 @@ async function whoIs(sub) {
     name: u ? (u.name || u.email) : null,
     allowed: u ? u.allowed !== false : true,
     rights: (u && Array.isArray(u.rights)) ? u.rights : [],
+    role: (u && u.role) ? u.role : 'viewer',
     at: Date.now()
   };
   who.admin = !!who.email && ADMIN_EMAILS.has(who.email);
+  if (who.admin) who.role = 'admin';
   whoCache.set(sub, who);
   return who;
+}
+
+// may this person do this job, whatever their role says
+function mayDo(who, job) {
+  if (!who || !job) return false;
+  if (who.admin || who.role === 'admin') return true;
+  if (who.role === 'standard') return true;
+  if (who.role === 'custom') return who.rights.indexOf(job) > -1;
+  return false;                        // reports only, or no access
 }
 
 function forgetWho(sub) { whoCache.delete(sub); }
@@ -224,7 +254,7 @@ async function requireCompany(req, res) {
   }
   // someone the admin has turned off is signed in, and no further
   const who = await whoIs(sub);
-  if (who && !who.allowed && !who.admin) {
+  if (who && !who.admin && (!who.allowed || who.role === 'none')) {
     res.status(403).json({ error: 'The admin has turned your access to this app off.' });
     return null;
   }
@@ -239,7 +269,10 @@ app.get('/api/admin/rights', async (req, res) => {
   const realmId = await requireAdmin(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ groups: RIGHT_GROUPS.map(g => ({ key: g.key, label: g.label, what: g.what })) });
+  res.json({
+    roles: ROLES,
+    groups: RIGHT_GROUPS.map(g => ({ key: g.key, label: g.label, what: g.what }))
+  });
 });
 
 app.get('/api/admin/users', async (req, res) => {
@@ -256,6 +289,8 @@ app.get('/api/admin/users', async (req, res) => {
         name: u.name || '',
         admin: !!u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase()),
         allowed: u.allowed !== false,
+        role: (!!u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase()))
+          ? 'admin' : (u.role || 'viewer'),
         rights: Array.isArray(u.rights) ? u.rights : [],
         lastIn: u.last_in,
         since: u.created_at
@@ -270,15 +305,21 @@ app.post('/api/admin/users/access', async (req, res) => {
   const realmId = await requireAdmin(req, res);
   if (!realmId) return;
 
-  const { sub, allowed, rights } = req.body || {};
+  const { sub, allowed, rights, role } = req.body || {};
   if (!sub) return res.status(400).json({ error: 'Which person?' });
+  if (role !== undefined && !ROLE_KEYS.has(String(role))) {
+    return res.status(400).json({ error: 'There is no such role' });
+  }
+  if (role === 'admin') {
+    return res.status(400).json({ error: 'An admin is named by ADMIN_EMAILS on the server, not here.' });
+  }
 
   try {
     const u = await getUser(sub);
     if (u && u.email && ADMIN_EMAILS.has(String(u.email).toLowerCase())) {
       return res.status(400).json({ error: 'That address is an admin - change ADMIN_EMAILS on the server instead.' });
     }
-    await setUserAccess(sub, { allowed, rights });
+    await setUserAccess(sub, { allowed, rights, role });
     forgetWho(sub);
     res.json({ ok: true });
   } catch (e) {
@@ -408,9 +449,8 @@ app.use(async (req, res, next) => {
   try {
     const who = await whoIs(sub);
     if (who && who.admin) return next();
-    // the admin may have handed this whole job to them
-    const need = RIGHT_OF_PATH.get(path);
-    if (need && who && who.rights.includes(need)) return next();
+    // their role, or the jobs the admin ticked for them
+    if (mayDo(who, RIGHT_OF_PATH.get(path))) return next();
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -430,6 +470,28 @@ app.get('/auth/connect', (req, res) => {
     client_id: process.env.QB_CLIENT_ID,
     response_type: 'code',
     scope: 'com.intuit.quickbooks.accounting openid profile email',
+    redirect_uri: `${BASE_URL}/auth/callback`,
+    state
+  });
+
+  res.redirect(`${AUTH_URL}?${params}`);
+});
+
+// The door everyone else comes through. It asks Intuit only who the person is -
+// not for the accounting scope, which is what "connect this app to the company"
+// means and what brings up Intuit's own Assign admin screen. So someone signing in
+// here never sees that screen, never touches the company's key, and cannot later
+// stop the app for everyone by disconnecting it. They do not need a QuickBooks
+// seat either; an Intuit account is enough.
+app.get('/auth/signin', (req, res) => {
+  const state = crypto.randomBytes(16).toString('hex');
+  res.cookie('oauth_state', state, { httpOnly: true, maxAge: 600000, sameSite: 'lax' });
+  res.cookie('oauth_door', 'user', { httpOnly: true, maxAge: 600000, sameSite: 'lax' });
+
+  const params = new URLSearchParams({
+    client_id: process.env.QB_CLIENT_ID,
+    response_type: 'code',
+    scope: 'openid profile email',
     redirect_uri: `${BASE_URL}/auth/callback`,
     state
   });
@@ -494,6 +556,22 @@ app.get('/auth/callback', async (req, res) => {
     res.cookie('uid', sign(sub), { httpOnly: true, maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
 
     const isAdmin = ADMIN_EMAILS.has(String(email || '').toLowerCase());
+    const userDoor = req.cookies.oauth_door === 'user';
+    res.clearCookie('oauth_door');
+
+    // Signing in the plain way brings no company back with it, because nothing was
+    // connected. Where the app holds one company, that is the one they are for; a
+    // second one and the admin says which on the Who uses this page.
+    let joinTo = realmId;
+    if (!joinTo && userDoor) {
+      const all = await listCompanies();
+      if (all.length === 1) joinTo = all[0].realmId;
+    }
+
+    if (joinTo && !realmId) {
+      await linkCompany(sub, joinTo);
+      res.cookie('realm_id', joinTo, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
+    }
 
     if (realmId) {
       // The key that every page in the app works through belongs to the admin and
@@ -548,7 +626,11 @@ app.get('/auth/status', async (req, res) => {
     realmId,
     // the pages read these to put away every button the person may not press
     admin: !!(who && who.admin),
-    rights: (who && who.rights) || [],
+    role: (who && who.role) || 'viewer',
+    // a standard user has every job; anyone else has what was ticked
+    rights: (who && who.role === 'standard')
+      ? RIGHT_GROUPS.map(g => g.key)
+      : ((who && who.rights) || []),
     jobs: RIGHT_GROUPS.map(g => g.key),
     user: user ? (user.name || user.email) : null
   });

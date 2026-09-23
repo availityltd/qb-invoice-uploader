@@ -19,6 +19,7 @@ export async function initUsers() {
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS allowed BOOLEAN NOT NULL DEFAULT TRUE,
       ADD COLUMN IF NOT EXISTS rights  JSONB   NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS role    TEXT    NOT NULL DEFAULT 'viewer',
       ADD COLUMN IF NOT EXISTS last_in TIMESTAMPTZ
   `);
 
@@ -43,21 +44,23 @@ export async function upsertUser(sub, email, name) {
 // Everyone who has ever signed in, for the admin's list
 export async function listUsers() {
   const r = await pool.query(
-    `SELECT sub, email, name, allowed, rights, last_in, created_at
+    `SELECT sub, email, name, allowed, rights, role, last_in, created_at
      FROM users ORDER BY created_at`
   );
   return r.rows;
 }
 
 // The admin says whether someone may use the app, and what they may change
-export async function setUserAccess(sub, { allowed, rights }) {
+export async function setUserAccess(sub, { allowed, rights, role }) {
   await pool.query(
     `UPDATE users SET
        allowed = COALESCE($2, allowed),
-       rights  = COALESCE($3, rights)
+       rights  = COALESCE($3, rights),
+       role    = COALESCE($4, role)
      WHERE sub = $1`,
     [sub, allowed === undefined ? null : !!allowed,
-     rights === undefined ? null : JSON.stringify(rights)]
+     rights === undefined ? null : JSON.stringify(rights),
+     role === undefined ? null : String(role)]
   );
 }
 
