@@ -175,7 +175,9 @@ function currentUser(req) {
 // to become an admin.
 const ADMIN_EMAILS = new Set(
   String(process.env.ADMIN_EMAILS || 'sohailsaim6@gmail.com')
-    .split(/[,;s]+/).map(x => x.trim().toLowerCase()).filter(Boolean)
+    .split(/[,; ]+/)
+    .map(x => x.trim().toLowerCase().replace(/^["']|["']$/g, ''))
+    .filter(Boolean)
 );
 
 // The roles, said the way QuickBooks says them on its own Manage users page, so
@@ -335,7 +337,7 @@ app.post('/api/admin/users/access', async (req, res) => {
 // sent with POST is taken to be a change, so one added later is closed to users
 // until it is opened on purpose.
 const USER_MAY_POST = new Set([
-  '/auth/signout', '/auth/switch',
+  '/auth/signout', '/auth/switch', '/auth/disconnect',
   // reading QuickBooks
   '/api/preview', '/api/gap-check', '/api/negative-items',
   '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
@@ -614,6 +616,8 @@ app.get('/auth/status', async (req, res) => {
       signedIn: true,
       connected: false,
       admin: !!(who && who.admin),
+      email: (who && who.email) || null,
+      adminCount: ADMIN_EMAILS.size,
       user: user ? (user.name || user.email) : null
     });
   }
@@ -626,6 +630,10 @@ app.get('/auth/status', async (req, res) => {
     realmId,
     // the pages read these to put away every button the person may not press
     admin: !!(who && who.admin),
+    // what the server knows you by, and how many addresses it holds as admin -
+    // the two things worth seeing when a sign-in is not the admin it should be
+    email: (who && who.email) || null,
+    adminCount: ADMIN_EMAILS.size,
     role: (who && who.role) || 'viewer',
     // a standard user has every job; anyone else has what was ticked
     rights: (who && who.role === 'standard')
