@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  /* The door, and nothing else on the screen with it. No rail, no toolbar and no
+     dashboard behind it: the server sends this page instead of one of the app's,
+     so there is nothing to draw first and nothing to take away afterwards. */
+  .pick{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:34px 28px 26px;text-align:center;
+    box-shadow:0 10px 34px rgba(15,46,36,.07)}
+  .card img{width:56px;height:56px;border-radius:13px;display:block;margin:0 auto 20px}
+  .card h1{font-size:19px;font-weight:600;margin:0 0 6px}
+  .card p{color:var(--muted);font-size:13px;margin:0 0 22px;line-height:1.6}
+  .go{width:100%;padding:11px;border-radius:9px;border:0;background:var(--qbo);
+    color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+  .go:hover{filter:brightness(1.06)}
+  .go:disabled{opacity:.7;cursor:default}
+  .fine{margin:16px 0 0;font-size:11.5px;color:var(--muted);line-height:1.6}
+</style>
+</head>
+<body>
+
+<div class="pick">
+  <div class="card">
+    <img src="/logo.svg" alt="">
+    <h1>Shopify &rarr; QuickBooks</h1>
+    <p>Sign in with the QuickBooks address you work under.</p>
+    <button class="go" id="go">Sign in with QuickBooks</button>
+    <p class="fine">
+      What you may do in the app, and which companies you work in, is the
+      company admin&rsquo;s to decide.
+    </p>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var go = document.getElementById('go');
+  go.addEventListener('click', function(){
+    go.disabled = true;
+    go.textContent = 'Taking you to QuickBooks\u2026';
+    location.href = '/auth/signin';
+  });
+})();
+</script>
+</body>
+</html>

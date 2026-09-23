@@ -155,3 +155,15 @@ export async function usersByEmails(emails) {
   );
   return r.rows;
 }
+
+// Turned away, and asking again. The decision is rubbed out rather than reversed
+// - nobody lets themselves in - so the address goes back to the top of the
+// admin's list as one nobody has answered yet.
+export async function askAgain(sub) {
+  const r = await pool.query(
+    `UPDATE users SET decided_at = NULL WHERE sub = $1 AND decided_at IS NOT NULL
+     RETURNING sub`,
+    [sub]
+  );
+  return r.rowCount > 0;
+}

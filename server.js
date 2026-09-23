@@ -13,7 +13,7 @@ import { listCompanies } from './companies.js';
 import { listSheets, listTabs, readTab, paintRows, testConnection } from './sheets.js';
 import {
   initUsers, upsertUser, getUser, linkCompany, userOwns,
-  listUsers, setUserAccess, setUserCompanies, realmsForUser, usersByEmails
+  listUsers, setUserAccess, setUserCompanies, realmsForUser, usersByEmails, askAgain
 } from './users.js';
 import {
   initNotify, notify, listFor, unreadCount, markAllRead, clearFor, sendMail
@@ -134,6 +134,47 @@ const BUILD_AT = new Date().toISOString();
 app.get('/api/version', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ version: BUILD, at: BUILD_AT });
+});
+
+// Which page this person should be looking at - decided here, before a line of
+// HTML is sent.
+//
+// It used to be decided in the browser: every page drew itself, asked the server
+// who was looking, and then took itself away again. That is what the flash was -
+// the rail, the dashboard, the gate, each one appearing for a moment on its way
+// out. A page the browser never receives cannot flash. So a request for a page
+// of the app from somebody who is not all the way in is answered with a redirect
+// to the one screen that is theirs, and nothing else is ever sent.
+//
+// Three screens, in order: the door, the waiting-or-choosing screen, the app.
+app.get(/(^\/$)|\.html$/, async (req, res, next) => {
+  const here = req.path === '/' ? '/index.html' : req.path;
+
+  try {
+    const sub = currentUser(req);
+
+    if (!sub) {
+      return here === '/signin.html' ? next() : res.redirect('/signin.html');
+    }
+    if (here === '/signin.html') return res.redirect('/');
+
+    const who = await whoIs(sub);
+    const letIn = !!(who && (who.admin || (who.allowed && who.role !== 'none')));
+
+    const realmId = req.cookies.realm_id;
+    const settled = letIn && realmId &&
+      await userOwns(sub, realmId) && !!(await getCompany(realmId));
+
+    if (!settled) {
+      return here === '/choose.html' ? next() : res.redirect('/choose.html');
+    }
+    if (here === '/choose.html') return res.redirect('/');
+
+    return next();
+  } catch (e) {
+    console.error('page guard:', e.message);
+    return next();
+  }
 });
 
 // The company's list of people belongs to the admin. Anyone else who reaches for
@@ -491,6 +532,47 @@ app.post('/api/notifications/clear', async (req, res) => {
   }
 });
 
+// Turned away, and asking again. Nothing here lets anybody in: it puts the
+// address back on the admin's list as one nobody has answered, and tells them.
+app.post('/api/access/request', async (req, res) => {
+  const sub = currentUser(req);
+  if (!sub) return res.status(401).json({ error: 'Not signed in' });
+
+  try {
+    const who = await whoIs(sub);
+    if (who && (who.admin || (who.allowed && who.role !== 'none'))) {
+      return res.json({ ok: true, already: true });
+    }
+
+    const moved = await askAgain(sub);
+    forgetWho(sub);
+    if (!moved) return res.json({ ok: true });
+
+    const u = await getUser(sub);
+    const label = (u && (u.name || u.email)) || 'Somebody';
+    await tellAdmins({
+      kind: 'signin',
+      title: label + ' is asking again',
+      body: (u && u.email ? u.email : 'no address') + ' was turned down and has ' +
+            'asked to be let in. Choose their companies and what they may do, or ' +
+            'turn them down again.',
+      link: '/users.html?who=' + encodeURIComponent(sub),
+      subject: label + ' is asking again - Shopify to QuickBooks',
+      lines: [
+        label + ' (' + (u && u.email ? u.email : 'no address') + ') was turned ' +
+        'down and has asked again.',
+        'Open the link below on any phone: it lands on them, with the companies ' +
+        'to tick and what they may do.',
+        BASE_URL + '/users.html?who=' + encodeURIComponent(sub)
+      ]
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== this phone ====================
 // The public half of the app's own keypair. There is nothing secret in it - the
 // phone needs it to check that a notice really came from here.
@@ -538,6 +620,8 @@ const USER_MAY_POST = new Set([
   '/api/notifications/read', '/api/notifications/clear',
   // signing this phone up for notices, and off again
   '/api/push/subscribe', '/api/push/unsubscribe',
+  // asking the admin again after being turned away
+  '/api/access/request',
   // reading QuickBooks
   '/api/preview', '/api/gap-check', '/api/negative-items',
   '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',

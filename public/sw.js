@@ -1,7 +1,10 @@
 // a new name clears what the old worker kept, so no computer keeps serving a
 // page from before the update
-const CACHE = 'sqbo-v3';
-const SHELL = ['/', '/upload.html', '/app.css', '/logo.svg', '/favicon.svg', '/manifest.json'];
+const CACHE = 'sqbo-v4';
+// Only what a page is made of, never a page. A page now answers with a redirect
+// when the person looking at it should be somewhere else, and addAll refuses a
+// redirect - which would fail the install and leave no worker at all.
+const SHELL = ['/app.css', '/logo.svg', '/favicon.svg', '/manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -24,6 +27,11 @@ self.addEventListener('fetch', e => {
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) return;
   if (e.request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
+
+  // A page is the server's to decide - it answers with the door, the waiting
+  // screen or the app, depending on who is asking. A kept copy would show the
+  // wrong one of the three, so pages are never kept.
+  if (e.request.mode === 'navigate') return;
 
   // Network first, fall back to cache when offline
   e.respondWith(
