@@ -59,6 +59,9 @@
   .jobs.show{display:block}
   .jobs .cap{font-size:11px;letter-spacing:.07em;text-transform:uppercase;
     color:var(--faint);margin-bottom:8px}
+  .jobs .cap em{font-style:normal;text-transform:none;letter-spacing:0;font-size:11.5px;
+    color:var(--muted);margin-left:9px}
+  .jobs .area + .area{margin-top:16px}
   .jobs .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:9px}
 
   .editacts{margin-top:16px;display:flex;gap:8px;align-items:center}
@@ -156,7 +159,7 @@
 (function(){
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
-  var S = { roles: [], groups: [], users: [], companies: [], openSub: null };
+  var S = { roles: [], areas: [], groups: [], users: [], companies: [], openSub: null };
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -261,14 +264,21 @@
           '</div>' +
         '</div>' +
         '<div class="jobs' + (u.role === 'custom' ? ' show' : '') + '">' +
-          '<div class="cap">The jobs they may do</div>' +
-          '<div class="grid">' +
-            S.groups.map(function(g){
-              return '<label><input type="checkbox" value="' + esc(g.key) + '"' +
-                (u.rights.indexOf(g.key) > -1 ? ' checked' : '') + '>' +
-                '<span>' + esc(g.label) + '<small>' + esc(g.what) + '</small></span></label>';
-            }).join('') +
-          '</div>' +
+          S.areas.map(function(a){
+            var mine = S.groups.filter(function(g){ return g.area === a.key; });
+            if(!mine.length) return '';
+            return '<div class="area">' +
+              '<div class="cap">' + esc(a.label) +
+                '<em>' + esc(a.what) + '</em></div>' +
+              '<div class="grid">' +
+                mine.map(function(g){
+                  return '<label><input type="checkbox" value="' + esc(g.key) + '"' +
+                    (u.rights.indexOf(g.key) > -1 ? ' checked' : '') + '>' +
+                    '<span>' + esc(g.label) +
+                    '<small>' + esc(g.what) + '</small></span></label>';
+                }).join('') +
+              '</div></div>';
+          }).join('') +
         '</div>' +
         '<div class="editacts">' +
           '<button class="solid b-save">Save</button>' +
@@ -345,9 +355,17 @@
       var tr = document.createElement('tr');
       if(!u.admin && (!u.allowed || u.role === 'none')) tr.className = 'off';
 
-      var jobsNote = (u.role === 'custom' && u.rights.length)
-        ? '<small>' + u.rights.length + (u.rights.length === 1 ? ' job' : ' jobs') + '</small>'
-        : '';
+      // A count of jobs says nothing. Which parts of the books they touch does.
+      var jobsNote = '';
+      if(u.role === 'custom'){
+        var areas = S.areas.filter(function(a){
+          return S.groups.some(function(g){
+            return g.area === a.key && u.rights.indexOf(g.key) > -1;
+          });
+        }).map(function(a){ return a.label; });
+        jobsNote = '<small>' + esc(areas.length ? areas.join(', ') : 'nothing ticked') +
+                   '</small>';
+      }
 
       tr.innerHTML =
         '<td class="nm"><b>' + esc(u.name || u.email || u.sub) + '</b>' +
@@ -421,6 +439,7 @@
     get('/api/admin/rights')
       .then(function(d){
         S.roles = d.roles || [];
+        S.areas = d.areas || [];
         S.groups = d.groups || [];
         return get('/api/admin/users');
       })

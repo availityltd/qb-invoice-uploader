@@ -243,15 +243,27 @@ const ADMIN_EMAILS = new Set(
 // the admin sets them here.
 const ROLES = [
   { key: 'admin',    label: 'Company admin',
-    what: 'Everything, including the courier accounts and this list.' },
-  { key: 'standard', label: 'Standard user',
-    what: 'Every day-to-day change: upload, payments, void, changes, purchases.' },
-  { key: 'custom',   label: 'Standard, limited',
-    what: 'Only the jobs ticked for them.' },
+    what: 'Every area, plus the courier accounts and this list of people.' },
+  { key: 'standard', label: 'Standard user (all access)',
+    what: 'Every area: customers and sales, vendors and purchases, products and stock.' },
+  { key: 'custom',   label: 'Standard user (limited)',
+    what: 'Only the areas ticked below.' },
   { key: 'viewer',   label: 'Reports only',
-    what: 'Reads and downloads everything. Changes nothing.' },
+    what: 'Sees and downloads everything. Posts nothing, changes nothing.' },
   { key: 'none',     label: 'No access',
     what: 'Signed in, and no further.' }
+];
+
+// The three areas of the books these jobs fall into, said the way an accountant
+// would and the way QuickBooks itself divides a limited user: what goes out to a
+// customer, what comes in from a supplier, and what sits on the shelf.
+const AREAS = [
+  { key: 'sales',     label: 'Customers and sales',
+    what: 'What is invoiced, collected and credited back.' },
+  { key: 'purchases', label: 'Vendors and purchases',
+    what: 'What is ordered, billed and paid out, including the couriers.' },
+  { key: 'items',     label: 'Products and stock',
+    what: 'What the items cost, what is on hand, and how they are named.' }
 ];
 const ROLE_KEYS = new Set(ROLES.map(r => r.key));
 
@@ -330,7 +342,10 @@ app.get('/api/admin/rights', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({
     roles: ROLES,
-    groups: RIGHT_GROUPS.map(g => ({ key: g.key, label: g.label, what: g.what }))
+    areas: AREAS,
+    groups: RIGHT_GROUPS.map(g => ({
+      key: g.key, area: g.area || 'sales', label: g.label, what: g.what
+    }))
   });
 });
 
@@ -679,13 +694,13 @@ const USER_MAY_POST = new Set([
 // addresses. The courier accounts and their keys are not here on purpose: those
 // stay with the admin whatever else is given away.
 const RIGHT_GROUPS = [
-  { key: 'upload', label: 'Upload invoices',
-    what: 'Create the invoices in QuickBooks from a converted file.',
+  { key: 'upload', area: 'sales', label: 'Create invoices',
+    what: 'Post the invoices to QuickBooks from a converted order file.',
     paths: ['/api/upload/start', '/api/upload/retry', '/api/upload/resume',
             '/api/upload/handover', '/api/upload/clear'] },
 
-  { key: 'payments', label: 'Receive payments',
-    what: 'Record the payments on a CPR against the invoices, and put a payment right.',
+  { key: 'payments', area: 'sales', label: 'Receive payments',
+    what: 'Apply what the courier collected against the open invoices, and correct a receipt.',
     paths: ['/api/cpr/receive', '/api/cpr/receive-clear', '/api/cpr/receive-resume',
             '/api/cpr/bank', '/api/cpr/settled', '/api/cpr/colour',
             '/api/cpr/duplicate', '/api/cpr/fix-payment', '/api/cpr/columns',
@@ -693,54 +708,54 @@ const RIGHT_GROUPS = [
             '/api/receipts/receive', '/api/receipts/mark', '/api/receipts/bank',
             '/api/receipts/duplicate'] },
 
-  { key: 'advance', label: 'Advance payments',
-    what: 'Part payments taken before delivery.',
+  { key: 'advance', area: 'sales', label: 'Advance payments',
+    what: 'Part payment taken before delivery, held against the invoice.',
     paths: ['/api/adv/receive', '/api/adv/receive-one', '/api/adv/receive-clear',
             '/api/adv/receive-resume', '/api/adv/banks', '/api/adv/columns',
             '/api/adv/columns-reset', '/api/adv/root', '/api/adv/mark-posted',
             '/api/adv/fix-payment', '/api/adv/delete-payment'] },
 
-  { key: 'charges', label: 'Delivery charges',
-    what: 'Post the courier fees and taxes as journal entries.',
+  { key: 'charges', area: 'purchases', label: 'Delivery charges',
+    what: 'Post the courier fees and their taxes as journal entries.',
     paths: ['/api/charges/post', '/api/charges/post-lines', '/api/charges/lines',
             '/api/charges/accounts', '/api/charges/columns', '/api/charges/dc-root'] },
 
-  { key: 'void', label: 'Void invoices',
-    what: 'Set returned orders to zero, keeping the invoice number.',
+  { key: 'void', area: 'sales', label: 'Void invoices',
+    what: 'Write a returned order down to zero, keeping its invoice number in the sequence.',
     paths: ['/api/void/start', '/api/void/resume', '/api/void/clear',
             '/api/void/sheet-root'] },
 
-  { key: 'merge', label: 'Merge payments and take shipping off',
-    what: 'Group the orders of one customer against a CPR and take the extra shipping off.',
+  { key: 'merge', area: 'sales', label: 'Merge receipts, adjust shipping',
+    what: 'Settle one customer’s orders against a single receipt and take the extra shipping off.',
     paths: ['/api/merge/strip', '/api/merge/strip-clear-log', '/api/merge/columns',
             '/api/shipfix/run'] },
 
-  { key: 'changes', label: 'Change product, category or description',
-    what: 'Swap the product, or move transactions to another heading, across a date range.',
+  { key: 'changes', area: 'items', label: 'Reclassify transactions',
+    what: 'Swap the item, or move transactions to another account, across a date range.',
     paths: ['/api/replace/run', '/api/swap/run', '/api/recat/run', '/api/desc/run',
             '/api/recat/history/clear'] },
 
-  { key: 'products', label: 'Product health changes',
-    what: 'Put a cost on, put stock right, put an item away, merge two items into one.',
+  { key: 'products', area: 'items', label: 'Costs, stock and merges',
+    what: 'Set a cost, adjust stock on hand, make an item inactive, merge two items into one.',
     paths: ['/api/products/apply', '/api/products/record/clear'] },
 
-  { key: 'purchases', label: 'Purchase orders and bills',
-    what: 'Make a purchase order or bill, and attach the supplier paper.',
+  { key: 'purchases', area: 'purchases', label: 'Purchase orders and bills',
+    what: 'Raise a purchase order or a bill, and attach the supplier’s paperwork.',
     paths: ['/api/purchases/create', '/api/purchases/attach'] },
 
-  { key: 'delete', label: 'Delete invoices',
-    what: 'Remove invoices from QuickBooks for good. There is no undo for this.',
+  { key: 'delete', area: 'sales', label: 'Delete invoices',
+    what: 'Remove invoices from the books for good. There is no undo for this.',
     paths: ['/api/invoice-delete-start', '/api/invoice-delete-clear',
             '/api/invoice-delete-resume', '/api/invoice-rename'] },
 
-  { key: 'couriersync', label: 'Bring courier data in',
-    what: 'Sync and backfill orders and receipts from a courier. Not the accounts or their keys.',
+  { key: 'couriersync', area: 'purchases', label: 'Bring courier data in',
+    what: 'Pull orders and receipts from a courier. Not the accounts or their keys.',
     paths: ['/api/courier/sync', '/api/courier/backfill', '/api/courier/cpr-chase',
             '/api/courier/keeper-now', '/api/courier/backfill-clear',
             '/api/courier/backfill-resume', '/api/receipts/login', '/api/receipts/logout'] },
 
-  { key: 'settings', label: 'SKU and column settings',
-    what: 'The remembered SKU mappings the Convert page matches against.',
+  { key: 'settings', area: 'items', label: 'SKU mappings',
+    what: 'The remembered SKU-to-item matches the Convert page works from.',
     paths: ['/api/mappings'] }
 ];
 
