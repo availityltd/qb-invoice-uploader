@@ -263,7 +263,7 @@
               : '<div class="note">No company is connected yet.</div>') +
           '</div>' +
         '</div>' +
-        '<div class="jobs' + (u.role === 'custom' ? ' show' : '') + '">' +
+        '<div class="jobs rights' + (u.role === 'custom' ? ' show' : '') + '">' +
           S.areas.map(function(a){
             var mine = S.groups.filter(function(g){ return g.area === a.key; });
             if(!mine.length) return '';
@@ -287,7 +287,10 @@
         '</div>' +
       '</div></td>';
 
-    var jobs = tr.querySelector('.jobs');
+    // By name, not by being first: the companies to tick are a .jobs block too,
+    // and they sit above this one - so "the first .jobs" was the wrong one, and
+    // choosing the limited role opened and closed the companies instead.
+    var jobs = tr.querySelector('.jobs.rights');
 
     tr.querySelectorAll('.roles input').forEach(function(radio){
       radio.addEventListener('change', function(){
@@ -307,7 +310,7 @@
     save.addEventListener('click', function(){
       var role = (tr.querySelector('.roles input:checked') || {}).value || u.role;
       var picked = [];
-      tr.querySelectorAll('.jobs:not(.cos) input:checked').forEach(function(i){ picked.push(i.value); });
+      tr.querySelectorAll('.jobs.rights input:checked').forEach(function(i){ picked.push(i.value); });
       var realms = [];
       tr.querySelectorAll('.cos input:checked').forEach(function(i){ realms.push(i.value); });
 

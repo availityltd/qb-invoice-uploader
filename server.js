@@ -171,6 +171,14 @@ app.get(/(^\/$)|\.html$/, async (req, res, next) => {
     }
     if (here === '/choose.html') return res.redirect('/');
 
+    // A page that belongs to an area this person was not given is not theirs to
+    // open. Only a limited user is held to this - everybody else was given the
+    // whole of the books, or the whole of them to read.
+    if (who && who.role === 'custom' && !who.admin) {
+      const need = PAGE_NEED.get(here);
+      if (need && who.rights.indexOf(need) < 0) return res.redirect('/');
+    }
+
     return next();
   } catch (e) {
     console.error('page guard:', e.message);
@@ -759,6 +767,36 @@ const RIGHT_GROUPS = [
     paths: ['/api/mappings'] }
 ];
 
+// Which page belongs to which job.
+//
+// A limited user is given areas of the books, not a list of buttons, so a page
+// whose whole purpose is an area they were not given has no reason to be in
+// front of them - not in the rail, and not at its own address either, because a
+// rail that hides a page while the page still answers is only half a rule.
+//
+// Everything not named here is open to anybody who is let in: the dashboard, the
+// searches, the settings. Reading was never what was being handed out.
+const PAGE_NEED = new Map(Object.entries({
+  '/convert.html': 'upload',
+  '/upload.html': 'upload',
+  '/payments.html': 'payments',
+  '/merge.html': 'merge',
+  '/advance.html': 'advance',
+  '/charges.html': 'charges',
+  '/void.html': 'void',
+  '/purchases.html': 'purchases',
+  '/products.html': 'products',
+  '/fix.html': 'products',
+  '/replace.html': 'changes',
+  '/swap.html': 'changes',
+  '/recat.html': 'changes',
+  '/desc.html': 'changes',
+  '/couriers.html': 'couriersync',
+  '/courier-dash.html': 'couriersync',
+  '/receipts.html': 'couriersync',
+  '/cprs.html': 'couriersync'
+}));
+
 // route -> the job it belongs to, worked out once
 const RIGHT_OF_PATH = new Map();
 RIGHT_GROUPS.forEach(g => g.paths.forEach(p => RIGHT_OF_PATH.set(p, g.key)));
@@ -1084,6 +1122,7 @@ app.get('/auth/status', async (req, res) => {
       // about and still may not come in was turned away, which reads differently
       decided: !!(user && user.decided_at),
       asking: !(user && user.asked === false),
+      limited: !!(who && !who.admin && who.role === 'custom'),
       companyCount: mine.length,
       admin: !!(who && who.admin),
       email: (who && who.email) || null,
@@ -1104,6 +1143,8 @@ app.get('/auth/status', async (req, res) => {
     // the pages read these to put away every button the person may not press
     admin: !!(who && who.admin),
     letIn,
+    // given areas rather than the whole of the books - the rail is cut to them
+    limited: !!(who && !who.admin && who.role === 'custom'),
     companyCount: mine.length,
     // what the server knows you by, and how many addresses it holds as admin -
     // the two things worth seeing when a sign-in is not the admin it should be

@@ -24,32 +24,38 @@
     }
   })();
 
+  // `need` is the job a line belongs to. A person given areas of the books rather
+  // than all of them sees only the lines whose job they were given - and the
+  // server turns the same pages away at their own address, so the rail is not
+  // hiding a door that still opens. A line with no `need` is reading, which was
+  // never what was being handed out: the dashboard and the searches stay.
   var ITEMS = [
     { group: null, items: [
       { href:'/',              label:'Dashboard',        icon:'grid' }
     ]},
     { group: 'Import invoices', items: [
-      { href:'/convert.html',  label:'Convert',          icon:'shuffle' },
-      { href:'/upload.html',   label:'Upload',           icon:'up' }
+      { href:'/convert.html',  label:'Convert',          icon:'shuffle', need:'upload' },
+      { href:'/upload.html',   label:'Upload',           icon:'up',      need:'upload' }
     ]},
     { group: 'Payments', items: [
-      { href:'/payments.html', label:'Receive payments', icon:'cash' },
-      { href:'/advance.html',  label:'Advance payments', icon:'wallet' },
-      { href:'/charges.html',  label:'Delivery charges', icon:'receipt' },
+      { href:'/payments.html', label:'Receive payments', icon:'cash',    need:'payments' },
+      { href:'/advance.html',  label:'Advance payments', icon:'wallet',  need:'advance' },
+      { href:'/charges.html',  label:'Delivery charges', icon:'receipt', need:'charges' },
             { href:'/find.html',     label:'Find orders',      icon:'search' },
-      { href:'/couriers.html', label:'Couriers',         icon:'truck', tree:true }
+      { href:'/couriers.html', label:'Couriers',         icon:'truck', tree:true,
+        need:'couriersync' }
     ]},
     { group: 'Products', items: [
       // cost, stock, duplicates and the reports behind them are tabs of one page
-      { href:'/products.html',  label:'Product health',  icon:'tag' },
-      { href:'/purchases.html', label:'Purchases',       icon:'cart' }
+      { href:'/products.html',  label:'Product health',  icon:'tag',  need:'products' },
+      { href:'/purchases.html', label:'Purchases',       icon:'cart', need:'purchases' }
     ]},
     { group: 'Maintenance', items: [
-      { href:'/fix.html',      label:'Fix duplicates',   icon:'copy' },
+      { href:'/fix.html',      label:'Fix duplicates',   icon:'copy', need:'products' },
       // Product, Category and Description are tabs of one page, not three
       // lines in the rail - a new kind of change is a new tab, not a new link
-      { href:'/replace.html',  label:'Changes',          icon:'swap' },
-      { href:'/void.html',     label:'Void invoices',    icon:'ban' }
+      { href:'/replace.html',  label:'Changes',          icon:'swap', need:'changes' },
+      { href:'/void.html',     label:'Void invoices',    icon:'ban',  need:'void' }
       // Who may sign in, and what each of them may change, is not a line in this
       // rail. It sits under the settings gear with the rest of the company's own
       // settings, the way QuickBooks keeps it, and only the admin sees it there.
@@ -103,6 +109,7 @@
                (it.href === '/replace.html' &&
                 (path === '/swap.html' || path === '/recat.html' || path === '/desc.html'));
       html += '<a href="' + it.href + '"' +
+              (it.need ? ' data-line="' + it.need + '"' : '') +
               (on ? ' class="on"' : (it.admin ? ' class="admin-only"' : '')) +
               (on && it.admin ? ' data-admin="1"' : '') +
               (it.tree ? ' id="couriersLink"' : '') + '>' +
@@ -736,6 +743,31 @@
       var mine = (s.rights || []);
       window.APP.rights = mine;
       window.APP.may = function(job){ return !!s.admin || mine.indexOf(job) > -1; };
+
+      // Given areas rather than the whole of the books: the rail is cut to them.
+      // A group whose every line has gone takes its heading with it, so there is
+      // no empty word left standing over nothing.
+      if(s.limited){
+        var off = [];
+        rail && rail.querySelectorAll('nav a[data-line]').forEach(function(a){
+          if(mine.indexOf(a.getAttribute('data-line')) < 0) off.push(a);
+        });
+        off.forEach(function(a){
+          var tree = a.nextElementSibling;
+          if(tree && tree.classList.contains('ctree')) tree.remove();
+          a.remove();
+        });
+
+        rail && rail.querySelectorAll('nav .group').forEach(function(h){
+          var n = h.nextElementSibling, any = false;
+          while(n && !n.classList.contains('group')){
+            if(n.tagName === 'A'){ any = true; break; }
+            n = n.nextElementSibling;
+          }
+          if(!any) h.remove();
+        });
+      }
+
       if(!s.admin){
         var notMine = (s.jobs || []).filter(function(k){ return mine.indexOf(k) < 0; });
         if(notMine.length){
