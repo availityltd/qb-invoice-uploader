@@ -251,15 +251,15 @@ const ADMIN_EMAILS = new Set(
 // the admin sets them here.
 const ROLES = [
   { key: 'admin',    label: 'Company admin',
-    what: 'Every area, plus the courier accounts and this list of people.' },
+    what: 'Everything, plus people and couriers' },
   { key: 'standard', label: 'Standard user (all access)',
-    what: 'Every area: customers and sales, vendors and purchases, products and stock.' },
+    what: 'Every area of the books' },
   { key: 'custom',   label: 'Standard user (limited)',
-    what: 'Only the areas ticked below.' },
+    what: 'Only the areas ticked below' },
   { key: 'viewer',   label: 'Reports only',
-    what: 'Sees and downloads everything. Posts nothing, changes nothing.' },
+    what: 'Reads everything, changes nothing' },
   { key: 'none',     label: 'No access',
-    what: 'Signed in, and no further.' }
+    what: 'Signed in, and no further' }
 ];
 
 // The three areas of the books these jobs fall into, said the way an accountant
@@ -267,11 +267,11 @@ const ROLES = [
 // customer, what comes in from a supplier, and what sits on the shelf.
 const AREAS = [
   { key: 'sales',     label: 'Customers and sales',
-    what: 'What is invoiced, collected and credited back.' },
+    what: 'What is invoiced, collected and credited back' },
   { key: 'purchases', label: 'Vendors and purchases',
-    what: 'What is ordered, billed and paid out, including the couriers.' },
+    what: 'What is ordered, billed and paid out' },
   { key: 'items',     label: 'Products and stock',
-    what: 'What the items cost, what is on hand, and how they are named.' }
+    what: 'What items cost, what is on hand, how they are named' }
 ];
 const ROLE_KEYS = new Set(ROLES.map(r => r.key));
 
@@ -703,12 +703,12 @@ const USER_MAY_POST = new Set([
 // stay with the admin whatever else is given away.
 const RIGHT_GROUPS = [
   { key: 'upload', area: 'sales', label: 'Create invoices',
-    what: 'Post the invoices to QuickBooks from a converted order file.',
+    what: 'Post invoices to QuickBooks',
     paths: ['/api/upload/start', '/api/upload/retry', '/api/upload/resume',
             '/api/upload/handover', '/api/upload/clear'] },
 
   { key: 'payments', area: 'sales', label: 'Receive payments',
-    what: 'Apply what the courier collected against the open invoices, and correct a receipt.',
+    what: 'Apply collections to open invoices',
     paths: ['/api/cpr/receive', '/api/cpr/receive-clear', '/api/cpr/receive-resume',
             '/api/cpr/bank', '/api/cpr/settled', '/api/cpr/colour',
             '/api/cpr/duplicate', '/api/cpr/fix-payment', '/api/cpr/columns',
@@ -717,53 +717,53 @@ const RIGHT_GROUPS = [
             '/api/receipts/duplicate'] },
 
   { key: 'advance', area: 'sales', label: 'Advance payments',
-    what: 'Part payment taken before delivery, held against the invoice.',
+    what: 'Part payment taken before delivery',
     paths: ['/api/adv/receive', '/api/adv/receive-one', '/api/adv/receive-clear',
             '/api/adv/receive-resume', '/api/adv/banks', '/api/adv/columns',
             '/api/adv/columns-reset', '/api/adv/root', '/api/adv/mark-posted',
             '/api/adv/fix-payment', '/api/adv/delete-payment'] },
 
   { key: 'charges', area: 'purchases', label: 'Delivery charges',
-    what: 'Post the courier fees and their taxes as journal entries.',
+    what: 'Courier fees as journal entries',
     paths: ['/api/charges/post', '/api/charges/post-lines', '/api/charges/lines',
             '/api/charges/accounts', '/api/charges/columns', '/api/charges/dc-root'] },
 
   { key: 'void', area: 'sales', label: 'Void invoices',
-    what: 'Write a returned order down to zero, keeping its invoice number in the sequence.',
+    what: 'Zero a returned order, keep its number',
     paths: ['/api/void/start', '/api/void/resume', '/api/void/clear',
             '/api/void/sheet-root'] },
 
   { key: 'merge', area: 'sales', label: 'Merge receipts, adjust shipping',
-    what: 'Settle one customer’s orders against a single receipt and take the extra shipping off.',
+    what: 'One receipt against many orders',
     paths: ['/api/merge/strip', '/api/merge/strip-clear-log', '/api/merge/columns',
             '/api/shipfix/run'] },
 
   { key: 'changes', area: 'items', label: 'Reclassify transactions',
-    what: 'Swap the item, or move transactions to another account, across a date range.',
+    what: 'Move to another item or account',
     paths: ['/api/replace/run', '/api/swap/run', '/api/recat/run', '/api/desc/run',
             '/api/recat/history/clear'] },
 
   { key: 'products', area: 'items', label: 'Costs, stock and merges',
-    what: 'Set a cost, adjust stock on hand, make an item inactive, merge two items into one.',
+    what: 'Costs, stock on hand, merges',
     paths: ['/api/products/apply', '/api/products/record/clear'] },
 
   { key: 'purchases', area: 'purchases', label: 'Purchase orders and bills',
-    what: 'Raise a purchase order or a bill, and attach the supplier’s paperwork.',
+    what: 'Raise purchase orders and bills',
     paths: ['/api/purchases/create', '/api/purchases/attach'] },
 
   { key: 'delete', area: 'sales', label: 'Delete invoices',
-    what: 'Remove invoices from the books for good. There is no undo for this.',
+    what: 'Remove invoices for good — no undo',
     paths: ['/api/invoice-delete-start', '/api/invoice-delete-clear',
             '/api/invoice-delete-resume', '/api/invoice-rename'] },
 
   { key: 'couriersync', area: 'purchases', label: 'Bring courier data in',
-    what: 'Pull orders and receipts from a courier. Not the accounts or their keys.',
+    what: 'Pull courier orders and receipts in',
     paths: ['/api/courier/sync', '/api/courier/backfill', '/api/courier/cpr-chase',
             '/api/courier/keeper-now', '/api/courier/backfill-clear',
             '/api/courier/backfill-resume', '/api/receipts/login', '/api/receipts/logout'] },
 
   { key: 'settings', area: 'items', label: 'SKU mappings',
-    what: 'The remembered SKU-to-item matches the Convert page works from.',
+    what: 'Remembered SKU-to-item matches',
     paths: ['/api/mappings'] }
 ];
 
