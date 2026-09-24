@@ -157,7 +157,9 @@
       'itself - there is nothing to press.</div>';
     $('note').innerHTML = '<span class="pulse">Waiting…</span>';
 
-    if(!waitTimer) waitTimer = setInterval(look, 4000);
+    // often enough that nobody sits there wondering, seldom enough that a
+    // screen left open all day is not a cost in itself
+    if(!waitTimer) waitTimer = setInterval(look, 10000);
   }
 
   // Withdrawn - the admin is no longer being asked, and nothing is waiting on

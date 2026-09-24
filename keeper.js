@@ -8,7 +8,10 @@ import { adapter as postexAdapter } from './postex.js';
 
 const ADAPTERS = { postex: postexAdapter };
 
-const EVERY = 10 * 60 * 1000;      // ten minutes
+// Every sweep wakes the database, and it stays awake for some minutes after. Half
+// an hour between sweeps lets it sleep for most of each one; courier statuses do
+// not move faster than that. KEEPER_MINUTES on the server changes it.
+const EVERY = Math.max(5, Number(process.env.KEEPER_MINUTES) || 30) * 60 * 1000;
 const RECENT_DAYS = 4;             // what a routine refresh covers
 const MAX_CATCHUP = 120;           // how far back a first fill will reach
 const RAW_DAYS = 7;                // how long the courier's own JSON is kept

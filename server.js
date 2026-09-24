@@ -163,8 +163,7 @@ app.get(/(^\/$)|\.html$/, async (req, res, next) => {
     const letIn = !!(who && (who.admin || (who.allowed && who.role !== 'none')));
 
     const realmId = req.cookies.realm_id;
-    const settled = letIn && realmId &&
-      await userOwns(sub, realmId) && !!(await getCompany(realmId));
+    const settled = letIn && realmId && await isSettled(sub, realmId);
 
     if (!settled) {
       return here === '/choose.html' ? next() : res.redirect('/choose.html');
@@ -479,6 +478,7 @@ app.post('/api/admin/users/companies', async (req, res) => {
 
     const had = new Set(await realmsForUser(sub));
     await setUserCompanies(sub, want);
+    forgetSettled(sub);
 
     const added = all.filter(c => want.indexOf(c.realmId) > -1 && !had.has(c.realmId));
     const gone  = all.filter(c => want.indexOf(c.realmId) < 0 && had.has(c.realmId));
@@ -530,6 +530,20 @@ app.get('/api/notifications', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
     res.json({ items: await listFor(sub), unread: await unreadCount(sub) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// The count alone. Opening a page asked for fifty rows to find one number, and a
+// window left open asked again every twenty seconds - which by itself kept the
+// database awake all day. One number, rarely, and the phone carries the rest.
+app.get('/api/notifications/count', async (req, res) => {
+  const sub = currentUser(req);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!sub) return res.json({ unread: 0 });
+  try {
+    res.json({ unread: await unreadCount(sub) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1004,6 +1018,7 @@ app.get('/auth/callback', async (req, res) => {
     // a user's key is read once, for the name and address above, and kept nowhere
 
     await linkCompany(sub, joinTo);
+    forgetSettled(sub);
     res.cookie('realm_id', joinTo, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
     inside(res, true);
 
@@ -1024,6 +1039,27 @@ app.get('/auth/callback', async (req, res) => {
 // the frame for somebody the server was about to send back to the door, and the
 // frame flashed past on its way out. So it is set when they land in a company
 // and cleared the moment they are anywhere else.
+// Whether this person is settled in a company, remembered for a minute. Every page
+// asked the database twice to find out, and a person clicking about the app asks
+// the same question over and over with the same answer.
+const settledCache = new Map();            // sub|realm -> { ok, at }
+const SETTLED_LIFE = 60 * 1000;
+
+async function isSettled(sub, realmId) {
+  const key = sub + '|' + realmId;
+  const kept = settledCache.get(key);
+  if (kept && Date.now() - kept.at < SETTLED_LIFE) return kept.ok;
+
+  const ok = await userOwns(sub, realmId) && !!(await getCompany(realmId));
+  settledCache.set(key, { ok, at: Date.now() });
+  if (settledCache.size > 500) settledCache.clear();
+  return ok;
+}
+
+function forgetSettled(sub) {
+  for (const k of settledCache.keys()) if (k.startsWith(sub + '|')) settledCache.delete(k);
+}
+
 function inside(res, yes) {
   if (yes) res.cookie('signed', '1', { maxAge: 60 * 24 * 3600 * 1000, sameSite: 'lax' });
   else res.clearCookie('signed');
@@ -1212,6 +1248,7 @@ app.post('/auth/switch', async (req, res) => {
   const company = await getCompany(realmId);
   if (!company) return res.status(404).json({ error: 'Company not connected' });
 
+  forgetSettled(sub);
   res.cookie('realm_id', realmId, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000, sameSite: 'lax' });
   inside(res, true);
   res.json({ ok: true, companyName: await companyLabel(company) });

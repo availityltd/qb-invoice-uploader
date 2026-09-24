@@ -2,9 +2,17 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+// Neon charges for the time its compute is awake, not for the queries run, and it
+// goes back to sleep only after nothing has touched it for a few minutes. A pool
+// that holds a connection open is a thing touching it, so the connections are let
+// go quickly and few are kept - the database sleeps between spells of work, which
+// is where nearly all of the month's allowance was going.
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+  idleTimeoutMillis: 5000,
+  allowExitOnIdle: false
 });
 
 export async function initDb() {

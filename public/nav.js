@@ -522,39 +522,57 @@
     });
 
     /* ---------- keeping the count honest ---------- */
-    // The count was read once, when the page loaded, and then left. A notice that
-    // arrived a minute later sat on the server until something else was opened.
-    // It is asked for again on a quiet loop, and at once whenever the window is
-    // come back to - which is the moment somebody would look at the bell anyway.
+    // What is wanted here is one number, so one number is what is asked for - not
+    // the fifty rows behind it, which are fetched when the bell is opened and the
+    // person is actually going to read them.
     //
-    // A window nobody is looking at asks for nothing. There is no one to tell.
-    var COUNT_EVERY = 20000;
+    // And it is asked for rarely. A notice that matters arrives on the phone the
+    // moment it happens; this is only so the red mark is right for somebody
+    // sitting in front of the app. Every window open across the company asking
+    // every twenty seconds was keeping the database awake around the clock, and
+    // the database is charged for being awake.
+    //
+    // Coming back to the window is the moment somebody would look at the bell, so
+    // that is when it is worth asking. A window nobody is looking at asks nothing.
+    var COUNT_EVERY = 5 * 60 * 1000;
     var beat = null;
+    var lastLook = 0;
 
-    function look(){
+    function mark(d){
+      var dot = document.getElementById('bellDot');
+      if(!dot) return;
+      dot.textContent = d.unread > 99 ? '99+' : String(d.unread || '');
+      dot.classList.toggle('on', !!d.unread);
+    }
+
+    function look(force){
       if(document.hidden) return;
-      fetch('/api/notifications', { cache:'no-store' })
+      // coming back to a window twice in a moment is still one look
+      if(!force && Date.now() - lastLook < 30000) return;
+      lastLook = Date.now();
+
+      fetch('/api/notifications/count', { cache:'no-store' })
         .then(function(r){ return r.json(); })
-        .then(paint)
+        .then(mark)
         .catch(function(){});
     }
 
     function start(){
       if(beat) clearInterval(beat);
-      beat = setInterval(look, COUNT_EVERY);
+      beat = setInterval(function(){ look(true); }, COUNT_EVERY);
     }
 
     document.addEventListener('visibilitychange', function(){
       if(document.hidden){
         if(beat){ clearInterval(beat); beat = null; }
       } else {
-        look();
+        look(false);
         start();
       }
     });
 
     // a notice that arrived while the app was shut is on the screen as it opens
-    look();
+    look(true);
     start();
   })();
 
