@@ -41,28 +41,59 @@
 
   tr.editrow td{background:#FAFCFE;padding:0}
   .editbox{padding:16px 14px 18px}
-  .roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:9px}
-  .roles label,.jobs label{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;
-    border:1px solid var(--line);border-radius:7px;padding:9px 11px;cursor:pointer;
-    background:#fff;line-height:1.5;
-    /* A grid cell will not shrink below its longest word unless it is told it may,
-       and a card that will not shrink cuts its own description off instead. */
-    min-width:0}
-  .roles label:hover,.jobs label:hover{border-color:var(--qbo)}
-  .roles label.on{border-color:var(--qbo);box-shadow:inset 0 0 0 1px var(--qbo)}
-  .roles label input,.jobs label input{margin-top:2px;flex:0 0 auto}
-  .roles label span,.jobs label span{min-width:0;flex:1}
-  .roles label span small,.jobs label span small{display:block;color:var(--muted);
-    font-size:11.5px;margin-top:2px;white-space:normal;overflow-wrap:anywhere}
+  /* One line to a choice. The whole description inside every card made a wall of
+     text to read before anything could be picked; it is on hover instead, where
+     it is there for the one card being considered and nowhere else.
+
+     app.css puts every label in small capitals with wide letter-spacing, which
+     suits a field heading and not a thing to be read, so that is undone here. */
+  .roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
+  .jobs .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+
+  .roles label,.jobs label{display:flex;gap:9px;align-items:center;min-width:0;
+    border:1px solid var(--line);border-radius:7px;padding:10px 12px;cursor:pointer;
+    background:#fff;position:relative;
+    font-size:13px;font-weight:500;line-height:1.35;letter-spacing:0;
+    text-transform:none;color:var(--text)}
+  .roles label:hover,.jobs label:hover{border-color:var(--qbo);background:#FCFEFC}
+  .roles label.on,.jobs label.on{border-color:var(--qbo);
+    box-shadow:inset 0 0 0 1px var(--qbo)}
+  .roles label input,.jobs label input{margin:0;flex:0 0 auto}
+  .roles label span,.jobs label span{min-width:0;flex:1;overflow-wrap:anywhere}
+  .roles label em,.jobs label em{font-style:normal;display:block;color:var(--faint);
+    font-family:var(--mono);font-size:10.5px;font-weight:400;margin-top:2px}
+
+  /* the description, for the one being looked at */
+  label[data-tip]::after{content:attr(data-tip);position:absolute;left:0;
+    top:calc(100% + 6px);width:max-content;max-width:240px;
+    background:var(--ink);color:#fff;padding:8px 10px;border-radius:7px;
+    font-size:11.5px;font-weight:400;line-height:1.5;letter-spacing:0;
+    text-transform:none;box-shadow:0 8px 22px rgba(15,46,36,.22);
+    opacity:0;visibility:hidden;transform:translateY(-3px);
+    transition:opacity .13s ease,transform .13s ease;pointer-events:none;z-index:40}
+  label[data-tip]:hover::after{opacity:1;visibility:visible;transform:none}
+  tr.editrow td{overflow:visible}
 
   .jobs{margin-top:14px;display:none}
   .jobs.show{display:block}
   .jobs .cap{font-size:11px;letter-spacing:.07em;text-transform:uppercase;
     color:var(--faint);margin-bottom:8px}
-  .jobs .cap em{font-style:normal;text-transform:none;letter-spacing:0;font-size:11.5px;
-    color:var(--muted);margin-left:9px}
-  .jobs .area + .area{margin-top:16px}
-  .jobs .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:9px}
+  .jobs .cap{margin-bottom:2px}
+  .jobs.cos .cap{margin-bottom:9px}
+  .jobs .areawhat{font-size:11.5px;color:var(--muted);margin-bottom:9px;line-height:1.5}
+  .jobs .area + .area{margin-top:18px}
+
+  /* A phone has no hover, so there would be nowhere for the description to live.
+     There it goes back under the name - one column wide, it reads as a list
+     rather than as the wall it was across four. */
+  @media (hover: none){
+    .roles label,.jobs label{display:block}
+    .roles label input,.jobs label input{float:left;margin:3px 9px 0 0}
+    label[data-tip]::after{position:static;opacity:1;visibility:visible;transform:none;
+      display:block;width:auto;max-width:none;margin-top:3px;padding:0;
+      background:none;color:var(--muted);box-shadow:none;font-size:11.5px}
+  }
+
 
   .editacts{margin-top:16px;display:flex;gap:8px;align-items:center}
   .editacts .solid{font-size:12px;padding:7px 16px}
@@ -245,10 +276,11 @@
       '<td colspan="6"><div class="editbox">' +
         '<div class="roles">' +
           roles.map(function(r){
-            return '<label class="' + (u.role === r.key ? 'on' : '') + '">' +
+            return '<label class="' + (u.role === r.key ? 'on' : '') + '"' +
+              ' data-tip="' + esc(r.what) + '">' +
               '<input type="radio" name="role-' + esc(u.sub) + '" value="' + esc(r.key) + '"' +
               (u.role === r.key ? ' checked' : '') + '>' +
-              '<span>' + esc(r.label) + '<small>' + esc(r.what) + '</small></span></label>';
+              '<span>' + esc(r.label) + '</span></label>';
           }).join('') +
         '</div>' +
         '<div class="jobs cos show">' +
@@ -256,9 +288,10 @@
           '<div class="grid">' +
             (S.companies.length
               ? S.companies.map(function(c){
-                  return '<label><input type="checkbox" value="' + esc(c.realmId) + '"' +
+                  return '<label data-tip="QuickBooks company ' + esc(c.realmId) + '">' +
+                    '<input type="checkbox" value="' + esc(c.realmId) + '"' +
                     ((u.realms || []).indexOf(c.realmId) > -1 ? ' checked' : '') + '>' +
-                    '<span>' + esc(c.name) + '<small>' + esc(c.realmId) + '</small></span></label>';
+                    '<span>' + esc(c.name) + '</span></label>';
                 }).join('')
               : '<div class="note">No company is connected yet.</div>') +
           '</div>' +
@@ -268,14 +301,14 @@
             var mine = S.groups.filter(function(g){ return g.area === a.key; });
             if(!mine.length) return '';
             return '<div class="area">' +
-              '<div class="cap">' + esc(a.label) +
-                '<em>' + esc(a.what) + '</em></div>' +
+              '<div class="cap">' + esc(a.label) + '</div>' +
+              '<div class="areawhat">' + esc(a.what) + '</div>' +
               '<div class="grid">' +
                 mine.map(function(g){
-                  return '<label><input type="checkbox" value="' + esc(g.key) + '"' +
+                  return '<label data-tip="' + esc(g.what) + '">' +
+                    '<input type="checkbox" value="' + esc(g.key) + '"' +
                     (u.rights.indexOf(g.key) > -1 ? ' checked' : '') + '>' +
-                    '<span>' + esc(g.label) +
-                    '<small>' + esc(g.what) + '</small></span></label>';
+                    '<span>' + esc(g.label) + '</span></label>';
                 }).join('') +
               '</div></div>';
           }).join('') +
@@ -291,6 +324,13 @@
     // and they sit above this one - so "the first .jobs" was the wrong one, and
     // choosing the limited role opened and closed the companies instead.
     var jobs = tr.querySelector('.jobs.rights');
+
+    tr.querySelectorAll('.jobs input').forEach(function(box){
+      if(box.checked) box.parentNode.classList.add('on');
+      box.addEventListener('change', function(){
+        box.parentNode.classList.toggle('on', box.checked);
+      });
+    });
 
     tr.querySelectorAll('.roles input').forEach(function(radio){
       radio.addEventListener('change', function(){
