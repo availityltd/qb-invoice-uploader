@@ -847,8 +847,8 @@ app.use(async (req, res, next) => {
   }
 
   res.status(403).json({
-    error: 'You are signed in as a user, so this page is read-only. ' +
-           'Ask the admin to make this change, or to give you the right to it.'
+    error: 'This change is not one of the jobs you were given, so it is ' +
+           'read-only for you. Ask the admin to make it, or to give you the right to it.'
   });
 });
 

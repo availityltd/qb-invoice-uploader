@@ -808,13 +808,17 @@
         if(txt) txt.textContent = 'Not connected';
       }
 
-      // said once, where the company name is, so it is never a surprise later
-      if(!s.admin && txt && txt.parentNode && !document.querySelector('.readonly-tag')){
+      // Said once, where the company name is, so it is never a surprise later -
+      // but only to somebody who really cannot change anything. A standard user
+      // holding jobs writes to the books every day; calling that read only is a
+      // lie, and it makes them doubt the buttons they were given.
+      if(!s.admin && !mine.length && txt && txt.parentNode &&
+         !document.querySelector('.readonly-tag')){
         var tag = document.createElement('div');
         tag.className = 'readonly-tag';
         tag.textContent = 'Read only';
-        tag.title = 'You are signed in as a user. Everything can be read and ' +
-                    'downloaded; changes belong to the admin.';
+        tag.title = 'You were given no jobs on this company. Everything can be ' +
+                    'read and downloaded; changes belong to the admin.';
         txt.parentNode.appendChild(tag);
       }
       return s;
