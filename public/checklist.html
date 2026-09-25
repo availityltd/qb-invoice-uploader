@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check list</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .step.done{border-color:var(--qbo)}
+
+  .picks{display:flex;flex-wrap:wrap;gap:8px}
+  .pick{border:1px solid var(--line);background:#fff;border-radius:7px;padding:9px 14px;
+    cursor:pointer;font-size:13px;font-family:inherit;transition:.13s;text-align:left}
+  .pick:hover{border-color:var(--qbo)}
+  .pick.on{border-color:var(--qbo);background:#F2FAF0;font-weight:600}
+  .pick small{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+
+  .cprs{display:flex;flex-wrap:wrap;gap:9px;align-items:flex-start}
+  .cprCard{border:1px solid var(--line);background:#fff;border-radius:8px;
+    min-width:186px;max-width:330px;overflow:hidden;transition:.13s;cursor:pointer}
+  .cprCard:hover{border-color:var(--qbo)}
+  .cprCard.on{box-shadow:0 0 0 2px var(--qbo)}
+  .cprCard .head{padding:9px 14px;font-size:13px}
+  .cprCard .head b{font-weight:600;display:block}
+  .cprCard .head small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+
+  .crumb{font-size:12px;color:var(--muted);margin-bottom:10px;font-family:var(--mono)}
+  .crumb b{color:var(--text)}
+
+  .tally{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+  .tally > div{flex:1;min-width:118px;border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;background:#fff}
+  .tally .n{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+  .tally .l{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);margin-top:4px}
+  .tally .ok .n{color:var(--ok)}
+  .tally .warn .n{color:var(--warn)}
+  .tally .bad .n{color:var(--bad)}
+
+  .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;
+    margin-bottom:16px}
+  .fields label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+
+  /* one kind of trouble to a box: what is wrong, then the button that mends it */
+  .box{border:1px solid var(--line);border-radius:9px;background:#fff;margin-bottom:14px;
+    overflow:hidden}
+  .box.warn{border-color:var(--warn)}
+  .box.bad{border-color:var(--bad)}
+  .box > h3{margin:0;padding:11px 15px;font-size:13px;font-weight:600;
+    background:var(--tint);border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .box.warn > h3{background:#FFFBF0}
+  .box.bad > h3{background:#FDF3F3}
+  .box > h3 .count{font-family:var(--mono);font-weight:500;color:var(--muted)}
+  .box > p{margin:0;padding:11px 15px 0;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .box .scroll{max-height:320px;overflow:auto;margin-top:10px}
+  .box .acts{padding:11px 15px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+    border-top:1px solid var(--line)}
+  .box .acts .note{font-size:11.5px;color:var(--muted)}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--faint);font-weight:600;padding:7px 10px;border-bottom:1px solid var(--line);
+    background:#fff;position:sticky;top:0}
+  table.t td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  table.t td.num,table.t th.num{text-align:right;font-family:var(--mono)}
+  table.t td.mono{font-family:var(--mono)}
+  table.t tr:last-child td{border-bottom:0}
+  table.t input[type=checkbox]{width:auto;margin:0}
+  table.t input.amt{width:92px;font-size:12px;padding:3px 6px;margin:0;
+    font-family:var(--mono);text-align:right}
+  table.t .why{font-size:11px;color:var(--warn)}
+  table.t .empty{padding:14px;color:var(--muted);text-align:center}
+
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;
+    margin-bottom:16px;background:#fff}
+  .seg button{border:0;background:#fff;font-family:inherit;font-size:13px;padding:9px 18px;
+    cursor:pointer;color:var(--muted)}
+  .seg button.on{background:var(--tint);color:var(--ink);font-weight:600}
+
+  .result{border:1px solid var(--line);border-radius:8px;padding:12px 15px;margin-top:12px;
+    background:#fff;font-size:13px}
+  .result.good{border-color:var(--qbo);background:#F2FAF0}
+  .result.bad{border-color:var(--bad);background:#FDF3F3}
+
+  .prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:14px 0 8px}
+  .prog i{display:block;height:100%;width:0;background:var(--qbo);transition:width .3s}
+  .runline{font-size:12.5px;color:var(--muted);font-family:var(--mono);margin-bottom:10px}
+
+  .paylog{background:#0F2E24;color:#CFE8D8;border-radius:8px;padding:12px 15px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.7;max-height:220px;
+    overflow:auto;margin-top:12px}
+  .paylog .ok{color:#8FE3A8}
+  .paylog .fail{color:#FF9C9C}
+  .paylog .error{color:#FF9C9C}
+
+  .runacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .runacts button{font-size:12px;padding:6px 14px;border-radius:7px;border:1px solid var(--line);
+    background:#fff;cursor:pointer;font-family:inherit}
+  .runacts button:hover{border-color:var(--qbo)}
+  .runacts button.stop{background:var(--bad);border-color:var(--bad);color:#fff}
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs a:hover{color:var(--ink)}
+  .tabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Check list</h1>
+        <div class="sub">What a CPR actually paid for in QuickBooks, and putting it right.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>Everything on this page comes straight from your company file.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <div class="tabs">
+          <a href="/payments.html">Receive payments</a>
+          <a href="/merge.html">Merge payments</a>
+          <a class="on" href="/checklist.html">Check list</a>
+        </div>
+
+        <div class="seg">
+          <button id="modeCpr" class="on">A whole CPR</button>
+          <button id="modeInv">Order numbers</button>
+        </div>
+
+        <!-- ============ a whole CPR ============ -->
+        <div id="paneCpr">
+
+          <div class="step" id="stepRoot">
+            <h2>Drive folder</h2>
+            <div class="hint">The folder that holds one sub-folder per courier. Paste the link or the ID.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input id="rootIn" placeholder="https://drive.google.com/drive/folders/..." style="flex:1;min-width:260px">
+              <button class="solid" id="btnRoot">Save</button>
+            </div>
+            <div id="rootNote" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+          </div>
+
+          <div class="step hide" id="stepBrowse">
+            <h2>Pick the sheet</h2>
+            <div class="crumb" id="crumb"></div>
+            <div class="picks" id="browse"></div>
+          </div>
+
+          <div class="step hide" id="stepCpr">
+            <h2>Which CPR</h2>
+            <div class="hint" id="cprHint"></div>
+            <div class="cprs" id="cprList"></div>
+          </div>
+        </div>
+
+        <!-- ============ order numbers ============ -->
+        <div id="paneInv" class="hide">
+          <div class="step">
+            <h2>Order numbers</h2>
+            <div class="hint">One per line, or separated by commas. Every payment sitting on each
+              order comes back with the CPR it was received under.</div>
+            <textarea id="invText" rows="5" placeholder="91302583&#10;91302588"></textarea>
+            <div style="margin-top:12px">
+              <button class="solid" id="btnInv">Check these orders</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ the read ============ -->
+        <div class="step hide" id="stepRun">
+          <h2>Reading QuickBooks</h2>
+          <div class="hint" id="runHint"></div>
+          <div class="paylog" id="checkLog"></div>
+          <div class="runacts">
+            <button class="stop" id="btnCheckStop" style="display:none">Stop</button>
+            <button id="btnCheckResume" style="display:none">Carry on</button>
+            <button id="btnCheckClear" style="display:none">Clear log</button>
+          </div>
+        </div>
+
+        <!-- ============ what came back ============ -->
+        <div class="step hide" id="stepOut">
+          <h2 id="outTitle">What this CPR paid for</h2>
+          <div class="hint" id="outHint"></div>
+          <div class="tally" id="tally"></div>
+          <div id="boxes"></div>
+        </div>
+
+        <!-- ============ the changes ============ -->
+        <div class="step hide" id="stepFix">
+          <h2>Putting it right</h2>
+          <div class="hint" id="fixHint"></div>
+          <div class="prog"><i id="fixBar"></i></div>
+          <div class="runline" id="fixLine"></div>
+          <div class="paylog" id="fixLog"></div>
+          <div class="runacts">
+            <button class="stop" id="btnFixStop" style="display:none">Stop</button>
+            <button id="btnFixResume" style="display:none">Carry on</button>
+            <button id="btnFixClear" style="display:none">Clear log</button>
+          </div>
+        </div>
+
+        <!-- ============ receiving it again ============ -->
+        <div class="step hide" id="stepPay">
+          <h2>Receiving it again</h2>
+          <div class="hint" id="payHint"></div>
+          <div class="fields">
+            <div>
+              <label>Deposit to</label>
+              <select id="acct"></select>
+            </div>
+            <div>
+              <label>Payment method</label>
+              <select id="method"></select>
+            </div>
+          </div>
+          <div class="prog"><i id="payBar"></i></div>
+          <div class="runline" id="payLine"></div>
+          <div class="paylog" id="payLog"></div>
+          <div class="runacts">
+            <button class="stop" id="btnPayStop" style="display:none">Stop</button>
+            <button id="btnPayResume" style="display:none">Carry on</button>
+            <button id="btnPayClear" style="display:none">Clear log</button>
+          </div>
+          <div id="payOut"></div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var S = {
+    mode: 'cpr',
+    root: '', courier: '', trail: [],
+    sheetId: '', sheetName: '', excel: false, tab: '',
+    groups: [], cpr: '', cprDate: null,
+    options: null, bank: null,
+    result: null,
+    checkEvent: 0, fixEvent: 0, payEvent: 0,
+    checkPoll: null, fixPoll: null, payPoll: null,
+    afterFix: null                      // what to do once the changes are through
+  };
+
+  function money(n){
+    var v = Number(n || 0);
+    var p = Math.abs(v).toFixed(2).split('.');
+    return (v < 0 ? '-' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + p[1];
+  }
+  function nf(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function say(cls, html){
+    $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
+    $('statBox').innerHTML = html;
+  }
+  function clearSay(){ $('statBox').className = 'stat'; $('statBox').textContent = ''; }
+
+  function get(url){
+    return fetch(url, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  function writeLog(box, events){
+    (events || []).forEach(function(e){
+      var line = document.createElement('div');
+      if(e.type === 'ok') line.className = 'ok';
+      else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
+      line.textContent = e.msg;
+      box.appendChild(line);
+    });
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /* ---------- start ---------- */
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    pollCheck(true);
+    pollFix(true);
+    pollPay(true);
+    loadOptions();
+
+    get('/api/cpr/root').then(function(d){
+      if(d.folderId){
+        S.root = d.folderId;
+        $('rootIn').value = d.folderId;
+        $('rootNote').textContent = 'Saved.';
+        $('stepRoot').classList.add('done');
+        openCouriers();
+      }
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  $('btnRoot').addEventListener('click', function(){
+    var v = $('rootIn').value.trim();
+    if(!v) return;
+    $('btnRoot').disabled = true;
+    post('/api/cpr/root', { folderId: v }).then(function(d){
+      $('btnRoot').disabled = false;
+      S.root = d.folderId;
+      $('rootIn').value = d.folderId;
+      $('rootNote').textContent = 'Saved.';
+      $('stepRoot').classList.add('done');
+      openCouriers();
+    }).catch(function(e){
+      $('btnRoot').disabled = false;
+      $('rootNote').textContent = e.message;
+    });
+  });
+
+  function loadOptions(){
+    return get('/api/cpr/qb-options').then(function(o){
+      S.options = o;
+      fillSelect($('acct'), o.accounts, false);
+      fillSelect($('method'), o.methods, true);
+      return o;
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  function fillSelect(sel, list, allowNone){
+    sel.innerHTML = '';
+    if(allowNone){
+      var n = document.createElement('option');
+      n.value = ''; n.textContent = '- none -';
+      sel.appendChild(n);
+    }
+    (list || []).forEach(function(x){
+      var e = document.createElement('option');
+      e.value = x.id; e.textContent = x.name;
+      sel.appendChild(e);
+    });
+  }
+
+  function bankName(id){
+    if(!S.options || !id) return '';
+    var a = (S.options.accounts || []).find(function(x){ return String(x.id) === String(id); });
+    return a ? a.name : '';
+  }
+
+  /* ---------- the two ways in ---------- */
+
+  $('modeCpr').addEventListener('click', function(){ setMode('cpr'); });
+  $('modeInv').addEventListener('click', function(){ setMode('inv'); });
+
+  function setMode(m){
+    S.mode = m;
+    $('modeCpr').classList.toggle('on', m === 'cpr');
+    $('modeInv').classList.toggle('on', m === 'inv');
+    $('paneCpr').classList.toggle('hide', m !== 'cpr');
+    $('paneInv').classList.toggle('hide', m !== 'inv');
+  }
+
+  /* ---------- browsing Drive ---------- */
+
+  function drawCrumb(){
+    var bits = ['Root'];
+    S.trail.forEach(function(t){ bits.push(t.name); });
+    $('crumb').innerHTML = bits.map(function(b, i){
+      return i === bits.length - 1 ? '<b>' + esc(b) + '</b>' : esc(b);
+    }).join(' / ');
+  }
+
+  function openCouriers(){
+    S.trail = [];
+    $('stepCpr').classList.add('hide');
+    $('stepBrowse').classList.remove('hide');
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading Drive...</span>';
+
+    get('/api/cpr/couriers').then(function(d){
+      if(!d.folders.length){
+        $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">No folders in there.</span>';
+        return;
+      }
+      paint(d.folders, [], function(f){ S.courier = f.name; openFolder(f); });
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function openFolder(folder){
+    $('stepCpr').classList.add('hide');
+    S.trail.push(folder);
+    drawCrumb();
+    $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading...</span>';
+
+    get('/api/cpr/folder?id=' + encodeURIComponent(folder.id)).then(function(d){
+      if(!d.folders.length && !d.sheets.length){
+        $('browse').innerHTML = '<span style="font-size:13px;color:var(--muted)">Nothing in there. ' +
+          '<a href="#" id="back">Go back</a></span>';
+        $('back').addEventListener('click', function(e){ e.preventDefault(); goBack(); });
+        return;
+      }
+      paint(d.folders, d.sheets, openFolder, openSheet);
+    }).catch(function(e){
+      $('browse').innerHTML = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function goBack(){
+    S.trail.pop();
+    if(!S.trail.length){ openCouriers(); return; }
+    var last = S.trail.pop();
+    openFolder(last);
+  }
+
+  function paint(folders, sheets, onFolder, onSheet){
+    var box = $('browse');
+    box.innerHTML = '';
+
+    if(S.trail.length){
+      var b = document.createElement('button');
+      b.className = 'pick';
+      b.textContent = '← Back';
+      b.addEventListener('click', goBack);
+      box.appendChild(b);
+    }
+
+    folders.forEach(function(f){
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.textContent = '\u{1F4C1} ' + f.name;
+      e.addEventListener('click', function(){ onFolder(f); });
+      box.appendChild(e);
+    });
+
+    (sheets || []).forEach(function(f){
+      var e = document.createElement('button');
+      e.className = 'pick';
+      e.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+        (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
+      e.addEventListener('click', function(){
+        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+        e.classList.add('on');
+        onSheet(f);
+      });
+      box.appendChild(e);
+    });
+  }
+
+  function openSheet(file){
+    S.sheetId = file.id;
+    S.sheetName = file.name;
+    S.excel = !!file.excel;
+    clearSay();
+    say('', 'Reading the sheet...');
+
+    get('/api/cpr/open?sheetId=' + encodeURIComponent(file.id) +
+        '&courier=' + encodeURIComponent(S.courier) +
+        '&inspect=0' + (S.excel ? '&excel=1' : '')).then(function(d){
+      clearSay();
+      S.tab = d.tab;
+      S.groups = d.groups || [];
+      S.bank = (S.options && S.options.prefs && S.options.prefs[S.courier]) || null;
+      drawCprs(d);
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  function drawCprs(d){
+    $('stepCpr').classList.remove('hide');
+    $('cprHint').innerHTML = esc(S.sheetName) + ' · <b>' + esc(S.tab) + '</b> · ' +
+      nf(S.groups.length) + ' CPR' + (S.groups.length === 1 ? '' : 's') +
+      (d.remembered ? '' : ' · the columns were worked out from the headings — ' +
+        'set them on the Receive payments tab if they are wrong');
+
+    var box = $('cprList');
+    box.innerHTML = '';
+    S.groups.forEach(function(g){
+      var card = document.createElement('div');
+      card.className = 'cprCard';
+      card.innerHTML = '<div class="head"><b>' + esc(g.cprNumber || '(no CPR number)') + '</b>' +
+        '<small>' + (g.cprDate || 'no date') + ' · ' + nf(g.rows) + ' rows · ' +
+        money(g.amount) + '</small></div>';
+      card.addEventListener('click', function(){
+        Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+        card.classList.add('on');
+        S.cpr = g.cprNumber || '(no CPR number)';
+        S.cprDate = g.cprDate || null;
+        startCheck();
+      });
+      box.appendChild(card);
+    });
+  }
+
+  /* ---------- the read ---------- */
+
+  function startCheck(){
+    clearSay();
+    $('stepOut').classList.add('hide');
+    $('checkLog').innerHTML = '';
+    S.checkEvent = 0;
+    S.result = null;
+
+    post('/api/check/scan', {
+      sheetId: S.sheetId, tab: S.tab, excel: S.excel,
+      courier: S.courier, cpr: S.cpr
+    }).then(function(){
+      $('stepRun').classList.remove('hide');
+      pollCheck(true);
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  $('btnInv').addEventListener('click', function(){
+    var text = $('invText').value.trim();
+    if(!text) return say('bad', '<b>Paste some order numbers first.</b>');
+    clearSay();
+    $('stepOut').classList.add('hide');
+    $('checkLog').innerHTML = '';
+    S.checkEvent = 0;
+    S.result = null;
+
+    post('/api/check/invoices', { text: text }).then(function(){
+      $('stepRun').classList.remove('hide');
+      pollCheck(true);
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  function pollCheck(first){
+    var u = '/api/check/status?since=' + S.checkEvent + (first ? '&full=1' : '');
+    return get(u).then(function(d){
+      if(!d.job){
+        stopCheckPoll();
+        $('btnCheckStop').style.display = 'none';
+        $('btnCheckResume').style.display = 'none';
+        $('btnCheckClear').style.display = 'none';
+        return;
+      }
+      var j = d.job;
+      $('stepRun').classList.remove('hide');
+      writeLog($('checkLog'), j.events);
+      if(j.lastEventId) S.checkEvent = j.lastEventId;
+
+      var live = j.state === 'running';
+      $('btnCheckStop').style.display = live ? '' : 'none';
+      $('btnCheckStop').disabled = false;
+      $('btnCheckStop').textContent = 'Stop';
+      $('btnCheckResume').style.display = (j.state === 'stopped' || j.state === 'error') ? '' : 'none';
+      $('btnCheckClear').style.display = live ? 'none' : '';
+      $('runHint').textContent = live
+        ? 'Running on the server - you can leave this page.'
+        : (j.state === 'stopped' ? 'Stopped.' : 'Done.');
+
+      if(live){ startCheckPoll(); return; }
+      stopCheckPoll();
+      if(j.result){ S.result = j.result; draw(j.result); }
+    }).catch(function(){});
+  }
+
+  function startCheckPoll(){
+    if(S.checkPoll) return;
+    S.checkPoll = setInterval(function(){ pollCheck(false); }, 2000);
+  }
+  function stopCheckPoll(){
+    if(!S.checkPoll) return;
+    clearInterval(S.checkPoll);
+    S.checkPoll = null;
+  }
+
+  $('btnCheckStop').addEventListener('click', function(){
+    $('btnCheckStop').disabled = true;
+    $('btnCheckStop').textContent = 'Stopping...';
+    post('/api/check/stop').catch(function(){});
+  });
+  $('btnCheckResume').addEventListener('click', function(){
+    $('btnCheckResume').style.display = 'none';
+    post('/api/check/resume').then(function(){
+      pollCheck(false); startCheckPoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  $('btnCheckClear').addEventListener('click', function(){
+    post('/api/check/clear').then(function(){
+      S.checkEvent = 0;
+      S.result = null;
+      $('checkLog').innerHTML = '';
+      $('stepRun').classList.add('hide');
+      $('stepOut').classList.add('hide');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  /* ---------- what came back ---------- */
+
+  function draw(r){
+    $('stepOut').classList.remove('hide');
+    if(r.kind === 'invoices') drawInvoices(r); else drawCpr(r);
+  }
+
+  function tallyBox(list){
+    $('tally').innerHTML = list.map(function(t){
+      return '<div class="' + (t.cls || '') + '"><div class="n">' + t.n + '</div>' +
+             '<div class="l">' + esc(t.l) + '</div></div>';
+    }).join('');
+  }
+
+  function payById(id){
+    return (S.result.payments || []).find(function(p){ return String(p.id) === String(id); }) || null;
+  }
+
+  function drawCpr(r){
+    $('outTitle').textContent = 'CPR ' + r.cpr;
+    $('outHint').innerHTML =
+      esc(r.courier || '') + ' · ' + (r.cprDate || 'no date') + ' · ' +
+      'the sheet says ' + money(r.sheetAmount) + ' over ' + nf(r.sheetOrders) + ' orders, ' +
+      'QuickBooks holds ' + money(r.qbAmount) + ' under this number' +
+      (r.bank && r.bank.accountId ? ' · this courier pays into <b>' +
+        esc(bankName(r.bank.accountId) || r.bank.accountId) + '</b>' : '');
+
+    tallyBox([
+      { n: nf(r.belong.length), l: 'paid, and belong here', cls: 'ok' },
+      { n: nf(r.extra.length),  l: 'not on this CPR', cls: r.extra.length ? 'bad' : '' },
+      { n: nf(r.over.length),   l: 'took too much', cls: r.over.length ? 'bad' : '' },
+      { n: nf(r.twice.length),  l: 'paid twice here', cls: r.twice.length ? 'warn' : '' },
+      { n: nf(r.wrongCpr.length), l: 'paid under another CPR', cls: r.wrongCpr.length ? 'warn' : '' },
+      { n: nf(r.notPaid.length), l: 'still not received', cls: r.notPaid.length ? 'warn' : '' }
+    ]);
+
+    var html = '';
+
+    /* 1 - orders this CPR never carried */
+    html += box('extra', r.extra.length ? 'bad' : '',
+      'Not on this CPR', r.extra.length,
+      'These orders were paid by a payment filed under ' + esc(r.cpr) +
+      ', but the CPR sheet does not carry them. Taking one off leaves the rest of ' +
+      'that payment alone and brings its total down by the same amount.',
+      r.extra.length
+        ? table(
+            ['', 'Order', 'Customer', 'Taken', 'Invoice', 'Payment'],
+            r.extra.map(function(x, i){
+              return '<tr><td><input type="checkbox" class="tk" data-i="' + i + '"></td>' +
+                '<td class="mono">' + esc(x.doc) + '</td>' +
+                '<td>' + esc(x.customer) + '</td>' +
+                '<td class="num">' + money(x.paid) + '</td>' +
+                '<td class="num">' + money(x.invoiceTotal) + '</td>' +
+                '<td>' + esc(x.date) + ' · ' + esc(x.accountName || '') + '</td></tr>';
+            }).join(''))
+        : '',
+      r.extra.length
+        ? '<button class="solid" data-act="extra" data-need="payments">Take the ticked off this CPR</button>' +
+          '<span class="note">Nothing else on those payments is touched.</span>'
+        : '');
+
+    /* 2 - more money than the order was worth */
+    html += box('over', r.over.length ? 'bad' : '',
+      'More was taken than the order is worth', r.over.length,
+      'The amount beside each order is what it will be corrected to. Change it if the ' +
+      'sheet is not the measure - an advance of 500 taken as 1,000 is put back to 500 here.',
+      r.over.length
+        ? table(
+            ['', 'Order', 'Sheet says', 'Taken', 'Over by', 'Correct to'],
+            r.over.map(function(x, i){
+              return '<tr><td><input type="checkbox" class="tk" data-i="' + i + '"></td>' +
+                '<td class="mono">' + esc(x.doc) + '</td>' +
+                '<td class="num">' + money(x.expect) + '</td>' +
+                '<td class="num">' + money(x.paid) + '</td>' +
+                '<td class="num" style="color:var(--bad)">' + money(x.over) + '</td>' +
+                '<td class="num"><input class="amt" data-i="' + i + '" value="' +
+                  Number(x.expect).toFixed(2) + '"></td></tr>';
+            }).join(''))
+        : '',
+      r.over.length
+        ? '<button class="solid" data-act="over" data-need="payments">Correct the ticked</button>'
+        : '');
+
+    /* 3 - the same order paid twice inside this CPR */
+    html += box('twice', r.twice.length ? 'warn' : '',
+      'Paid twice inside this CPR', r.twice.length,
+      'The same order appears on more than one paid line under this number. Take the ' +
+      'extra line off; if both lines sit on the same payment they go together, and the ' +
+      'order can then be received again from the Receive payments tab.',
+      r.twice.length
+        ? table(
+            ['', 'Order', 'Taken', 'Sheet says', 'Payment', 'Lines'],
+            r.twice.map(function(x, i){
+              return '<tr><td><input type="checkbox" class="tk" data-i="' + i + '"></td>' +
+                '<td class="mono">' + esc(x.doc) + '</td>' +
+                '<td class="num">' + money(x.paid) + '</td>' +
+                '<td class="num">' + money(x.expect) + '</td>' +
+                '<td class="mono">' + esc(x.paymentId) + ' · ' + esc(x.date) + '</td>' +
+                '<td class="num">' + nf(x.times) + '</td></tr>';
+            }).join(''))
+        : '',
+      r.twice.length
+        ? '<button class="solid" data-act="twice" data-need="payments">Take the ticked off this CPR</button>'
+        : '');
+
+    /* 4 - this CPR's own orders, paid under some other number */
+    html += box('wrong', r.wrongCpr.length ? 'warn' : '',
+      'Paid under another CPR', r.wrongCpr.length,
+      'These orders belong to this CPR, but the money against them went in under a ' +
+      'different number. Take it off that CPR and receive it here, or - where the ' +
+      'payment is carrying this one order only - move the payment onto this CPR.',
+      r.wrongCpr.length
+        ? table(
+            ['', 'Order', 'Received under', 'Taken', 'Date', 'Bank', 'On that payment'],
+            r.wrongCpr.map(function(x, i){
+              var p = payById(x.paymentId);
+              var alone = p && p.lines === 1;
+              return '<tr><td><input type="checkbox" class="tk" data-i="' + i + '"></td>' +
+                '<td class="mono">' + esc(x.doc) + '</td>' +
+                '<td>' + esc(x.otherRef) + '</td>' +
+                '<td class="num">' + money(x.paid) + '</td>' +
+                '<td>' + esc(x.date) + '</td>' +
+                '<td>' + esc(x.accountName || '') + '</td>' +
+                '<td>' + (p ? nf(p.lines) + ' order' + (p.lines === 1 ? '' : 's') : '?') +
+                  (alone ? '' : ' <span class="why">shared</span>') + '</td></tr>';
+            }).join(''))
+        : '',
+      r.wrongCpr.length
+        ? '<button class="solid" data-act="wrong-off" data-need="payments">Take the ticked off that CPR</button>' +
+          '<button data-act="wrong-move" data-need="payments">Move the ticked onto ' + esc(r.cpr) + '</button>' +
+          '<span class="note">Moving is offered only where the payment carries that one order.</span>'
+        : '');
+
+    /* 5 - the payments themselves: number, date and bank */
+    var mine = (r.payments || []).filter(function(p){ return p.underThis; });
+    var offs = mine.filter(function(p){ return p.wrongDate || p.wrongBank || p.unapplied > 0.005; });
+    html += box('pays', offs.length ? 'warn' : '',
+      'The payments under this number', mine.length,
+      'One payment can carry many orders. The date should be the CPR date the courier ' +
+      'banked on, and the bank the one this courier pays into.',
+      mine.length
+        ? table(
+            ['', 'Payment', 'Date', 'Bank', 'Orders', 'Applied', 'Unapplied', ''],
+            mine.map(function(p){
+              var i = r.payments.indexOf(p);
+              var why = [];
+              if(p.wrongDate) why.push('dated ' + p.date + ', the CPR says ' + (r.cprDate || '-'));
+              if(p.wrongBank) why.push('not this courier’s bank');
+              if(p.unapplied > 0.005) why.push(money(p.unapplied) + ' sitting unapplied');
+              return '<tr><td><input type="checkbox" class="tk" data-i="' + i + '"></td>' +
+                '<td class="mono">' + esc(p.id) + '</td>' +
+                '<td>' + esc(p.date) + '</td>' +
+                '<td>' + esc(p.accountName || '') + '</td>' +
+                '<td class="num">' + nf(p.lines) + '</td>' +
+                '<td class="num">' + money(p.applied) + '</td>' +
+                '<td class="num">' + money(p.unapplied) + '</td>' +
+                '<td class="why">' + esc(why.join(' · ')) + '</td></tr>';
+            }).join(''))
+        : '',
+      mine.length
+        ? '<button class="solid" data-act="putright" data-need="payments">Put the ticked date and bank right</button>' +
+          '<button data-act="delete-some" data-need="payments">Delete the ticked payments</button>'
+        : '');
+
+    /* 6 - what the CPR says is owed and nothing has paid */
+    html += box('unpaid', r.notPaid.length ? 'warn' : '',
+      'On the CPR, not yet received', r.notPaid.length,
+      'Receive these from the Receive payments tab - this page only takes money off, ' +
+      'it never puts it on.',
+      r.notPaid.length
+        ? table(
+            ['Order', 'Sheet says', 'In QuickBooks', 'Balance', 'Paid under'],
+            r.notPaid.map(function(x){
+              return '<tr><td class="mono">' + esc(x.number) + '</td>' +
+                '<td class="num">' + money(x.sheetAmount) + '</td>' +
+                '<td>' + (x.inQb ? esc(x.doc) : '<span class="why">not there</span>') + '</td>' +
+                '<td class="num">' + money(x.balance) + '</td>' +
+                '<td>' + esc((x.elsewhere || []).join(', ')) +
+                  (x.delivered ? '' : ' <span class="why">not delivered</span>') + '</td></tr>';
+            }).join(''))
+        : '', '');
+
+    /* 7 - everything that is as it should be */
+    var right = r.belong.filter(function(x){ return x.over <= 0.005 && x.times === 1; });
+    html += box('right', '', 'Paid, and belongs to this CPR', right.length, '',
+      right.length
+        ? table(['Order', 'Customer', 'Taken', 'Sheet says', 'Payment'],
+            right.map(function(x){
+              return '<tr><td class="mono">' + esc(x.doc) + '</td>' +
+                '<td>' + esc(x.customer) + '</td>' +
+                '<td class="num">' + money(x.paid) + '</td>' +
+                '<td class="num">' + money(x.expect) + '</td>' +
+                '<td class="mono">' + esc(x.paymentId) + '</td></tr>';
+            }).join(''))
+        : '', '');
+
+    /* 8 - the whole CPR, off and on again */
+    html += '<div class="box bad" id="box-all"><h3>The whole CPR</h3>' +
+      '<p>Deleting takes every payment filed under ' + esc(r.cpr) + ' out of QuickBooks - ' +
+      nf(mine.length) + ' payment' + (mine.length === 1 ? '' : 's') + ' covering ' +
+      money(r.qbAmount) + '. The invoices go back to unpaid. ' +
+      'Receiving it again reads the sheet afresh and pays what is open, into ' +
+      esc((S.bank && bankName(S.bank.accountId)) || 'the account you pick below') + '.</p>' +
+      '<div class="acts">' +
+      '<button class="solid" data-act="delete-all" data-need="payments">Delete this CPR’s payments</button>' +
+      '<button class="solid" data-act="redo" data-need="payments">Delete and receive again</button>' +
+      '</div></div>';
+
+    $('boxes').innerHTML = html;
+    wireBoxes();
+  }
+
+  function box(id, cls, title, count, note, inner, acts){
+    return '<div class="box ' + cls + '" id="box-' + id + '">' +
+      '<h3>' + esc(title) + '<span class="count">' + nf(count) + '</span></h3>' +
+      (note ? '<p>' + note + '</p>' : '') +
+      (inner ? '<div class="scroll">' + inner + '</div>' : '') +
+      (acts ? '<div class="acts">' + acts + '</div>' : '') +
+      '</div>';
+  }
+
+  function table(head, rows){
+    return '<table class="t"><thead><tr>' +
+      head.map(function(h, i){
+        if(h === '') return '<th style="width:28px">' + (i === 0 ? '<input type="checkbox" class="all">' : '') + '</th>';
+        return '<th' + (/taken|says|over|applied|orders|balance|correct|lines/i.test(h) ? ' class="num"' : '') +
+               '>' + esc(h) + '</th>';
+      }).join('') + '</tr></thead><tbody>' +
+      (rows || '<tr><td class="empty" colspan="' + head.length + '">Nothing.</td></tr>') +
+      '</tbody></table>';
+  }
+
+  // tick-all, and the buttons that turn a box into a run of changes
+  function wireBoxes(){
+    Array.prototype.forEach.call($('boxes').querySelectorAll('input.all'), function(a){
+      a.addEventListener('change', function(){
+        var box = a.closest('.box');
+        Array.prototype.forEach.call(box.querySelectorAll('input.tk'), function(t){
+          t.checked = a.checked;
+        });
+      });
+    });
+
+    Array.prototype.forEach.call($('boxes').querySelectorAll('button[data-act]'), function(b){
+      b.addEventListener('click', function(){ act(b.getAttribute('data-act')); });
+    });
+  }
+
+  function ticked(boxId){
+    var box = $('box-' + boxId);
+    if(!box) return [];
+    return Array.prototype.map.call(box.querySelectorAll('input.tk:checked'), function(t){
+      return Number(t.getAttribute('data-i'));
+    });
+  }
+
+  function amountFor(boxId, i, fallback){
+    var box = $('box-' + boxId);
+    var el = box ? box.querySelector('input.amt[data-i="' + i + '"]') : null;
+    var v = el ? Number(String(el.value).replace(/[^0-9.\-]/g, '')) : NaN;
+    return isNaN(v) ? fallback : v;
+  }
+
+  /* ---------- turning a tick into a change ---------- */
+
+  // one door for every button in the result, whichever list it came from
+  function act(kind){
+    if(kind.indexOf('inv-') === 0) return actInv(kind);
+    return actCpr(kind);
+  }
+
+  function actCpr(kind){
+    var r = S.result;
+    if(!r) return;
+    var actions = [], label = '', ask = '';
+
+    if(kind === 'extra' || kind === 'twice'){
+      var src = kind === 'extra' ? r.extra : r.twice;
+      var pick = ticked(kind);
+      if(!pick.length) return say('bad', '<b>Tick the orders first.</b>');
+      actions = pick.map(function(i){
+        var x = src[i];
+        return { kind: 'unlink', paymentId: x.paymentId, invoiceId: x.invoiceId,
+                 doc: x.doc, ref: x.ref };
+      });
+      label = 'Taking ' + pick.length + ' order' + (pick.length === 1 ? '' : 's') + ' off ' + r.cpr;
+      ask = 'Take ' + pick.length + ' order' + (pick.length === 1 ? '' : 's') +
+            ' off CPR ' + r.cpr + '?\n\nThe payment stays for everything else on it.';
+    }
+
+    else if(kind === 'over'){
+      var picks = ticked('over');
+      if(!picks.length) return say('bad', '<b>Tick the orders first.</b>');
+      actions = picks.map(function(i){
+        var x = r.over[i];
+        return { kind: 'amount', paymentId: x.paymentId, invoiceId: x.invoiceId,
+                 doc: x.doc, ref: x.ref, amount: amountFor('over', i, x.expect) };
+      });
+      var bad = actions.filter(function(a){ return !(a.amount >= 0); });
+      if(bad.length) return say('bad', '<b>One of the amounts is not a number.</b>');
+      label = 'Correcting ' + actions.length + ' amount' + (actions.length === 1 ? '' : 's');
+      ask = actions.map(function(a){ return a.doc + ' → ' + money(a.amount); }).join('\n');
+      ask = 'Correct these to the amounts shown?\n\n' + ask;
+    }
+
+    else if(kind === 'wrong-off' || kind === 'wrong-move'){
+      var w = ticked('wrong');
+      if(!w.length) return say('bad', '<b>Tick the orders first.</b>');
+
+      if(kind === 'wrong-off'){
+        actions = w.map(function(i){
+          var x = r.wrongCpr[i];
+          return { kind: 'unlink', paymentId: x.paymentId, invoiceId: x.invoiceId,
+                   doc: x.doc, ref: x.otherRef };
+        });
+        label = 'Taking ' + actions.length + ' order' + (actions.length === 1 ? '' : 's') +
+                ' off the CPR that paid them';
+        ask = 'Take ' + actions.length + ' order' + (actions.length === 1 ? '' : 's') +
+              ' off the CPR they were paid under?\n\nThey can then be received under ' +
+              r.cpr + ' from the Receive payments tab.';
+      } else {
+        var shared = [];
+        var ids = {};
+        w.forEach(function(i){
+          var x = r.wrongCpr[i];
+          var p = payById(x.paymentId);
+          if(!p || p.lines !== 1){ shared.push(x.doc); return; }
+          ids[x.paymentId] = x;
+        });
+        if(shared.length){
+          say('bad', '<b>' + esc(shared.join(', ')) + ' sit on payments carrying other orders ' +
+              '— those cannot be moved whole. Take them off instead.</b>');
+          if(!Object.keys(ids).length) return;
+        }
+        actions = Object.keys(ids).map(function(pid){
+          return { kind: 'fix', paymentId: pid, doc: ids[pid].doc,
+                   cprNumber: r.cpr === '(no CPR number)' ? '' : r.cpr,
+                   cprDate: r.cprDate || null,
+                   accountId: (r.bank && r.bank.accountId) || null,
+                   accountName: (r.bank && bankName(r.bank.accountId)) || '' };
+        });
+        if(!actions.length) return;
+        label = 'Moving ' + actions.length + ' payment' + (actions.length === 1 ? '' : 's') +
+                ' onto ' + r.cpr;
+        ask = 'Move ' + actions.length + ' payment' + (actions.length === 1 ? '' : 's') +
+              ' onto CPR ' + r.cpr + (r.cprDate ? ', dated ' + r.cprDate : '') + '?';
+      }
+    }
+
+    else if(kind === 'putright' || kind === 'delete-some'){
+      var p = ticked('pays');
+      if(!p.length) return say('bad', '<b>Tick the payments first.</b>');
+      if(kind === 'putright'){
+        if(!r.cprDate && !(r.bank && r.bank.accountId)){
+          return say('bad', '<b>The sheet has no CPR date and no bank is remembered for ' +
+                     esc(r.courier) + ' — there is nothing to put right with.</b>');
+        }
+        actions = p.map(function(i){
+          var pay = r.payments[i];
+          return { kind: 'fix', paymentId: pay.id,
+                   cprDate: r.cprDate || null,
+                   accountId: (r.bank && r.bank.accountId) || null,
+                   accountName: (r.bank && bankName(r.bank.accountId)) || '' };
+        });
+        label = 'Putting ' + actions.length + ' payment' + (actions.length === 1 ? '' : 's') + ' right';
+        ask = 'Date ' + actions.length + ' payment' + (actions.length === 1 ? '' : 's') +
+              (r.cprDate ? ' ' + r.cprDate : '') +
+              (r.bank && r.bank.accountId ? ' and move them into ' + bankName(r.bank.accountId) : '') + '?';
+      } else {
+        actions = p.map(function(i){
+          var pay = r.payments[i];
+          return { kind: 'delete', paymentId: pay.id, ref: pay.ref };
+        });
+        var sum = p.reduce(function(s, i){ return s + Number(r.payments[i].total || 0); }, 0);
+        label = 'Deleting ' + actions.length + ' payment' + (actions.length === 1 ? '' : 's');
+        ask = 'Delete ' + actions.length + ' payment' + (actions.length === 1 ? '' : 's') +
+              ' totalling ' + money(sum) + '?\n\nEvery order on them goes back to unpaid. ' +
+              'This cannot be undone.';
+      }
+    }
+
+    else if(kind === 'delete-all' || kind === 'redo'){
+      var mine = (r.payments || []).filter(function(x){ return x.underThis; });
+      if(!mine.length) return say('bad', '<b>No payment carries this CPR number.</b>');
+      actions = mine.map(function(x){ return { kind: 'delete', paymentId: x.id, ref: x.ref }; });
+      label = 'Deleting CPR ' + r.cpr;
+      ask = 'Delete all ' + mine.length + ' payment' + (mine.length === 1 ? '' : 's') +
+            ' of CPR ' + r.cpr + ', totalling ' + money(r.qbAmount) + '?';
+
+      if(kind === 'redo'){
+        if(!$('acct').value && S.bank && S.bank.accountId) $('acct').value = S.bank.accountId;
+        if(!$('acct').value){
+          $('stepPay').classList.remove('hide');
+          $('payHint').textContent = 'Pick the account this courier pays into, then press ' +
+            'Delete and receive again.';
+          $('stepPay').scrollIntoView({ behavior: 'smooth' });
+          return say('bad', '<b>Pick the deposit account first.</b>');
+        }
+        ask += '\n\nThen receive the CPR again from the sheet, into ' +
+               $('acct').options[$('acct').selectedIndex].textContent + '.';
+      }
+    }
+
+    if(!actions.length) return;
+    if(!confirm(ask)) return;
+
+    S.afterFix = (kind === 'redo') ? 'receive' : null;
+    runFix(actions, label);
+  }
+
+  /* ---------- the changes ---------- */
+
+  function runFix(actions, label){
+    clearSay();
+    $('fixLog').innerHTML = '';
+    S.fixEvent = 0;
+    $('stepFix').classList.remove('hide');
+    $('stepFix').scrollIntoView({ behavior: 'smooth' });
+
+    post('/api/check/fix', { actions: actions, label: label }).then(function(){
+      pollFix(true);
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  function pollFix(first){
+    return get('/api/check/fix-status?since=' + S.fixEvent).then(function(d){
+      if(!d.job){
+        stopFixPoll();
+        $('btnFixStop').style.display = 'none';
+        $('btnFixResume').style.display = 'none';
+        $('btnFixClear').style.display = 'none';
+        return;
+      }
+      var j = d.job;
+      $('stepFix').classList.remove('hide');
+      writeLog($('fixLog'), j.events);
+      if(j.lastEventId) S.fixEvent = j.lastEventId;
+
+      var live = j.state === 'running';
+      $('fixHint').textContent = j.label || '';
+      var pct = j.total ? Math.round((j.doneCount + j.failed) / j.total * 100) : 0;
+      $('fixBar').style.width = pct + '%';
+      $('fixLine').textContent = nf(j.doneCount) + ' of ' + nf(j.total) + ' done' +
+        (j.failed ? ' · ' + nf(j.failed) + ' failed' : '') +
+        (live ? '  (running on the server - you can leave this page)' : '');
+
+      $('btnFixStop').style.display = live ? '' : 'none';
+      $('btnFixStop').disabled = false;
+      $('btnFixStop').textContent = 'Stop';
+      $('btnFixResume').style.display = (!live && j.leftCount) ? '' : 'none';
+      $('btnFixResume').textContent = 'Carry on (' + nf(j.leftCount || 0) + ' left)';
+      $('btnFixClear').style.display = live ? 'none' : '';
+
+      if(live){ startFixPoll(); return; }
+      stopFixPoll();
+
+      if(S.afterFix === 'receive' && !j.leftCount && !j.failed){
+        S.afterFix = null;
+        receiveAgain();
+      } else if(S.afterFix === 'receive'){
+        S.afterFix = null;
+        say('bad', '<b>Some payments were not deleted, so the CPR was not received again. ' +
+            'Carry on or look at the log first.</b>');
+      }
+    }).catch(function(){});
+  }
+
+  function startFixPoll(){
+    if(S.fixPoll) return;
+    S.fixPoll = setInterval(function(){ pollFix(false); }, 2000);
+  }
+  function stopFixPoll(){
+    if(!S.fixPoll) return;
+    clearInterval(S.fixPoll);
+    S.fixPoll = null;
+  }
+
+  $('btnFixStop').addEventListener('click', function(){
+    $('btnFixStop').disabled = true;
+    $('btnFixStop').textContent = 'Stopping...';
+    S.afterFix = null;
+    post('/api/check/fix-stop').catch(function(){});
+  });
+  $('btnFixResume').addEventListener('click', function(){
+    $('btnFixResume').style.display = 'none';
+    post('/api/check/fix-resume').then(function(){
+      pollFix(false); startFixPoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  $('btnFixClear').addEventListener('click', function(){
+    post('/api/check/fix-clear').then(function(){
+      S.fixEvent = 0;
+      $('fixLog').innerHTML = '';
+      $('fixLine').textContent = '';
+      $('fixBar').style.width = '0';
+      $('stepFix').classList.add('hide');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  /* ---------- receiving the CPR again ---------- */
+
+  function receiveAgain(){
+    var r = S.result;
+    if(!r) return;
+
+    $('stepPay').classList.remove('hide');
+    $('payHint').textContent = 'Reading the sheet against QuickBooks again...';
+    $('payLog').innerHTML = '';
+    S.payEvent = 0;
+
+    var u = '/api/cpr/match?sheetId=' + encodeURIComponent(S.sheetId) +
+            '&tab=' + encodeURIComponent(S.tab) +
+            '&courier=' + encodeURIComponent(S.courier) +
+            '&cpr=' + encodeURIComponent(S.cpr) + (S.excel ? '&excel=1' : '');
+
+    get(u).then(function(m){
+      if(!m.matched || !m.matched.length){
+        $('payHint').textContent = 'Nothing is open to receive - the CPR has no unpaid orders left.';
+        return;
+      }
+      $('payHint').textContent = 'Receiving ' + nf(m.totals.matched) + ' orders, ' +
+        money(m.totals.amount) + ', into ' + $('acct').options[$('acct').selectedIndex].textContent + '.';
+
+      return post('/api/cpr/receive', {
+        courier: S.courier,
+        cprNumber: m.cprNumber,
+        cprDate: m.cprDate,
+        accountId: $('acct').value,
+        accountName: $('acct').options[$('acct').selectedIndex].textContent,
+        methodId: $('method').value || null,
+        matched: m.matched,
+        sheetId: S.sheetId,
+        tab: S.tab,
+        excel: S.excel,
+        headerRow: m.headerRow,
+        statusCol: m.statusCol,
+        writeStatus: false
+      }).then(function(){ pollPay(true); });
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  function pollPay(first){
+    return get('/api/cpr/receive-status?since=' + S.payEvent + (first ? '&full=1' : ''))
+      .then(function(d){
+        if(!d.job){
+          stopPayPoll();
+          $('btnPayStop').style.display = 'none';
+          $('btnPayResume').style.display = 'none';
+          $('btnPayClear').style.display = 'none';
+          return;
+        }
+        var j = d.job;
+        $('stepPay').classList.remove('hide');
+        writeLog($('payLog'), j.events);
+        if(j.lastEventId) S.payEvent = j.lastEventId;
+
+        var live = j.state === 'running';
+        var pct = j.total ? Math.round(j.doneCount / j.total * 100) : 0;
+        $('payBar').style.width = pct + '%';
+        $('payLine').textContent = nf(j.doneCount) + ' of ' + nf(j.total) + ' orders · ' +
+          nf(j.posted) + ' payment' + (j.posted === 1 ? '' : 's') + ' · ' + money(j.amount) +
+          (live ? '  (running on the server - you can leave this page)' : '');
+
+        $('btnPayStop').style.display = live ? '' : 'none';
+        $('btnPayStop').disabled = false;
+        $('btnPayStop').textContent = 'Stop';
+        $('btnPayResume').style.display = (!live && j.leftCount) ? '' : 'none';
+        $('btnPayResume').textContent = 'Carry on (' + nf(j.leftCount || 0) + ' left)';
+        $('btnPayClear').style.display = live ? 'none' : '';
+
+        if(live){ startPayPoll(); return; }
+        stopPayPoll();
+
+        var html = '';
+        (j.results || []).forEach(function(x){
+          html += '<div class="result ' + (x.ok ? 'good' : 'bad') + '">' +
+            (x.ok
+              ? '✓ ' + esc(x.customer || '') + ' - ' + nf(x.count) + ' invoices, ' + money(x.amount) +
+                (x.paymentId ? ' · QB payment ' + esc(x.paymentId) : '')
+              : '✗ ' + (x.customer ? esc(x.customer) + ' - ' : '') + esc(x.msg)) +
+            '</div>';
+        });
+        $('payOut').innerHTML = html;
+      }).catch(function(){});
+  }
+
+  function startPayPoll(){
+    if(S.payPoll) return;
+    S.payPoll = setInterval(function(){ pollPay(false); }, 2000);
+  }
+  function stopPayPoll(){
+    if(!S.payPoll) return;
+    clearInterval(S.payPoll);
+    S.payPoll = null;
+  }
+
+  $('btnPayStop').addEventListener('click', function(){
+    $('btnPayStop').disabled = true;
+    $('btnPayStop').textContent = 'Stopping...';
+    post('/api/cpr/receive-stop').catch(function(){});
+  });
+  $('btnPayResume').addEventListener('click', function(){
+    $('btnPayResume').style.display = 'none';
+    post('/api/cpr/receive-resume').then(function(){
+      pollPay(false); startPayPoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  $('btnPayClear').addEventListener('click', function(){
+    post('/api/cpr/receive-clear').then(function(){
+      S.payEvent = 0;
+      $('payLog').innerHTML = '';
+      $('payOut').innerHTML = '';
+      $('payLine').textContent = '';
+      $('payBar').style.width = '0';
+      $('stepPay').classList.add('hide');
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  /* ---------- order numbers, one by one ---------- */
+
+  function drawInvoices(r){
+    $('outTitle').textContent = 'These orders in QuickBooks';
+    var found = r.rows.filter(function(x){ return x.inQb; });
+    var over = found.filter(function(x){ return x.over > 0.005; });
+    var unpaid = found.filter(function(x){ return x.balance > 0.005; });
+
+    $('outHint').textContent = nf(found.length) + ' of ' + nf(r.rows.length) +
+      ' found · every payment sitting on them is listed with the CPR it went in under.';
+
+    tallyBox([
+      { n: nf(found.length), l: 'found', cls: 'ok' },
+      { n: nf(r.rows.length - found.length), l: 'not in QuickBooks',
+        cls: (r.rows.length - found.length) ? 'bad' : '' },
+      { n: nf(over.length), l: 'took too much', cls: over.length ? 'bad' : '' },
+      { n: nf(unpaid.length), l: 'still open', cls: unpaid.length ? 'warn' : '' }
+    ]);
+
+    // every payment line across every order, so one tick list covers them all
+    var lines = [];
+    r.rows.forEach(function(x){
+      if(!x.inQb) return;
+      (x.lines || []).forEach(function(l){
+        lines.push({
+          doc: x.doc, customer: x.customer, total: x.total, balance: x.balance,
+          paid: x.paid, over: x.over,
+          paymentId: l.paymentId, ref: l.ref, date: l.date,
+          accountName: l.accountName, amount: l.paid,
+          invoiceId: x.invoiceId, paymentLines: l.paymentLines
+        });
+      });
+    });
+    S.invLines = lines;
+
+    var html = box('inv', lines.length ? '' : 'warn',
+      'What is sitting on these orders', lines.length,
+      'Take a payment off the CPR it does not belong to, or correct what it took. ' +
+      'The amount beside each line is what it will be set to - 1,000 taken where 500 ' +
+      'was due is put back to 500 here. A line set to nothing comes off altogether.',
+      lines.length
+        ? table(
+            ['', 'Order', 'Received under', 'Date', 'Bank', 'Taken', 'Invoice', 'Balance', 'Correct to'],
+            lines.map(function(x, i){
+              return '<tr><td><input type="checkbox" class="tk" data-i="' + i + '"></td>' +
+                '<td class="mono">' + esc(x.doc) + '</td>' +
+                '<td>' + esc(x.ref) + (x.paymentLines > 1
+                  ? ' <span class="why">' + nf(x.paymentLines) + ' orders on it</span>' : '') + '</td>' +
+                '<td>' + esc(x.date) + '</td>' +
+                '<td>' + esc(x.accountName || '') + '</td>' +
+                '<td class="num">' + money(x.amount) + '</td>' +
+                '<td class="num">' + money(x.total) + '</td>' +
+                '<td class="num">' + money(x.balance) + '</td>' +
+                '<td class="num"><input class="amt" data-i="' + i + '" value="' +
+                  Number(x.amount).toFixed(2) + '"></td></tr>';
+            }).join(''))
+        : '',
+      lines.length
+        ? '<button class="solid" data-act="inv-off" data-need="payments">Take the ticked off their CPR</button>' +
+          '<button class="solid" data-act="inv-amt" data-need="payments">Correct the ticked to the amount shown</button>'
+        : '');
+
+    var missing = r.rows.filter(function(x){ return !x.inQb; });
+    html += box('inv-missing', missing.length ? 'bad' : '', 'Not in QuickBooks', missing.length, '',
+      missing.length
+        ? table(['Order'], missing.map(function(x){
+            return '<tr><td class="mono">' + esc(x.number) + '</td></tr>';
+          }).join(''))
+        : '', '');
+
+    var clean = found.filter(function(x){ return !x.lines.length; });
+    html += box('inv-open', clean.length ? 'warn' : '', 'Nothing received on them yet', clean.length, '',
+      clean.length
+        ? table(['Order', 'Customer', 'Invoice', 'Balance'], clean.map(function(x){
+            return '<tr><td class="mono">' + esc(x.doc) + '</td>' +
+              '<td>' + esc(x.customer) + '</td>' +
+              '<td class="num">' + money(x.total) + '</td>' +
+              '<td class="num">' + money(x.balance) + '</td></tr>';
+          }).join(''))
+        : '', '');
+
+    $('boxes').innerHTML = html;
+    wireBoxes();
+  }
+
+  // the two buttons of the order-number list run through the same fix job
+  function actInv(kind){
+    var pick = ticked('inv');
+    if(!pick.length) return say('bad', '<b>Tick the lines first.</b>');
+    var actions, label, ask;
+
+    if(kind === 'inv-off'){
+      actions = pick.map(function(i){
+        var x = S.invLines[i];
+        return { kind: 'unlink', paymentId: x.paymentId, invoiceId: x.invoiceId,
+                 doc: x.doc, ref: x.ref };
+      });
+      label = 'Taking ' + actions.length + ' payment line' + (actions.length === 1 ? '' : 's') + ' off';
+      ask = pick.map(function(i){
+        var x = S.invLines[i];
+        return x.doc + ' off ' + x.ref + ' (' + money(x.amount) + ')';
+      }).join('\n');
+      ask = 'Take these off the CPR that paid them?\n\n' + ask;
+    } else {
+      actions = pick.map(function(i){
+        var x = S.invLines[i];
+        return { kind: 'amount', paymentId: x.paymentId, invoiceId: x.invoiceId,
+                 doc: x.doc, ref: x.ref, amount: amountFor('inv', i, x.amount) };
+      });
+      if(actions.some(function(a){ return !(a.amount >= 0); })){
+        return say('bad', '<b>One of the amounts is not a number.</b>');
+      }
+      label = 'Correcting ' + actions.length + ' amount' + (actions.length === 1 ? '' : 's');
+      ask = 'Set these to the amounts shown?\n\n' +
+        actions.map(function(a){ return a.doc + ' → ' + money(a.amount); }).join('\n');
+    }
+
+    if(!confirm(ask)) return;
+    S.afterFix = null;
+    runFix(actions, label);
+  }
+})();
+</script>
+</body>
+</html>

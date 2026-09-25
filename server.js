@@ -81,6 +81,10 @@ import {
 import { loadTraxSummaries, applyLines } from './traxsheet.js';
 import { startPayJob, stopPayJob, clearPayJob, resumePayJob, paySnapshot } from './payjobs.js';
 import {
+  startCheck, stopCheck, resumeCheck, clearCheck, checkSnapshot,
+  startFix, stopFix, resumeFix, clearFix, fixSnapshot
+} from './checklist.js';
+import {
   startFindJob, resumeFindJob, stopFindJob, clearFindJob, findSnapshot,
   listTree, sheetsIn, peekHeader
 } from './finder.js';
@@ -699,6 +703,8 @@ const USER_MAY_POST = new Set([
   '/api/find/sheets', '/api/find/columns',
   // matching a CPR against QuickBooks, before anything is posted
   '/api/merge/upload', '/api/merge/scan', '/api/merge/paste', '/api/merge/clear',
+  // reading a CPR back out of QuickBooks - the check list changes nothing
+  '/api/check/scan', '/api/check/invoices', '/api/check/resume', '/api/check/clear',
   '/api/shipfix/plan', '/api/shipfix/clear', '/api/shipfix/clear-log',
   // reading the books, and narrowing what was read
   '/api/products/scan', '/api/products/paste',
@@ -727,6 +733,7 @@ const RIGHT_GROUPS = [
             '/api/cpr/bank', '/api/cpr/settled', '/api/cpr/colour',
             '/api/cpr/duplicate', '/api/cpr/fix-payment', '/api/cpr/columns',
             '/api/cpr/root', '/api/sheets/paint',
+            '/api/check/fix', '/api/check/fix-resume', '/api/check/fix-clear',
             '/api/receipts/receive', '/api/receipts/mark', '/api/receipts/bank',
             '/api/receipts/duplicate'] },
 
@@ -795,6 +802,7 @@ const PAGE_NEED = new Map(Object.entries({
   '/upload.html': 'upload',
   '/payments.html': 'payments',
   '/merge.html': 'merge',
+  '/checklist.html': 'payments',
   '/advance.html': 'advance',
   '/charges.html': 'charges',
   '/void.html': 'void',
@@ -3113,6 +3121,125 @@ app.post('/api/cpr/receive-clear', async (req, res) => {
   if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
   res.json({ ok: true });
 });
+// ==================== Check list ====================
+// The CPR read back out of QuickBooks: which orders its payments actually paid
+// for, which of them the CPR never carried, and what was taken over the amount
+// owed. The reads start a job so they can be stopped from any computer; the
+// changes start a second one, so a run of them can be stopped and carried on.
+
+app.post('/api/check/scan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const id = startCheck(realmId, Object.assign({ kind: 'cpr' }, req.body));
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+// the same read for a handful of order numbers pasted by hand
+app.post('/api/check/invoices', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const numbers = String(req.body.text || '')
+    .split(/[\s,;/|]+/)
+    .map(s => s.trim())
+    .filter(s => s.replace(/[^0-9]/g, '').length >= 4);
+
+  if (!numbers.length) return res.status(400).json({ error: 'No order numbers in that' });
+  if (numbers.length > 500) return res.status(400).json({ error: 'That is more than 500 numbers' });
+
+  try {
+    const id = startCheck(realmId, { kind: 'invoices', numbers });
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/check/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = checkSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/check/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopCheck(realmId) });
+});
+
+app.post('/api/check/resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeCheck(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/check/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearCheck(realmId);
+  if (!ok) return res.status(409).json({ error: 'The check is still going' });
+  res.json({ ok: true });
+});
+
+// the changes themselves - taking an order off a CPR, correcting what was
+// taken, moving a payment onto the right CPR, or deleting the CPR outright
+app.post('/api/check/fix', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const id = startFix(realmId, req.body);
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/check/fix-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = fixSnapshot(realmId, req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/check/fix-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopFix(realmId) });
+});
+
+app.post('/api/check/fix-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeFix(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/check/fix-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearFix(realmId);
+  if (!ok) return res.status(409).json({ error: 'The fix is still going' });
+  res.json({ ok: true });
+});
+
 // ==================== Find orders in the courier sheets ====================
 // Paste order numbers, and every CPR sheet is walked looking for them. What is
 // still missing afterwards is looked for in the return sheet.

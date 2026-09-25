@@ -39,6 +39,7 @@ understand what is happening underneath.
 | Receive payments | `payments.html`, `cpr.js` | Matches a courier CPR sheet against QB, records payment |
 | Merge payments | `merge.html`, `merges.js`, `mergeqb.js` | Groups one customer's orders against a CPR and takes the extra shipping off |
 | — Shipping off pasted invoices | `merge.html`, `shipfix.js` | Standalone: paste invoice numbers, see the shipping line on each, take it off. No CPR, no arithmetic |
+| — Check list | `checklist.html`, `checklist.js` | The third tab of Receive payments: reads a CPR back out of QuickBooks and lists, order by order, what its payments actually paid for — orders the CPR never carried, money taken over the amount owed, an order paid twice, an order of this CPR paid under another number, and payments dated or banked wrongly. A wrong order is taken off by rewriting that payment without its line (its total comes down with it), never by deleting a payment other orders sit on; an over-received amount is set to the exact figure, which is how an advance taken as 1,000 goes back to 500. The whole CPR can be deleted and received again in one run, and a pasted list of order numbers can be checked the same way |
 | Advance payments | `advance.html`, `advance.js`, `advjobs.js` | Part payments taken before delivery |
 | Delivery charges | `journal.js`, `traxsheet.js` | Courier fees and taxes as journal entries |
 | Find orders | `find.html`, `finder.js` | Searches every CPR sheet for pasted order numbers |

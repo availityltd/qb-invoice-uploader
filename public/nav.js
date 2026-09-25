@@ -102,9 +102,11 @@
   ITEMS.forEach(function(sec){
     if(sec.group) html += '<div class="group">' + sec.group + '</div>';
     sec.items.forEach(function(it){
-      // Merge payments is a tab of Receive payments, so that is what lights up
+      // Merge payments and the check list are tabs of Receive payments,
+      // so that is the line that lights up
       var on = (it.href === path) || (it.href !== '/' && path.indexOf(it.href) === 0) ||
-               (it.href === '/payments.html' && path === '/merge.html') ||
+               (it.href === '/payments.html' &&
+                (path === '/merge.html' || path === '/checklist.html')) ||
                // every tab of the changes page lights up the one link
                (it.href === '/replace.html' &&
                 (path === '/swap.html' || path === '/recat.html' || path === '/desc.html'));
