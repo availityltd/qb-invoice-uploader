@@ -718,6 +718,9 @@ const USER_MAY_POST = new Set([
   '/api/merge/upload', '/api/merge/scan', '/api/merge/paste', '/api/merge/clear',
   // reading a CPR back out of QuickBooks - the check list changes nothing
   '/api/check/scan', '/api/check/invoices', '/api/check/resume', '/api/check/clear',
+  // the check list's own walk of the courier sheets - a read from end to end
+  '/api/check/find-start', '/api/check/find-stop', '/api/check/find-resume',
+  '/api/check/find-clear', '/api/check/find-ready',
   '/api/shipfix/plan', '/api/shipfix/clear', '/api/shipfix/clear-log',
   // reading the books, and narrowing what was read
   '/api/products/scan', '/api/products/paste',
@@ -3266,6 +3269,142 @@ app.post('/api/check/fix-clear', async (req, res) => {
   const ok = clearFix(req.desk);
   if (!ok) return res.status(409).json({ error: 'The fix is still going' });
   res.json({ ok: true });
+});
+
+// ---- the check list's own walk of the courier sheets ----
+//
+// The Order numbers tab asks QuickBooks what paid for a list of orders. This
+// asks the sheets the same question from the other side: which CPR, in which
+// month, was each of these orders written on - so an order that QuickBooks has
+// never been told about can still be found, and then received under the very
+// CPR it was written on.
+//
+// It runs in the person's own second lane of the search engine, so starting one
+// here does not take the Find orders page's search away from them.
+function sheetLane(req) { return req.desk + '|checklist'; }
+
+app.post('/api/check/find-start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const cols = (await getSetting(realmId, 'find:cols', {})) || {};
+    const id = startFindJob(sheetLane(req), {
+      numbers: req.body.numbers,
+      folderIds: req.body.folderIds || [],
+      cols,
+      skipCpr: false
+    });
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/check/find-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = findSnapshot(sheetLane(req), req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/check/find-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopFindJob(sheetLane(req)) });
+});
+
+app.post('/api/check/find-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeFindJob(sheetLane(req));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/check/find-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearFindJob(sheetLane(req));
+  if (!ok) return res.status(409).json({ error: 'The search is still running' });
+  res.json({ ok: true });
+});
+
+// What one CPR's found orders look like in QuickBooks, before a penny moves.
+//
+// The page hands over the orders it found under one CPR, with what the sheet
+// says each was worth. Each is looked up and sorted the same way the Receive
+// payments page sorts a whole CPR: ready to receive, already paid, the sheet
+// and QuickBooks disagreeing by more than ten, and not in QuickBooks at all.
+// Only the ready ones are handed on to be received.
+app.post('/api/check/find-ready', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'Nothing to look up' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const token = await getAccessToken(realmId);
+    const found = await findInvoices(realmId, token, rows.map(r => r.invoice));
+
+    const matched = [], alreadyPaid = [], amountOff = [], notInQb = [];
+
+    rows.forEach(r => {
+      const asIs = String(r.invoice || '').trim().replace(/^#/, '');
+      const inv = found.get(asIs) || found.get(cprDigits(r.invoice));
+      const sheetAmount = Number(r.amount || 0);
+
+      if (!inv) { notInQb.push({ invoice: r.invoice, sheetAmount }); return; }
+
+      const entry = {
+        invoice: r.invoice,
+        qbDoc: inv.doc,
+        qbId: inv.id,
+        qbTotal: inv.total,
+        qbBalance: Math.round(inv.balance * 100) / 100,
+        customerId: inv.customerId,
+        customerName: inv.customerName,
+        date: inv.date,
+        sheetAmount
+      };
+
+      if (inv.balance <= 0.005) { alreadyPaid.push(entry); return; }
+      // the same ten rupees of slack the CPR page allows
+      if (sheetAmount > 0 && Math.abs(sheetAmount - inv.balance) > 10) {
+        amountOff.push(entry);
+        return;
+      }
+      matched.push(entry);
+    });
+
+    const prefs = (await getSetting(realmId, 'cpr:prefs', {})) || {};
+    const bank = req.body.courier ? (prefs[req.body.courier] || null) : null;
+
+    res.json({
+      cpr: req.body.cpr || '',
+      cprDate: req.body.cprDate || null,
+      courier: req.body.courier || '',
+      bank,
+      matched, alreadyPaid, amountOff, notInQb,
+      totals: {
+        asked: rows.length,
+        matched: matched.length,
+        alreadyPaid: alreadyPaid.length,
+        amountOff: amountOff.length,
+        notInQb: notInQb.length,
+        amount: Math.round(matched.reduce((t, m) => t + m.qbBalance, 0) * 100) / 100
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ==================== Find orders in the courier sheets ====================

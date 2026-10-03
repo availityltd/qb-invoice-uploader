@@ -186,9 +186,40 @@
             <div class="hint">One per line, or separated by commas. Every payment sitting on each
               order comes back with the CPR it was received under.</div>
             <textarea id="invText" rows="5" placeholder="91302583&#10;91302588"></textarea>
-            <div style="margin-top:12px">
-              <button class="solid" id="btnInv">Check these orders</button>
+            <div class="runacts">
+              <button class="solid" id="btnInv">Check these orders in QuickBooks</button>
+              <span class="note" id="invCount" style="font-size:12px;color:var(--muted);align-self:center"></span>
             </div>
+          </div>
+
+          <!-- the same numbers, asked of the courier sheets instead -->
+          <div class="step" id="stepFind">
+            <h2>Or find them in the CPR sheets</h2>
+            <div class="hint">
+              The other way round: which CPR was each of these orders written on. Pick the
+              months to read, or read every folder. Nothing is changed - and where orders turn
+              up under a CPR, they can be received under that very CPR from here.
+            </div>
+
+            <div id="findTree" style="margin-bottom:12px"></div>
+
+            <div class="runacts">
+              <button class="solid" id="btnFind">Find them in the CPR sheets</button>
+              <button class="stop" id="btnFindStop" style="display:none">Stop</button>
+              <button id="btnFindResume" style="display:none">Carry on</button>
+              <button id="btnFindClear" style="display:none">Clear log</button>
+              <span class="note" id="findNote" style="font-size:12px;color:var(--muted);align-self:center"></span>
+            </div>
+
+            <div class="runline" id="findLine" style="margin-top:10px"></div>
+            <div class="paylog hide" id="findLog"></div>
+          </div>
+
+          <!-- what the sheets said, a CPR at a time -->
+          <div class="step hide" id="stepFound">
+            <h2>Where these orders are written</h2>
+            <div class="hint" id="foundHint"></div>
+            <div id="foundGroups"></div>
           </div>
         </div>
 
@@ -330,7 +361,9 @@
     pollCheck(true);
     pollFix(true);
     pollPay(true);
+    pollFind(true);
     loadOptions();
+    loadFindTree();
 
     get('/api/cpr/root').then(function(d){
       if(d.folderId){
@@ -555,6 +588,16 @@
       pollCheck(true);
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   }
+
+  $('invText').addEventListener('input', function(){
+    var seen = {};
+    $('invText').value.split(/[\s,;]+/).forEach(function(n){
+      var d = String(n).replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
+      if(d) seen[d] = 1;
+    });
+    var n = Object.keys(seen).length;
+    $('invCount').textContent = n ? nf(n) + ' order number' + (n === 1 ? '' : 's') : '';
+  });
 
   $('btnInv').addEventListener('click', function(){
     var text = $('invText').value.trim();
@@ -1372,6 +1415,430 @@
     S.afterFix = null;
     runFix(actions, label);
   }
+
+  /* ================= the same numbers, asked of the courier sheets =============
+     The tab above asks QuickBooks what paid for these orders. This asks the
+     sheets where each of them is written - which CPR, in which month - and then
+     offers to receive what it found under the very CPR it was found on. The
+     search runs on the server, in this page's own lane, so it can be stopped
+     the moment it is seen to be the wrong search, carried on afterwards, and
+     its log cleared. */
+
+  var F = {
+    tree: [], picked: {}, all: true,
+    event: 0, poller: null, groups: [], ready: {}
+  };
+
+  function loadFindTree(){
+    $('findTree').innerHTML =
+      '<span style="font-size:12px;color:var(--muted)">Reading the Drive folders...</span>';
+
+    get('/api/find/tree').then(function(d){
+      F.tree = d.companies || [];
+      drawFindTree();
+    }).catch(function(e){
+      $('findTree').innerHTML =
+        '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
+    });
+  }
+
+  function drawFindTree(){
+    var box = $('findTree');
+    box.innerHTML = '';
+
+    if(!F.tree.length){
+      box.innerHTML = '<span style="font-size:12px;color:var(--muted)">' +
+        'No courier folders under the Drive folder.</span>';
+      return;
+    }
+
+    var top = document.createElement('div');
+    top.className = 'picks';
+    top.style.marginBottom = '10px';
+
+    var every = document.createElement('button');
+    every.className = 'pick' + (F.all ? ' on' : '');
+    every.innerHTML = 'Every folder<small>every courier, every month</small>';
+    every.addEventListener('click', function(){
+      F.all = true; F.picked = {}; drawFindTree();
+    });
+    top.appendChild(every);
+    box.appendChild(top);
+
+    F.tree.forEach(function(c){
+      if(!c.folders || !c.folders.length) return;
+
+      var wrap = document.createElement('div');
+      wrap.style.marginBottom = '10px';
+
+      var name = document.createElement('div');
+      name.style.cssText = 'font-size:11px;letter-spacing:.07em;text-transform:uppercase;' +
+        'color:var(--faint);margin-bottom:5px';
+      name.textContent = c.company;
+      wrap.appendChild(name);
+
+      var row = document.createElement('div');
+      row.className = 'picks';
+
+      c.folders.slice().sort(function(a, b){
+        return (b.year - a.year) || (b.month - a.month);
+      }).forEach(function(f){
+        var b = document.createElement('button');
+        b.className = 'pick' + (!F.all && F.picked[f.id] ? ' on' : '');
+        b.style.padding = '6px 11px';
+        b.style.fontSize = '12px';
+        b.textContent = f.label || f.name;
+        b.addEventListener('click', function(){
+          F.all = false;
+          if(F.picked[f.id]) delete F.picked[f.id];
+          else F.picked[f.id] = true;
+          if(!Object.keys(F.picked).length) F.all = true;
+          drawFindTree();
+        });
+        row.appendChild(b);
+      });
+
+      wrap.appendChild(row);
+      box.appendChild(wrap);
+    });
+
+    var n = Object.keys(F.picked).length;
+    $('findNote').textContent = F.all ? 'every folder will be read'
+      : n + ' folder' + (n === 1 ? '' : 's') + ' will be read';
+  }
+
+  $('btnFind').addEventListener('click', function(){
+    var text = $('invText').value.trim();
+    if(!text) return say('bad', '<b>Paste some order numbers first.</b>');
+
+    clearSay();
+    F.event = 0;
+    F.groups = [];
+    F.ready = {};
+    $('findLog').innerHTML = '';
+    $('findLog').classList.remove('hide');
+    $('foundGroups').innerHTML = '';
+    $('stepFound').classList.add('hide');
+
+    post('/api/check/find-start', {
+      numbers: text,
+      folderIds: F.all ? [] : Object.keys(F.picked)
+    }).then(function(){
+      pollFind(true);
+      startFindPoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  $('btnFindStop').addEventListener('click', function(){
+    $('btnFindStop').disabled = true;
+    $('btnFindStop').textContent = 'Stopping...';
+    post('/api/check/find-stop').catch(function(){});
+  });
+
+  $('btnFindResume').addEventListener('click', function(){
+    $('btnFindResume').style.display = 'none';
+    post('/api/check/find-resume').then(function(){
+      pollFind(false);
+      startFindPoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  $('btnFindClear').addEventListener('click', function(){
+    post('/api/check/find-clear').then(function(){
+      F.event = 0;
+      F.groups = [];
+      F.ready = {};
+      $('findLog').innerHTML = '';
+      $('findLog').classList.add('hide');
+      $('findLine').textContent = '';
+      $('foundGroups').innerHTML = '';
+      $('stepFound').classList.add('hide');
+      $('btnFindResume').style.display = 'none';
+      $('btnFindClear').style.display = 'none';
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  function startFindPoll(){
+    if(F.poller) return;
+    F.poller = setInterval(function(){ pollFind(false); }, 2000);
+  }
+  function stopFindPoll(){
+    if(!F.poller) return;
+    clearInterval(F.poller);
+    F.poller = null;
+  }
+
+  function pollFind(first){
+    return get('/api/check/find-status?since=' + F.event).then(function(d){
+      if(!d.job){
+        stopFindPoll();
+        $('btnFindStop').style.display = 'none';
+        $('btnFindResume').style.display = 'none';
+        $('btnFindClear').style.display = 'none';
+        return;
+      }
+
+      var j = d.job;
+      $('findLog').classList.remove('hide');
+
+      (j.log || []).forEach(function(line){
+        var el = document.createElement('div');
+        el.textContent = line.text || line;
+        $('findLog').appendChild(el);
+      });
+      if(j.logLength !== undefined) F.event = j.logLength;
+      $('findLog').scrollTop = $('findLog').scrollHeight;
+
+      var live = j.state === 'running';
+      $('btnFind').style.display = live ? 'none' : '';
+      $('btnFindStop').style.display = live ? '' : 'none';
+      $('btnFindStop').disabled = false;
+      $('btnFindStop').textContent = 'Stop';
+      $('btnFindResume').style.display = (!live && j.canCarryOn) ? '' : 'none';
+      $('btnFindClear').style.display = live ? 'none' : '';
+
+      $('findLine').textContent =
+        nf(j.sheetsSeen) + ' of ' + nf(j.sheetsTotal) + ' sheets read · ' +
+        nf(j.matched) + ' of ' + nf(j.asked) + ' orders found' +
+        (j.skipped ? ' · ' + nf(j.skipped) + ' skipped' : '') +
+        (live ? '   (running on the server - you can leave this page)' : '');
+
+      if(j.result) showFound(j.result);
+
+      if(live){ startFindPoll(); return; }
+      stopFindPoll();
+    }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  /* ---------- what the sheets said, a CPR at a time ---------- */
+
+  function groupFound(rows){
+    var by = {};
+    (rows || []).forEach(function(r){
+      var cpr = r.cprNumber || '(no CPR number)';
+      var key = [cpr, r.courier, r.sheet, r.tab].join(' | ');
+      if(!by[key]){
+        by[key] = {
+          key: key, cpr: cpr, cprDate: r.cprDate || null,
+          courier: r.courier || '', month: r.month || '',
+          sheet: r.sheet || '', tab: r.tab || '',
+          rows: [], amount: 0
+        };
+      }
+      by[key].rows.push(r);
+      by[key].amount += Number(r.amount || 0);
+    });
+
+    return Object.keys(by).map(function(k){ return by[k]; })
+      .sort(function(a, b){
+        return String(a.courier).localeCompare(String(b.courier)) ||
+               String(a.cpr).localeCompare(String(b.cpr));
+      });
+  }
+
+  function showFound(result){
+    F.groups = groupFound(result.rows);
+    $('stepFound').classList.remove('hide');
+
+    $('foundHint').innerHTML =
+      nf(result.found) + ' of ' + nf(result.asked) + ' orders found in the sheets, under ' +
+      nf(F.groups.length) + ' CPR' + (F.groups.length === 1 ? '' : 's') +
+      (result.missing && result.missing.length
+        ? ' · <b>' + nf(result.missing.length) + ' not written on any sheet read</b>'
+        : '');
+
+    var box = $('foundGroups');
+    box.innerHTML = '';
+
+    F.groups.forEach(function(g, i){
+      var el = document.createElement('div');
+      el.className = 'box';
+      el.id = 'fg' + i;
+      el.innerHTML =
+        '<h3><span>CPR ' + esc(g.cpr) +
+          (g.cprDate ? ' · ' + esc(g.cprDate) : '') + '</span>' +
+          '<span class="count">' + nf(g.rows.length) + ' order' +
+          (g.rows.length === 1 ? '' : 's') + ' · ' + money(g.amount) + '</span></h3>' +
+        '<p>' + esc(g.courier) + (g.month ? ' / ' + esc(g.month) : '') +
+          ' / ' + esc(g.sheet) + ' / ' + esc(g.tab) + '</p>' +
+        '<div class="scroll">' +
+          '<table class="t"><thead><tr><th>Order</th><th>Status</th>' +
+          '<th class="num">Sheet amount</th></tr></thead><tbody>' +
+          g.rows.map(function(r){
+            return '<tr><td class="mono">' + esc(r.invoice) + '</td>' +
+                   '<td>' + esc(r.status || '') + '</td>' +
+                   '<td class="num">' + money(r.amount) + '</td></tr>';
+          }).join('') +
+          '</tbody></table></div>' +
+        '<div class="acts">' +
+          '<button data-ready="' + i + '">Look these up in QuickBooks</button>' +
+          '<span class="note" id="fgNote' + i + '"></span>' +
+        '</div>' +
+        '<div id="fgOut' + i + '"></div>';
+      box.appendChild(el);
+    });
+
+    if(result.missing && result.missing.length){
+      var left = document.createElement('div');
+      left.className = 'box bad';
+      left.innerHTML =
+        '<h3><span>Not written on any sheet read</span>' +
+        '<span class="count">' + nf(result.missing.length) + '</span></h3>' +
+        '<div class="scroll"><table class="t"><tbody>' +
+        result.missing.map(function(n){
+          return '<tr><td class="mono">' + esc(n) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      box.appendChild(left);
+    }
+
+    box.querySelectorAll('button[data-ready]').forEach(function(b){
+      b.addEventListener('click', function(){ readyGroup(Number(b.dataset.ready), b); });
+    });
+  }
+
+  // look one CPR's found orders up in QuickBooks, before anything is received
+  function readyGroup(i, btn){
+    var g = F.groups[i];
+    if(!g) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Looking them up...';
+    $('fgNote' + i).textContent = '';
+
+    post('/api/check/find-ready', {
+      cpr: g.cpr === '(no CPR number)' ? '' : g.cpr,
+      cprDate: g.cprDate,
+      courier: g.courier,
+      rows: g.rows.map(function(r){
+        return { invoice: r.sheetInvoice || r.invoice, amount: r.amount };
+      })
+    }).then(function(d){
+      btn.disabled = false;
+      btn.textContent = 'Look these up in QuickBooks again';
+      F.ready[i] = d;
+      drawGroupOut(i, d);
+    }).catch(function(e){
+      btn.disabled = false;
+      btn.textContent = 'Look these up in QuickBooks';
+      $('fgNote' + i).textContent = e.message;
+    });
+  }
+
+  function drawGroupOut(i, d){
+    var g = F.groups[i];
+    var t = d.totals;
+    var out = $('fgOut' + i);
+
+    function list(title, rows, cls, render){
+      if(!rows.length) return '';
+      return '<div class="box ' + cls + '" style="margin:0 15px 12px">' +
+        '<h3><span>' + title + '</span><span class="count">' + nf(rows.length) + '</span></h3>' +
+        '<div class="scroll"><table class="t"><tbody>' +
+        rows.map(render).join('') + '</tbody></table></div></div>';
+    }
+
+    var bankNote = d.bank && d.bank.accountId
+      ? 'into ' + esc(bankName(d.bank.accountId) || d.bank.accountId)
+      : 'pick the bank below';
+
+    out.innerHTML =
+      '<div style="padding:12px 15px 0">' +
+        '<div class="tally">' +
+          '<div class="ok"><div class="n">' + nf(t.matched) + '</div>' +
+            '<div class="l">Ready to receive</div></div>' +
+          '<div class="ok"><div class="n">' + money(t.amount) + '</div>' +
+            '<div class="l">Amount</div></div>' +
+          '<div><div class="n">' + nf(t.alreadyPaid) + '</div>' +
+            '<div class="l">Already paid</div></div>' +
+          '<div class="warn"><div class="n">' + nf(t.amountOff) + '</div>' +
+            '<div class="l">Amount differs</div></div>' +
+          '<div class="bad"><div class="n">' + nf(t.notInQb) + '</div>' +
+            '<div class="l">Not in QuickBooks</div></div>' +
+        '</div>' +
+
+        list('Already paid', d.alreadyPaid, '', function(r){
+          return '<tr><td class="mono">' + esc(r.invoice) + '</td>' +
+                 '<td>' + esc(r.customerName || '') + '</td>' +
+                 '<td class="num">' + money(r.qbTotal) + '</td></tr>';
+        }) +
+        list('The sheet and QuickBooks disagree - left alone', d.amountOff, 'warn', function(r){
+          return '<tr><td class="mono">' + esc(r.invoice) + '</td>' +
+                 '<td class="why">sheet ' + money(r.sheetAmount) +
+                 ', QuickBooks is owed ' + money(r.qbBalance) + '</td></tr>';
+        }) +
+        list('Not in QuickBooks', d.notInQb, 'bad', function(r){
+          return '<tr><td class="mono">' + esc(r.invoice) + '</td>' +
+                 '<td class="num">' + money(r.sheetAmount) + '</td></tr>';
+        }) +
+      '</div>' +
+
+      '<div class="acts">' +
+        (t.matched
+          ? '<button class="solid" data-pay="' + i + '" data-need="payments">Receive ' +
+            nf(t.matched) + ' order' + (t.matched === 1 ? '' : 's') + ', ' + money(t.amount) +
+            ', under CPR ' + esc(g.cpr) + '</button>' +
+            '<span class="note">' + bankNote + ' · dated ' +
+            esc(g.cprDate || 'today') + '</span>'
+          : '<span class="note">Nothing here is open to receive.</span>') +
+      '</div>';
+
+    // the bank this courier pays into, ready in the fields below - and those
+    // fields are brought into view, because the money is about to go into them
+    if(d.bank && d.bank.accountId){
+      $('acct').value = d.bank.accountId;
+      if(d.bank.methodId) $('method').value = d.bank.methodId;
+    }
+    if(t.matched){
+      $('stepPay').classList.remove('hide');
+      $('payHint').textContent =
+        'The bank and method below are what CPR ' + g.cpr + ' will be received into. ' +
+        'Change them here if this one went somewhere else.';
+    }
+
+    // a button added after the page loaded is covered too: the rights are a
+    // style rule on data-need, not something run once over the buttons
+    var payBtn = out.querySelector('button[data-pay]');
+    if(payBtn) payBtn.addEventListener('click', function(){ payGroup(i); });
+  }
+
+  // receive one CPR's worth, under that CPR's own number and date
+  function payGroup(i){
+    var g = F.groups[i], d = F.ready[i];
+    if(!g || !d || !d.matched.length) return;
+
+    if(!$('acct').value){
+      $('stepPay').classList.remove('hide');
+      return say('bad', '<b>Pick the bank to deposit into, below.</b>');
+    }
+
+    var where = $('acct').options[$('acct').selectedIndex].textContent;
+    if(!confirm('Receive ' + d.matched.length + ' order' +
+                (d.matched.length === 1 ? '' : 's') + ', ' + money(d.totals.amount) +
+                ', under CPR ' + g.cpr + ' into ' + where + '?')) return;
+
+    clearSay();
+    $('stepPay').classList.remove('hide');
+    $('payHint').textContent = 'Receiving ' + d.matched.length + ' orders, ' +
+      money(d.totals.amount) + ', under CPR ' + g.cpr + ' into ' + where + '.';
+    $('payLog').innerHTML = '';
+    S.payEvent = 0;
+
+    post('/api/cpr/receive', {
+      courier: g.courier,
+      cprNumber: g.cpr === '(no CPR number)' ? '' : g.cpr,
+      cprDate: g.cprDate,
+      accountId: $('acct').value,
+      accountName: where,
+      methodId: $('method').value || null,
+      matched: d.matched,
+      writeStatus: false
+    }).then(function(){
+      pollPay(true);
+      startPayPoll();
+      $('stepPay').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
 })();
 </script>
 </body>
