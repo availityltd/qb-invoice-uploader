@@ -4,10 +4,11 @@
 
 import { getAccount, saveOrders, needCpr, savePayments } from './couriers.js';
 import { adapter as postexAdapter } from './postex.js';
+import { realmOf } from './desk.js';
 
 const ADAPTERS = { postex: postexAdapter };
 
-const jobs = new Map();          // realmId -> job
+const jobs = new Map();          // desk (company and person) -> job
 
 const now = () => Date.now();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -61,8 +62,8 @@ function monthsBetween(from, to) {
   return out;
 }
 
-export function backfillSnapshot(realmId, since) {
-  const job = jobs.get(realmId);
+export function backfillSnapshot(desk, since) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   return {
@@ -87,8 +88,9 @@ export function backfillSnapshot(realmId, since) {
 
 // Carry on after a Stop or a failure: the months not yet kept are read again,
 // and the receipts are asked for again where they are still missing.
-export function resumeBackfill(realmId) {
-  const job = jobs.get(realmId);
+export function resumeBackfill(desk) {
+  const realmId = realmOf(desk);
+  const job = jobs.get(desk);
   if (!job) throw new Error('There is no backfill to carry on');
   if (job.state === 'running') throw new Error('The backfill is still running');
   if (job.state === 'done') throw new Error('The backfill already finished');
@@ -108,22 +110,23 @@ export function resumeBackfill(realmId) {
   });
 }
 
-export function stopBackfill(realmId) {
-  const job = jobs.get(realmId);
+export function stopBackfill(desk) {
+  const job = jobs.get(desk);
   if (!job || job.state !== 'running') return false;
   job.cancel = true;
   return true;
 }
 
-export function clearBackfill(realmId) {
-  const job = jobs.get(realmId);
+export function clearBackfill(desk) {
+  const job = jobs.get(desk);
   if (job && job.state === 'running') return false;
-  jobs.delete(realmId);
+  jobs.delete(desk);
   return true;
 }
 
-export function startBackfill(realmId, opts) {
-  const old = jobs.get(realmId);
+export function startBackfill(desk, opts) {
+  const realmId = realmOf(desk);
+  const old = jobs.get(desk);
   if (old && old.state === 'running') throw new Error('A backfill is already running');
 
   const from = String(opts.from || '').slice(0, 10);
@@ -157,7 +160,7 @@ export function startBackfill(realmId, opts) {
   };
   job.monthsTotal = job.months.length;
 
-  jobs.set(realmId, job);
+  jobs.set(desk, job);
   run(realmId, job).catch(e => {
     job.state = 'failed';
     job.error = e.message;

@@ -10,12 +10,13 @@
 // QuickBooks answers that the old product is no longer on it - which the run
 // counts as done.
 
-import { pool } from './db.js';
+import { pool, keyRunsByDesk } from './db.js';
+import { realmOf, userOf } from './desk.js';
 
 export async function initReplaceStore() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS replace_state (
-      realm_id   TEXT PRIMARY KEY,
+      realm_id   TEXT NOT NULL,
       pairs      JSONB,
       scan       JSONB,
       rows       JSONB,
@@ -23,6 +24,7 @@ export async function initReplaceStore() {
       updated_at TIMESTAMPTZ DEFAULT now()
     )
   `);
+  await keyRunsByDesk('replace_state');
 }
 
 // what a row needs to be run again - the rest is rebuilt or not needed
@@ -48,14 +50,14 @@ function scanRow(s) {
   return { from: s.from, to: s.to, kinds: s.kinds, found: s.found, read: s.read };
 }
 
-export async function saveReplace(realmId, st) {
+export async function saveReplace(desk, st) {
   await pool.query(
-    `INSERT INTO replace_state (realm_id, pairs, scan, rows, job, updated_at)
-     VALUES ($1,$2,$3,$4,$5, now())
-     ON CONFLICT (realm_id) DO UPDATE SET
-       pairs = $2, scan = $3, rows = $4, job = $5, updated_at = now()`,
+    `INSERT INTO replace_state (realm_id, user_sub, pairs, scan, rows, job, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6, now())
+     ON CONFLICT (realm_id, user_sub) DO UPDATE SET
+       pairs = $3, scan = $4, rows = $5, job = $6, updated_at = now()`,
     [
-      realmId,
+      realmOf(desk), userOf(desk),
       JSON.stringify(st.pairs || []),
       JSON.stringify(scanRow(st.scan)),
       JSON.stringify((st.rows || []).map(slimRow)),
@@ -64,8 +66,9 @@ export async function saveReplace(realmId, st) {
   );
 }
 
-export async function clearReplace(realmId) {
-  await pool.query(`DELETE FROM replace_state WHERE realm_id = $1`, [realmId]);
+export async function clearReplace(desk) {
+  await pool.query(`DELETE FROM replace_state WHERE realm_id = $1 AND user_sub = $2`,
+    [realmOf(desk), userOf(desk)]);
 }
 
 // every run that was still going when the server went down, not too old to trust

@@ -2,8 +2,11 @@ import { getAccessToken } from './qb.js';
 import { postPayment } from './cpr.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
 import { stampRows } from './sheets.js';
+import { realmOf } from './desk.js';
 
-// one advance run per company, kept on the server so leaving the page is safe
+// one advance run per desk - the company and the person signed in, together -
+// kept on the server, so leaving the page or moving to another computer is
+// safe, and two people in the same books do not share a run
 const jobs = new Map();
 const MAX_EVENTS = 2000;
 
@@ -31,10 +34,11 @@ async function tokenFor(realmId, job, force) {
   return job.token;
 }
 
-export function startAdvJob(realmId, body) {
-  const live = jobs.get(realmId);
+export function startAdvJob(desk, body) {
+  const realmId = realmOf(desk);
+  const live = jobs.get(desk);
   if (live && live.state === 'running') {
-    throw new Error('An advance payment run is already going for this company');
+    throw new Error('An advance payment run of yours is already going');
   }
 
   if (!Array.isArray(body.rows) || !body.rows.length) throw new Error('Nothing to receive');
@@ -60,7 +64,7 @@ export function startAdvJob(realmId, body) {
     finishedAt: null
   };
 
-  jobs.set(realmId, job);
+  jobs.set(desk, job);
   run(realmId, job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -227,8 +231,9 @@ async function run(realmId, job, only) {
 
 // Carry on after a Stop: the rows not yet paid go through again, in the same log.
 // A row is paid once its invoice is in job.paid, so nothing is paid twice.
-export function resumeAdvJob(realmId) {
-  const job = jobs.get(realmId);
+export function resumeAdvJob(desk) {
+  const realmId = realmOf(desk);
+  const job = jobs.get(desk);
   if (!job) throw new Error('There is no run to carry on');
   if (job.state === 'running') throw new Error('The run is still going');
 
@@ -250,23 +255,23 @@ export function resumeAdvJob(realmId) {
   });
 }
 
-export function stopAdvJob(realmId) {
-  const job = jobs.get(realmId);
+export function stopAdvJob(desk) {
+  const job = jobs.get(desk);
   if (!job) return false;
   job.stop = true;
   push(job, 'log', 'Stop requested - finishing the payment in flight...');
   return true;
 }
 
-export function clearAdvJob(realmId) {
-  const job = jobs.get(realmId);
+export function clearAdvJob(desk) {
+  const job = jobs.get(desk);
   if (job && job.state === 'running') return false;
-  jobs.delete(realmId);
+  jobs.delete(desk);
   return true;
 }
 
-export function advSnapshot(realmId, since, full) {
-  const job = jobs.get(realmId);
+export function advSnapshot(desk, since, full) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   const out = {

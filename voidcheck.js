@@ -12,7 +12,7 @@ import { listTabs } from './sheets.js';
 import { digitsOf } from './cpr.js';
 import { readDateColumns } from './voidsheet.js';
 
-const jobs = new Map();            // realmId -> job
+const jobs = new Map();            // desk (company and person) -> job
 const MAX_EVENTS = 3000;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -43,10 +43,10 @@ async function tryThrice(job, what, work) {
   throw last;
 }
 
-export function startCheckJob(realmId, opts) {
-  const live = jobs.get(realmId);
+export function startCheckJob(desk, opts) {
+  const live = jobs.get(desk);
   if (live && live.state === 'running') {
-    throw new Error('A return sheet check is already going for this company');
+    throw new Error('A return sheet check of yours is already going');
   }
 
   const raw = opts.numbers;
@@ -93,7 +93,7 @@ export function startCheckJob(realmId, opts) {
     finishedAt: null
   };
 
-  jobs.set(realmId, job);
+  jobs.set(desk, job);
   run(job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -171,8 +171,8 @@ async function run(job, only) {
 
 // Carry on after a Stop: the tabs not yet read are read now, in the same log,
 // and what was found before stands.
-export function resumeCheckJob(realmId) {
-  const job = jobs.get(realmId);
+export function resumeCheckJob(desk) {
+  const job = jobs.get(desk);
   if (!job) throw new Error('There is no return sheet check to carry on');
   if (job.state === 'running') throw new Error('The return sheet check is still going');
 
@@ -193,23 +193,23 @@ export function resumeCheckJob(realmId) {
   });
 }
 
-export function stopCheckJob(realmId) {
-  const job = jobs.get(realmId);
+export function stopCheckJob(desk) {
+  const job = jobs.get(desk);
   if (!job) return false;
   job.stop = true;
   push(job, 'log', 'Stop requested - finishing the tab being read...');
   return true;
 }
 
-export function clearCheckJob(realmId) {
-  const job = jobs.get(realmId);
+export function clearCheckJob(desk) {
+  const job = jobs.get(desk);
   if (job && job.state === 'running') return false;
-  jobs.delete(realmId);
+  jobs.delete(desk);
   return true;
 }
 
-export function checkSnapshot(realmId, since, full) {
-  const job = jobs.get(realmId);
+export function checkSnapshot(desk, since, full) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   const found = [], missing = [];

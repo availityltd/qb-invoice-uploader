@@ -1,7 +1,10 @@
 import { getAccessToken, loadItems, loadTerms, getOrCreateCustomer, postInvoice } from './qb.js';
+import { realmOf, deskKey } from './desk.js';
 import { logUpload } from './db.js';
 import { saveJobStart, saveJobProgress, clearJobRow, unfinishedJobs } from './jobstore.js';
 // one running job per company, kept on the server so it survives page changes
+// keyed by the desk - the company and the person together - so two people in
+// the same books each have their own upload, their own log and their own Stop
 const jobs = new Map();
 const MAX_EVENTS = 4000;
 const MAX_ROUNDS = 5;
@@ -110,10 +113,11 @@ async function tokenFor(realmId, job, force) {
   return job.token;
 }
 
-export function startJob(realmId, { invoices, delay, negativeItems, batchSize }) {
-  const live = jobs.get(realmId);
+export function startJob(desk, { invoices, delay, negativeItems, batchSize }) {
+  const realmId = realmOf(desk);
+  const live = jobs.get(desk);
   if (live && (live.state === 'running' || live.state === 'waiting')) {
-    throw new Error('An upload is already running for this company');
+    throw new Error('An upload of yours is already running');
   }
 
   let size = Number(batchSize) || 10;
@@ -122,6 +126,7 @@ export function startJob(realmId, { invoices, delay, negativeItems, batchSize })
 
   const job = {
     id: Date.now(),
+    desk,
     state: 'running',
     stop: false,
     hold: false,
@@ -144,8 +149,8 @@ export function startJob(realmId, { invoices, delay, negativeItems, batchSize })
     finishedAt: null
   };
 
-  jobs.set(realmId, job);
-      saveJobStart(realmId, job).catch(e => console.error('job save failed:', e.message));
+  jobs.set(desk, job);
+  saveJobStart(desk, job).catch(e => console.error('job save failed:', e.message));
   run(realmId, job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -305,7 +310,7 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
         job.cursor = Math.min(job.total, i + job.batchSize);
       }
       // the place is written down after every batch, so a restart loses nothing
-            saveJobProgress(realmId, job).catch(e => console.error('job progress failed:', e.message));
+            saveJobProgress(job.desk, job).catch(e => console.error('job progress failed:', e.message));
       if (i + job.batchSize < pending.length) await nap(job, job.delay);
     }
 
@@ -357,11 +362,11 @@ async function run(realmId, job) {
   }
 
   job.finishedAt = Date.now();
-         saveJobProgress(realmId, job).catch(e => console.error('job progress failed:', e.message));
+         saveJobProgress(job.desk, job).catch(e => console.error('job progress failed:', e.message));
 }
 
-export function stopJob(realmId) {
-  const job = jobs.get(realmId);
+export function stopJob(desk) {
+  const job = jobs.get(desk);
   if (!job) return false;
   job.stop = true;
   job.hold = false;
@@ -371,16 +376,16 @@ export function stopJob(realmId) {
 
 // Pause holds the run where it is. Resume picks up from the same place, so
 // nothing already in QuickBooks is sent a second time.
-export function pauseJob(realmId) {
-  const job = jobs.get(realmId);
+export function pauseJob(desk) {
+  const job = jobs.get(desk);
   if (!job) return false;
   if (job.state !== 'running' && job.state !== 'waiting') return false;
   job.hold = true;
   return true;
 }
 
-export function resumeJob(realmId) {
-  const job = jobs.get(realmId);
+export function resumeJob(desk) {
+  const job = jobs.get(desk);
   if (!job) throw new Error('Nothing to resume');
 
   // still on the server and merely held - just let it go
@@ -400,7 +405,7 @@ export function resumeJob(realmId) {
       lastId: job.lastId
     };
 
-    const id = startJob(realmId, {
+    const id = startJob(desk, {
       invoices: left,
       delay: job.delay,
       negativeItems: [...job.negSet],
@@ -408,7 +413,7 @@ export function resumeJob(realmId) {
     });
 
     // keep the log and the tally, so the page reads as one long run
-    const fresh = jobs.get(realmId);
+    const fresh = jobs.get(desk);
     fresh.done = carried.done;
     fresh.events = carried.events;
     fresh.lastId = carried.lastId;
@@ -421,15 +426,15 @@ export function resumeJob(realmId) {
   throw new Error('The upload is already going');
 }
 
-export function clearJob(realmId) {
-  const job = jobs.get(realmId);
+export function clearJob(desk) {
+  const job = jobs.get(desk);
   if (job && (job.state === 'running' || job.state === 'waiting' || job.state === 'paused')) return false;
-  jobs.delete(realmId);
+  jobs.delete(desk);
   return true;
 }
 
-export function retryFailed(realmId) {
-  const job = jobs.get(realmId);
+export function retryFailed(desk) {
+  const job = jobs.get(desk);
   if (!job) throw new Error('Nothing to retry');
   if (job.state === 'running' || job.state === 'waiting' || job.state === 'paused') {
     throw new Error('The upload is still going');
@@ -441,7 +446,7 @@ export function retryFailed(realmId) {
   const set = new Set(stuck);
   const list = job.invoices.filter(inv => set.has(inv.docNumber));
 
-  return startJob(realmId, {
+  return startJob(desk, {
     invoices: list,
     delay: job.delay,
     negativeItems: [...job.negSet],
@@ -450,8 +455,8 @@ export function retryFailed(realmId) {
 }
 
 // what the page needs to draw itself, from scratch or from where it left off
-export function snapshot(realmId, since, full) {
-  const job = jobs.get(realmId);
+export function snapshot(desk, since, full) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   const out = {
@@ -481,14 +486,14 @@ export function snapshot(realmId, since, full) {
   return out;
 }
 
-export function remainingInvoices(realmId) {
-  const job = jobs.get(realmId);
+export function remainingInvoices(desk) {
+  const job = jobs.get(desk);
   if (!job) return [];
   return job.invoices.filter(inv => !job.done.has(inv.docNumber));
 }
 
-export function negativesOf(realmId) {
-  const job = jobs.get(realmId);
+export function negativesOf(desk) {
+  const job = jobs.get(desk);
   return job ? [...job.negSet] : [];
 }
 // When the server comes back after a deploy or a crash, any run that was still
@@ -504,10 +509,11 @@ export async function resumeUnfinished() {
       const done = new Set(row.done || []);
       const left = all.filter(inv => !done.has(inv.docNumber));
 
-      if (!left.length) { await clearJobRow(row.realm_id); continue; }
+      const desk = deskKey(row.realm_id, row.user_sub || '');
+      if (!left.length) { await clearJobRow(desk); continue; }
 
       const opts = row.opts || {};
-      startJob(row.realm_id, {
+      startJob(desk, {
         invoices: left,
         delay: opts.delay,
         negativeItems: opts.negativeItems || [],
@@ -515,7 +521,7 @@ export async function resumeUnfinished() {
       });
 
       // carry the tally and the log across, so the page reads as one run
-      const job = jobs.get(row.realm_id);
+      const job = jobs.get(desk);
       if (job) {
         job.done = done;
         job.failed = new Set(row.failed || []);
@@ -526,7 +532,7 @@ export async function resumeUnfinished() {
         job.cursor = Number(row.cursor) || done.size;
         push(job, 'log',
           `Server restarted - carrying on. ${done.size} already uploaded, ${left.length} to go.`);
-        saveJobStart(row.realm_id, job).catch(() => {});
+        saveJobStart(desk, job).catch(() => {});
       }
     } catch (e) { /* one bad row must not stop the rest */ }
   }

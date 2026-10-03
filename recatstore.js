@@ -10,12 +10,13 @@
 // category change leaves no trace in QuickBooks' own audit log beyond "edited",
 // so this is the only place that says why the P&L moved.
 
-import { pool } from './db.js';
+import { pool, keyRunsByDesk } from './db.js';
+import { realmOf, userOf } from './desk.js';
 
 export async function initRecatStore() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS recat_state (
-      realm_id   TEXT PRIMARY KEY,
+      realm_id   TEXT NOT NULL,
       from_acct  JSONB,
       to_acct    JSONB,
       scan       JSONB,
@@ -45,6 +46,9 @@ export async function initRecatStore() {
       created_at TIMESTAMPTZ DEFAULT now()
     )
   `);
+
+  // the half-finished run is one person's, the history below is the company's
+  await keyRunsByDesk('recat_state');
 
   await pool.query(
     `CREATE INDEX IF NOT EXISTS recat_moves_realm ON recat_moves (realm_id, created_at DESC)`
@@ -83,14 +87,14 @@ function scanRow(scan) {
   };
 }
 
-export async function saveRecatState(realmId, st) {
+export async function saveRecatState(desk, st) {
   await pool.query(
-    `INSERT INTO recat_state (realm_id, from_acct, to_acct, scan, txns, job, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6, now())
-     ON CONFLICT (realm_id) DO UPDATE SET
-       from_acct = $2, to_acct = $3, scan = $4, txns = $5, job = $6, updated_at = now()`,
+    `INSERT INTO recat_state (realm_id, user_sub, from_acct, to_acct, scan, txns, job, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+     ON CONFLICT (realm_id, user_sub) DO UPDATE SET
+       from_acct = $3, to_acct = $4, scan = $5, txns = $6, job = $7, updated_at = now()`,
     [
-      realmId,
+      realmOf(desk), userOf(desk),
       JSON.stringify(st.from || null),
       JSON.stringify(st.to || null),
       JSON.stringify(scanRow(st.scan)),
@@ -102,15 +106,18 @@ export async function saveRecatState(realmId, st) {
 
 // after each transaction only the moving parts are written - the two accounts
 // and the scan behind them do not change once the run has started
-export async function saveRecatProgress(realmId, st) {
+export async function saveRecatProgress(desk, st) {
   await pool.query(
-    `UPDATE recat_state SET txns = $2, job = $3, updated_at = now() WHERE realm_id = $1`,
-    [realmId, JSON.stringify(st.rows || []), JSON.stringify(jobRow(st.job))]
+    `UPDATE recat_state SET txns = $2, job = $3, updated_at = now()
+      WHERE realm_id = $1 AND user_sub = $4`,
+    [realmOf(desk), JSON.stringify(st.rows || []), JSON.stringify(jobRow(st.job)), userOf(desk)]
   );
 }
 
-export async function loadRecatState(realmId) {
-  const r = await pool.query(`SELECT * FROM recat_state WHERE realm_id = $1`, [realmId]);
+export async function loadRecatState(desk) {
+  const r = await pool.query(
+    `SELECT * FROM recat_state WHERE realm_id = $1 AND user_sub = $2`,
+    [realmOf(desk), userOf(desk)]);
   const row = r.rows[0];
   if (!row) return null;
 
@@ -124,8 +131,9 @@ export async function loadRecatState(realmId) {
   };
 }
 
-export async function clearRecatState(realmId) {
-  await pool.query(`DELETE FROM recat_state WHERE realm_id = $1`, [realmId]);
+export async function clearRecatState(desk) {
+  await pool.query(`DELETE FROM recat_state WHERE realm_id = $1 AND user_sub = $2`,
+    [realmOf(desk), userOf(desk)]);
 }
 
 // every run that was still going when the server went down. A scan is not

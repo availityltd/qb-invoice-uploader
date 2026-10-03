@@ -2,8 +2,11 @@ import { getAccessToken } from './qb.js';
 import { postPayment } from './cpr.js';
 import { writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
+import { realmOf } from './desk.js';
 
-// one payment run per company, kept on the server so leaving the page is safe
+// one payment run per desk - the company and the person signed in, together -
+// kept on the server, so leaving the page or moving to another computer is
+// safe, and two people in the same books do not share a run
 const jobs = new Map();
 const MAX_EVENTS = 2000;
 
@@ -20,10 +23,11 @@ function push(job, type, msg, extra) {
   }
 }
 
-export function startPayJob(realmId, body) {
-  const live = jobs.get(realmId);
+export function startPayJob(desk, body) {
+  const realmId = realmOf(desk);
+  const live = jobs.get(desk);
   if (live && live.state === 'running') {
-    throw new Error('A payment run is already going for this company');
+    throw new Error('A payment run of yours is already going');
   }
 
   if (!body.accountId) throw new Error('Deposit account required');
@@ -47,7 +51,7 @@ export function startPayJob(realmId, body) {
     finishedAt: null
   };
 
-  jobs.set(realmId, job);
+  jobs.set(desk, job);
   run(realmId, job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -221,8 +225,9 @@ async function run(realmId, job, only) {
 
 // Carry on after a Stop: the rows not yet paid go through again, in the same log.
 // A row is paid once its invoice is in job.paidInvoices, so nothing is paid twice.
-export function resumePayJob(realmId) {
-  const job = jobs.get(realmId);
+export function resumePayJob(desk) {
+  const realmId = realmOf(desk);
+  const job = jobs.get(desk);
   if (!job) throw new Error('There is no run to carry on');
   if (job.state === 'running') throw new Error('The run is still going');
 
@@ -243,23 +248,23 @@ export function resumePayJob(realmId) {
   });
 }
 
-export function stopPayJob(realmId) {
-  const job = jobs.get(realmId);
+export function stopPayJob(desk) {
+  const job = jobs.get(desk);
   if (!job) return false;
   job.stop = true;
   push(job, 'log', 'Stop requested - finishing the payment in flight...');
   return true;
 }
 
-export function clearPayJob(realmId) {
-  const job = jobs.get(realmId);
+export function clearPayJob(desk) {
+  const job = jobs.get(desk);
   if (job && job.state === 'running') return false;
-  jobs.delete(realmId);
+  jobs.delete(desk);
   return true;
 }
 
-export function paySnapshot(realmId, since, full) {
-  const job = jobs.get(realmId);
+export function paySnapshot(desk, since, full) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   const out = {

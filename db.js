@@ -108,3 +108,30 @@ export async function renameCompany(realmId, companyName) {
     [companyName, realmId]
   );
 }
+
+// A table that used to hold one run per company now holds one per person in it.
+// This widens such a table in place: the column is added if it is not there, and
+// the key moves from the company alone to the company and the person together.
+// Rows written before the change keep an empty sign-in, which is nobody's desk,
+// so an old run is never shown to someone as their own.
+export async function keyRunsByDesk(table) {
+  await pool.query(
+    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS user_sub TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`
+    DO $$
+    DECLARE held text;
+    BEGIN
+      SELECT string_agg(a.attname, ',' ORDER BY a.attnum) INTO held
+        FROM pg_constraint c
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+       WHERE c.conrelid = '${table}'::regclass AND c.contype = 'p';
+
+      IF held IS NULL THEN
+        ALTER TABLE ${table} ADD PRIMARY KEY (realm_id, user_sub);
+      ELSIF held = 'realm_id' THEN
+        ALTER TABLE ${table} DROP CONSTRAINT ${table}_pkey;
+        ALTER TABLE ${table} ADD PRIMARY KEY (realm_id, user_sub);
+      END IF;
+    END $$;
+  `);
+}

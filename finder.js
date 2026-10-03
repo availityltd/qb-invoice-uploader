@@ -7,8 +7,9 @@ import { listFolders, listSheetsIn, listTabs } from './sheets.js';
 import { loadSheet, digitsOf } from './cpr.js';
 import { readDateColumns } from './voidsheet.js';
 import { getSetting } from './settings.js';
+import { realmOf } from './desk.js';
 
-const jobs = new Map();          // realmId -> job
+const jobs = new Map();          // desk (company and person) -> job
 
 function now() { return Date.now(); }
 
@@ -185,8 +186,8 @@ function summarise(job) {
   };
 }
 
-export function findSnapshot(realmId, since) {
-  const job = jobs.get(realmId);
+export function findSnapshot(desk, since) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   const from = Number(since) || 0;
@@ -209,8 +210,9 @@ export function findSnapshot(realmId, since) {
 }
 
 // Carry on after a Stop: the sheets not yet read are read, what was found stays.
-export function resumeFindJob(realmId) {
-  const job = jobs.get(realmId);
+export function resumeFindJob(desk) {
+  const realmId = realmOf(desk);
+  const job = jobs.get(desk);
   if (!job) throw new Error('There is no search to carry on');
   if (job.state === 'running') throw new Error('The search is still running');
   if (job.state === 'done') throw new Error('The search already finished');
@@ -230,22 +232,23 @@ export function resumeFindJob(realmId) {
   });
 }
 
-export function stopFindJob(realmId) {
-  const job = jobs.get(realmId);
+export function stopFindJob(desk) {
+  const job = jobs.get(desk);
   if (!job || job.state !== 'running') return false;
   job.cancel = true;
   return true;
 }
 
-export function clearFindJob(realmId) {
-  const job = jobs.get(realmId);
+export function clearFindJob(desk) {
+  const job = jobs.get(desk);
   if (job && job.state === 'running') return false;
-  jobs.delete(realmId);
+  jobs.delete(desk);
   return true;
 }
 
-export function startFindJob(realmId, opts) {
-  const old = jobs.get(realmId);
+export function startFindJob(desk, opts) {
+  const realmId = realmOf(desk);
+  const old = jobs.get(desk);
   if (old && old.state === 'running') throw new Error('A search is already running');
 
   const raw = opts.numbers;
@@ -289,7 +292,7 @@ export function startFindJob(realmId, opts) {
     returnSheet: opts.returnSheet || null   // { id, name, excel, tabs, from, to }
   };
 
-  jobs.set(realmId, job);
+  jobs.set(desk, job);
   run(realmId, job).catch(e => {
     job.state = 'failed';
     job.error = e.message;

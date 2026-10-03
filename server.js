@@ -345,6 +345,11 @@ async function requireCompany(req, res) {
     res.status(403).json({ error: 'The admin has turned your access to this app off.' });
     return null;
   }
+  // Whose desk this is. The company is what QuickBooks is asked about and what
+  // the books are written to; the desk is what a run belongs to, so two people
+  // in the same company work side by side without seeing one another's runs -
+  // the same way they would in QuickBooks itself.
+  req.desk = deskKey(realmId, sub);
   return realmId;
 }
 
@@ -2077,7 +2082,7 @@ app.post('/api/invoice-delete-start', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startDelJob(realmId, req.body);
+    const id = startDelJob(req.desk, req.body);
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -2088,21 +2093,21 @@ app.get('/api/invoice-delete-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = delSnapshot(realmId, req.query.since || 0);
+  const snap = delSnapshot(req.desk, req.query.since || 0);
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/invoice-delete-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopDelJob(realmId) });
+  res.json({ ok: stopDelJob(req.desk) });
 });
 
 app.post('/api/invoice-delete-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeDelJob(realmId);
+    resumeDelJob(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -2112,7 +2117,7 @@ app.post('/api/invoice-delete-resume', async (req, res) => {
 app.post('/api/invoice-delete-clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearDelJob(realmId);
+  const ok = clearDelJob(req.desk);
   if (!ok) return res.status(409).json({ error: 'The delete run is still going' });
   res.json({ ok: true });
 });
@@ -3090,7 +3095,7 @@ app.post('/api/cpr/receive', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startPayJob(realmId, req.body);
+    const id = startPayJob(req.desk, req.body);
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3101,21 +3106,21 @@ app.get('/api/cpr/receive-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = paySnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  const snap = paySnapshot(req.desk, req.query.since || 0, req.query.full === '1');
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/cpr/receive-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopPayJob(realmId) });
+  res.json({ ok: stopPayJob(req.desk) });
 });
 
 app.post('/api/cpr/receive-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumePayJob(realmId);
+    resumePayJob(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3125,7 +3130,7 @@ app.post('/api/cpr/receive-resume', async (req, res) => {
 app.post('/api/cpr/receive-clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearPayJob(realmId);
+  const ok = clearPayJob(req.desk);
   if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
   res.json({ ok: true });
 });
@@ -3140,7 +3145,7 @@ app.post('/api/check/scan', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startCheck(realmId, Object.assign({ kind: 'cpr' }, req.body));
+    const id = startCheck(req.desk, Object.assign({ kind: 'cpr' }, req.body));
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3161,7 +3166,7 @@ app.post('/api/check/invoices', async (req, res) => {
   if (numbers.length > 500) return res.status(400).json({ error: 'That is more than 500 numbers' });
 
   try {
-    const id = startCheck(realmId, { kind: 'invoices', numbers });
+    const id = startCheck(req.desk, { kind: 'invoices', numbers });
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3172,21 +3177,21 @@ app.get('/api/check/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = checkSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  const snap = checkSnapshot(req.desk, req.query.since || 0, req.query.full === '1');
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/check/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopCheck(realmId) });
+  res.json({ ok: stopCheck(req.desk) });
 });
 
 app.post('/api/check/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeCheck(realmId);
+    resumeCheck(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3196,7 +3201,7 @@ app.post('/api/check/resume', async (req, res) => {
 app.post('/api/check/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearCheck(realmId);
+  const ok = clearCheck(req.desk);
   if (!ok) return res.status(409).json({ error: 'The check is still going' });
   res.json({ ok: true });
 });
@@ -3208,7 +3213,7 @@ app.post('/api/check/fix', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startFix(realmId, req.body);
+    const id = startFix(req.desk, req.body);
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3219,21 +3224,21 @@ app.get('/api/check/fix-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = fixSnapshot(realmId, req.query.since || 0);
+  const snap = fixSnapshot(req.desk, req.query.since || 0);
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/check/fix-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopFix(realmId) });
+  res.json({ ok: stopFix(req.desk) });
 });
 
 app.post('/api/check/fix-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeFix(realmId);
+    resumeFix(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3243,7 +3248,7 @@ app.post('/api/check/fix-resume', async (req, res) => {
 app.post('/api/check/fix-clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearFix(realmId);
+  const ok = clearFix(req.desk);
   if (!ok) return res.status(409).json({ error: 'The fix is still going' });
   res.json({ ok: true });
 });
@@ -3357,7 +3362,7 @@ app.post('/api/find/start', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startFindJob(realmId, req.body);
+    const id = startFindJob(req.desk, req.body);
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3368,21 +3373,21 @@ app.get('/api/find/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = findSnapshot(realmId, req.query.since || 0);
+  const snap = findSnapshot(req.desk, req.query.since || 0);
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/find/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopFindJob(realmId) });
+  res.json({ ok: stopFindJob(req.desk) });
 });
 
 app.post('/api/find/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeFindJob(realmId);
+    resumeFindJob(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -3392,7 +3397,7 @@ app.post('/api/find/resume', async (req, res) => {
 app.post('/api/find/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearFindJob(realmId);
+  const ok = clearFindJob(req.desk);
   if (!ok) return res.status(409).json({ error: 'The search is still running' });
   res.json({ ok: true });
 });
@@ -3403,7 +3408,7 @@ app.get('/api/find/file', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const snap = findSnapshot(realmId, 0);
+  const snap = findSnapshot(req.desk, 0);
   if (!snap || !snap.result) return res.status(404).json({ error: 'Nothing to download yet' });
 
   const r = snap.result;
@@ -3558,11 +3563,11 @@ app.get('/api/find/file', async (req, res) => {
 //
 // The uploaded files stay in memory for the company, so changing a column or
 // the matching strength does not mean uploading again.
-const mergeStore = new Map();          // realmId -> { files, orders, groups, at }
+const mergeStore = new Map();          // desk -> { files, orders, groups, at }
 const KEEP_BYTES = 40 * 1024 * 1024;   // beyond this the uploaded bytes are dropped
 
-function mergeState(realmId) {
-  const st = mergeStore.get(realmId);
+function mergeState(desk) {
+  const st = mergeStore.get(desk);
   if (!st) throw new Error('Upload the Shopify files first');
   return st;
 }
@@ -3617,8 +3622,8 @@ app.post('/api/merge/upload', takeMergeFiles, async (req, res) => {
         error: 'No orders found. Check that the files have an order number column.'
       });
     }
-    mergeStore.set(realmId, { files, orders, groups: [], at: Date.now() });
-    res.json({ files: mergeFilesReport(mergeStore.get(realmId)), orders: orders.length });
+    mergeStore.set(req.desk, { files, orders, groups: [], at: Date.now() });
+    res.json({ files: mergeFilesReport(mergeStore.get(req.desk)), orders: orders.length });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -3630,7 +3635,7 @@ app.get('/api/merge/state', async (req, res) => {
   if (!realmId) return;
 
   res.setHeader('Cache-Control', 'no-store');
-  const st = mergeStore.get(realmId);
+  const st = mergeStore.get(req.desk);
   if (!st) return res.json({ loaded: false });
   res.json({
     loaded: true,
@@ -3648,7 +3653,7 @@ app.post('/api/merge/columns', async (req, res) => {
 
   const { file, cols } = req.body || {};
   try {
-    const st = mergeState(realmId);
+    const st = mergeState(req.desk);
     const f = st.files.find(x => x.name === file);
     if (!f) return res.status(400).json({ error: 'No such file' });
 
@@ -3668,7 +3673,7 @@ app.post('/api/merge/scan', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = mergeState(realmId);
+    const st = mergeState(req.desk);
     const minFields = Number(req.body && req.body.minFields) || 4;
     // one parcel is one day's ordering - the same customer next week is a
     // second parcel, delivered and collected on its own
@@ -3711,7 +3716,7 @@ app.get('/api/merge/csv', async (req, res) => {
   if (!realmId) return;
 
   let st;
-  try { st = mergeState(realmId); }
+  try { st = mergeState(req.desk); }
   catch (e) { return res.status(400).json({ error: e.message }); }
 
   const cell = v => {
@@ -3744,7 +3749,7 @@ app.post('/api/merge/paste', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = mergeState(realmId);
+    const st = mergeState(req.desk);
     if (!st.groups.length) throw new Error('Find the groups first');
 
     const parsed = parsePasted(req.body && req.body.text);
@@ -3843,7 +3848,7 @@ app.get('/api/merge/columns-back', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const lines = mergeColumns(mergeState(realmId));
+    const lines = mergeColumns(mergeState(req.desk));
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       changed: lines.filter(l => l.changed).length,
@@ -3898,7 +3903,7 @@ app.post('/api/merge/strip', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = mergeState(realmId);
+    const st = mergeState(req.desk);
     if (!st.plan || !st.plan.plans.length) throw new Error('Match the pasted rows first');
     if (st.strip && st.strip.running) throw new Error('That is already running');
 
@@ -3932,7 +3937,7 @@ app.get('/api/merge/strip-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const st = mergeStore.get(realmId);
+  const st = mergeStore.get(req.desk);
   const job = st && st.strip;
   res.setHeader('Cache-Control', 'no-store');
   if (!job) return res.json({ running: false, done: 0, total: 0, log: [] });
@@ -3951,7 +3956,7 @@ app.get('/api/merge/strip-status', async (req, res) => {
 app.post('/api/merge/strip-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = mergeStore.get(realmId);
+  const st = mergeStore.get(req.desk);
   if (st && st.strip) st.strip.stop = true;
   res.json({ ok: true });
 });
@@ -3960,7 +3965,7 @@ app.post('/api/merge/strip-stop', async (req, res) => {
 app.post('/api/merge/strip-clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = mergeStore.get(realmId);
+  const st = mergeStore.get(req.desk);
   if (st && st.strip && st.strip.running) return res.status(400).json({ error: 'The run is still going' });
   if (st) st.strip = null;
   res.json({ ok: true });
@@ -3969,7 +3974,7 @@ app.post('/api/merge/strip-clear-log', async (req, res) => {
 app.post('/api/merge/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  mergeStore.delete(realmId);
+  mergeStore.delete(req.desk);
   res.json({ ok: true });
 });
 
@@ -3980,7 +3985,7 @@ app.post('/api/merge/clear', async (req, res) => {
 // are pasted, the shipping line on each is shown, and the ticked ones are taken
 // off. It keeps its own list so it does not disturb a CPR match in progress.
 
-const shipStore = new Map();           // realmId -> { rows, job, at }
+const shipStore = new Map();           // desk -> { rows, job, at }
 
 app.post('/api/shipfix/plan', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -3991,13 +3996,13 @@ app.post('/api/shipfix/plan', async (req, res) => {
     if (!numbers.length) throw new Error('Paste the invoice numbers first');
     if (numbers.length > 600) throw new Error('That is more than 600 numbers - do it in blocks');
 
-    const old = shipStore.get(realmId);
+    const old = shipStore.get(req.desk);
     if (old && old.job && old.job.running) throw new Error('A change is still running');
 
     const token = await getAccessToken(realmId);
     const rows = await buildShipPlan(realmId, token, numbers);
 
-    shipStore.set(realmId, { rows, job: null, at: Date.now() });
+    shipStore.set(req.desk, { rows, job: null, at: Date.now() });
     res.json({ ok: true, pasted: numbers.length, rows });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -4046,7 +4051,7 @@ app.post('/api/shipfix/run', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = shipStore.get(realmId);
+    const st = shipStore.get(req.desk);
     if (!st) throw new Error('Find the invoices first');
     if (st.job && st.job.running) throw new Error('That is already running');
 
@@ -4078,7 +4083,7 @@ app.get('/api/shipfix/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const st = shipStore.get(realmId);
+  const st = shipStore.get(req.desk);
   res.setHeader('Cache-Control', 'no-store');
   if (!st) return res.json({ has: false });
 
@@ -4097,7 +4102,7 @@ app.get('/api/shipfix/status', async (req, res) => {
 app.post('/api/shipfix/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = shipStore.get(realmId);
+  const st = shipStore.get(req.desk);
   if (st && st.job && st.job.running) st.job.stop = true;
   res.json({ ok: true });
 });
@@ -4106,7 +4111,7 @@ app.post('/api/shipfix/stop', async (req, res) => {
 app.post('/api/shipfix/clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = shipStore.get(realmId);
+  const st = shipStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
   if (st) st.job = null;
   res.json({ ok: true });
@@ -4115,9 +4120,9 @@ app.post('/api/shipfix/clear-log', async (req, res) => {
 app.post('/api/shipfix/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = shipStore.get(realmId);
+  const st = shipStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
-  shipStore.delete(realmId);
+  shipStore.delete(req.desk);
   res.json({ ok: true });
 });
 
@@ -4127,7 +4132,7 @@ app.post('/api/shipfix/clear', async (req, res) => {
 // is read first and shown; nothing goes back to QuickBooks until it is asked
 // for, and then one invoice at a time.
 
-const swapStore = new Map();           // realmId -> { from, to, rows, job, at }
+const swapStore = new Map();           // desk -> { from, to, rows, job, at }
 
 function swapProduct(list, id) {
   const p = (list || []).find(it => String(it.id) === String(id));
@@ -4167,12 +4172,12 @@ app.get('/api/swap/products', async (req, res) => {
   }
 });
 
-const swapChecks = new Map();      // realmId -> { running, stop }
+const swapChecks = new Map();      // desk -> { running, stop }
 
 app.get('/api/swap/plan-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const c = swapChecks.get(realmId);
+  const c = swapChecks.get(req.desk);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ running: !!(c && c.running), stopping: !!(c && c.stop) });
 });
@@ -4180,7 +4185,7 @@ app.get('/api/swap/plan-status', async (req, res) => {
 app.post('/api/swap/plan-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const c = swapChecks.get(realmId);
+  const c = swapChecks.get(req.desk);
   if (c && c.running) c.stop = true;
   res.json({ ok: true });
 });
@@ -4206,7 +4211,7 @@ app.post('/api/swap/plan', async (req, res) => {
     // the check is held on the server while it reads, so any computer on the
     // same company can see it running and stop it
     const check = { running: true, stop: false, started: Date.now() };
-    swapChecks.set(realmId, check);
+    swapChecks.set(req.desk, check);
     let rows;
     try {
       rows = await buildSwapPlan(realmId, token, list, fromP.id, () => check.stop);
@@ -4214,10 +4219,10 @@ app.post('/api/swap/plan', async (req, res) => {
       check.running = false;
     }
 
-    const old = swapStore.get(realmId);
+    const old = swapStore.get(req.desk);
     if (old && old.job && old.job.running) throw new Error('A change is still running');
 
-    swapStore.set(realmId, { from: fromP, to: toP, rows, job: null, at: Date.now() });
+    swapStore.set(req.desk, { from: fromP, to: toP, rows, job: null, at: Date.now() });
 
     res.setHeader('Cache-Control', 'no-store');
     res.json({
@@ -4271,7 +4276,7 @@ app.post('/api/swap/run', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = swapStore.get(realmId);
+    const st = swapStore.get(req.desk);
     if (!st) throw new Error('Check the invoices first');
     if (st.job && st.job.running) throw new Error('That is already running');
 
@@ -4302,7 +4307,7 @@ app.get('/api/swap/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const st = swapStore.get(realmId);
+  const st = swapStore.get(req.desk);
   res.setHeader('Cache-Control', 'no-store');
   if (!st) return res.json({ has: false });
 
@@ -4322,7 +4327,7 @@ app.get('/api/swap/status', async (req, res) => {
 app.post('/api/swap/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = swapStore.get(realmId);
+  const st = swapStore.get(req.desk);
   if (st && st.job) st.job.stop = true;
   res.json({ ok: true });
 });
@@ -4331,7 +4336,7 @@ app.post('/api/swap/stop', async (req, res) => {
 app.post('/api/swap/clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = swapStore.get(realmId);
+  const st = swapStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
   if (st) st.job = null;
   res.json({ ok: true });
@@ -4340,9 +4345,9 @@ app.post('/api/swap/clear-log', async (req, res) => {
 app.post('/api/swap/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = swapStore.get(realmId);
+  const st = swapStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
-  swapStore.delete(realmId);
+  swapStore.delete(req.desk);
   res.json({ ok: true });
 });
 
@@ -4351,16 +4356,16 @@ app.post('/api/swap/clear', async (req, res) => {
 // that field and leaves the date, the payee, the bank account, the amount and
 // the VAT exactly where they are.
 
-const recatStore = new Map();          // realmId -> { from, to, scan, rows, job, at }
+const recatStore = new Map();          // desk -> { from, to, scan, rows, job, at }
 
 // The run lives in memory while it goes and in Postgres as well, so a deploy
 // half way through does not lose the list. Memory is read first; the table is
 // only gone back to after a restart.
-async function getRecat(realmId) {
-  const live = recatStore.get(realmId);
+async function getRecat(desk) {
+  const live = recatStore.get(desk);
   if (live) return live;
 
-  const saved = await loadRecatState(realmId);
+  const saved = await loadRecatState(desk);
   if (!saved) return null;
 
   // the process it was running in is gone, so whatever it says, it is not
@@ -4371,7 +4376,8 @@ async function getRecat(realmId) {
   }
   if (saved.job && saved.job.running) saved.job.running = false;
 
-  recatStore.set(realmId, saved);
+  saved.desk = desk;
+  recatStore.set(desk, saved);
   return saved;
 }
 
@@ -4421,7 +4427,7 @@ async function runRecatScan(realmId, st, scan) {
   scan.finished = Date.now();
   // the list is written down once, whole - a part-read scan is not worth
   // keeping when reading the books again is a minute's work
-  await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+  await saveRecatState(st.desk, st).catch(e => console.error('recat save:', e.message));
 }
 
 app.post('/api/recat/scan', async (req, res) => {
@@ -4435,7 +4441,7 @@ app.post('/api/recat/scan', async (req, res) => {
     if (!dateFrom || !dateTo) throw new Error('Give the dates to look between');
     if (dateFrom > dateTo) throw new Error('The first date is after the last one');
 
-    const old = await getRecat(realmId);
+    const old = await getRecat(req.desk);
     if (old && old.job && old.job.running) throw new Error('A change is still running');
     if (old && old.scan && old.scan.running) throw new Error('A scan is still running');
 
@@ -4449,9 +4455,9 @@ app.post('/api/recat/scan', async (req, res) => {
       kinds: Array.isArray(kinds) ? kinds : null,
       upto: dateFrom, kind: '', found: 0, read: 0, started: Date.now()
     };
-    const st = { from: fromA, to: toA, scan, rows: [], job: null, at: Date.now() };
-    recatStore.set(realmId, st);
-    await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+    const st = { desk: req.desk, from: fromA, to: toA, scan, rows: [], job: null, at: Date.now() };
+    recatStore.set(req.desk, st);
+    await saveRecatState(st.desk, st).catch(e => console.error('recat save:', e.message));
 
     runRecatScan(realmId, st, scan).catch(e => {
       scan.running = false;
@@ -4504,12 +4510,12 @@ async function runRecat(realmId, st, job) {
     // written down after every transaction, so a deploy mid-run costs at most
     // the one that was in flight
     job.cursor = job.done;
-    await saveRecatProgress(realmId, st).catch(e => console.error('recat save:', e.message));
+    await saveRecatProgress(st.desk, st).catch(e => console.error('recat save:', e.message));
   }
 
   job.running = false;
   job.finished = Date.now();
-  await saveRecatProgress(realmId, st).catch(e => console.error('recat save:', e.message));
+  await saveRecatProgress(st.desk, st).catch(e => console.error('recat save:', e.message));
 }
 
 app.post('/api/recat/run', async (req, res) => {
@@ -4517,7 +4523,7 @@ app.post('/api/recat/run', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = await getRecat(realmId);
+    const st = await getRecat(req.desk);
     if (!st) throw new Error('Find the transactions first');
     if (st.scan && st.scan.running) throw new Error('The scan is still running');
     if (st.job && st.job.running) throw new Error('That is already running');
@@ -4536,12 +4542,12 @@ app.post('/api/recat/run', async (req, res) => {
       keys: rows.map(r => r.kind + '|' + r.qbId)
     };
     st.job = job;
-    await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+    await saveRecatState(st.desk, st).catch(e => console.error('recat save:', e.message));
 
     runRecat(realmId, st, job).catch(e => {
       job.running = false;
       job.error = e.message;
-      saveRecatProgress(realmId, st).catch(() => {});
+      saveRecatProgress(st.desk, st).catch(() => {});
     });
 
     res.json({ ok: true, transactions: job.total });
@@ -4554,7 +4560,7 @@ app.get('/api/recat/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const st = await getRecat(realmId);
+  const st = await getRecat(req.desk);
   res.setHeader('Cache-Control', 'no-store');
   if (!st) return res.json({ has: false });
 
@@ -4578,7 +4584,7 @@ app.get('/api/recat/status', async (req, res) => {
 app.post('/api/recat/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = recatStore.get(realmId);
+  const st = recatStore.get(req.desk);
   if (st && st.job && st.job.running) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
@@ -4588,11 +4594,11 @@ app.post('/api/recat/stop', async (req, res) => {
 app.post('/api/recat/clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = await getRecat(realmId);
+  const st = await getRecat(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
   if (st) {
     st.job = null;
-    await saveRecatState(realmId, st).catch(e => console.error('recat save:', e.message));
+    await saveRecatState(st.desk, st).catch(e => console.error('recat save:', e.message));
   }
   res.json({ ok: true });
 });
@@ -4600,12 +4606,12 @@ app.post('/api/recat/clear-log', async (req, res) => {
 app.post('/api/recat/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = recatStore.get(realmId);
+  const st = recatStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
   if (st && st.scan && st.scan.running) return res.status(400).json({ error: 'A scan is still running' });
-  recatStore.delete(realmId);
+  recatStore.delete(req.desk);
   // the list goes; what was actually moved stays in recat_moves
-  await clearRecatState(realmId).catch(e => console.error('recat clear:', e.message));
+  await clearRecatState(req.desk).catch(e => console.error('recat clear:', e.message));
   res.json({ ok: true });
 });
 
@@ -4635,7 +4641,7 @@ app.get('/api/recat/history', async (req, res) => {
 // which is a minute's work, and what was actually moved goes into the same
 // record as the category change so there is one place to look.
 
-const descStore = new Map();           // realmId -> { scan, rows, accountId, to, job, at }
+const descStore = new Map();           // desk -> { scan, rows, accountId, to, job, at }
 
 const descRound = n => Math.round(n * 100) / 100;
 
@@ -4666,7 +4672,7 @@ app.post('/api/desc/scan', async (req, res) => {
     if (!dateFrom || !dateTo) throw new Error('Give the dates to look between');
     if (dateFrom > dateTo) throw new Error('The first date is after the last one');
 
-    const old = descStore.get(realmId);
+    const old = descStore.get(req.desk);
     if (old && old.job && old.job.running) throw new Error('A change is still running');
     if (old && old.scan && old.scan.running) throw new Error('A scan is still running');
 
@@ -4686,7 +4692,7 @@ app.post('/api/desc/scan', async (req, res) => {
       scan, rows: [], accountId: only ? only.id : null, account: only,
       to: null, job: null, at: Date.now()
     };
-    descStore.set(realmId, st);
+    descStore.set(req.desk, st);
 
     scanDescriptions(realmId, token,
       { from: dateFrom, to: dateTo, accountId: st.accountId, kinds: scan.kinds },
@@ -4722,7 +4728,7 @@ app.get('/api/desc/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const st = descStore.get(realmId);
+  const st = descStore.get(req.desk);
   res.setHeader('Cache-Control', 'no-store');
   if (!st) return res.json({ has: false });
 
@@ -4761,7 +4767,7 @@ app.get('/api/desc/rows', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const st = descStore.get(realmId);
+  const st = descStore.get(req.desk);
   res.setHeader('Cache-Control', 'no-store');
   if (!st) return res.json({ rows: [] });
 
@@ -4840,7 +4846,7 @@ app.post('/api/desc/run', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = descStore.get(realmId);
+    const st = descStore.get(req.desk);
     if (!st) throw new Error('Find the descriptions first');
     if (st.scan && st.scan.running) throw new Error('The scan is still running');
     if (st.job && st.job.running) throw new Error('That is already running');
@@ -4888,7 +4894,7 @@ app.post('/api/desc/run', async (req, res) => {
 app.post('/api/desc/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = descStore.get(realmId);
+  const st = descStore.get(req.desk);
   if (st && st.job && st.job.running) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
@@ -4898,7 +4904,7 @@ app.post('/api/desc/stop', async (req, res) => {
 app.post('/api/desc/clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = descStore.get(realmId);
+  const st = descStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
   if (st) st.job = null;
   res.json({ ok: true });
@@ -4907,10 +4913,10 @@ app.post('/api/desc/clear-log', async (req, res) => {
 app.post('/api/desc/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = descStore.get(realmId);
+  const st = descStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'A change is still running' });
   if (st && st.scan && st.scan.running) return res.status(400).json({ error: 'A scan is still running' });
-  descStore.delete(realmId);
+  descStore.delete(req.desk);
   res.json({ ok: true });
 });
 
@@ -4935,11 +4941,13 @@ async function resumeRecat() {
   const rows = await unfinishedRecat();
 
   for (const r of rows) {
+    const desk = deskKey(r.realm_id, r.user_sub || '');
     const st = {
+      desk,
       from: r.from_acct, to: r.to_acct, scan: r.scan,
       rows: r.txns || [], job: null, at: Date.now()
     };
-    if (!st.from || !st.to || recatStore.has(r.realm_id)) continue;
+    if (!st.from || !st.to || recatStore.has(desk)) continue;
 
     const saved = r.job || {};
     const byKey = new Map(st.rows.map(x => [x.kind + '|' + x.qbId, x]));
@@ -4957,13 +4965,13 @@ async function resumeRecat() {
       rows: left
     };
     st.job = job;
-    recatStore.set(r.realm_id, st);
+    recatStore.set(desk, st);
 
     console.log(`recat: picking up ${left.length} left for ${r.realm_id}`);
     runRecat(r.realm_id, st, job).catch(e => {
       job.running = false;
       job.error = e.message;
-      saveRecatProgress(r.realm_id, st).catch(() => {});
+      saveRecatProgress(desk, st).catch(() => {});
     });
   }
 }
@@ -5515,7 +5523,7 @@ app.post('/api/courier/backfill', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startBackfill(realmId, req.body);
+    const id = startBackfill(req.desk, req.body);
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -5526,21 +5534,21 @@ app.get('/api/courier/backfill-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = backfillSnapshot(realmId, req.query.since || 0);
+  const snap = backfillSnapshot(req.desk, req.query.since || 0);
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/courier/backfill-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopBackfill(realmId) });
+  res.json({ ok: stopBackfill(req.desk) });
 });
 
 app.post('/api/courier/backfill-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeBackfill(realmId);
+    resumeBackfill(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -5550,7 +5558,7 @@ app.post('/api/courier/backfill-resume', async (req, res) => {
 app.post('/api/courier/backfill-clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearBackfill(realmId);
+  const ok = clearBackfill(req.desk);
   if (!ok) return res.status(409).json({ error: 'The backfill is still running' });
   res.json({ ok: true });
 });
@@ -6622,7 +6630,7 @@ app.post('/api/adv/receive', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startAdvJob(realmId, req.body);
+    const id = startAdvJob(req.desk, req.body);
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -6633,21 +6641,21 @@ app.get('/api/adv/receive-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = advSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  const snap = advSnapshot(req.desk, req.query.since || 0, req.query.full === '1');
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/adv/receive-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopAdvJob(realmId) });
+  res.json({ ok: stopAdvJob(req.desk) });
 });
 
 app.post('/api/adv/receive-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeAdvJob(realmId);
+    resumeAdvJob(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -6657,7 +6665,7 @@ app.post('/api/adv/receive-resume', async (req, res) => {
 app.post('/api/adv/receive-clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearAdvJob(realmId);
+  const ok = clearAdvJob(req.desk);
   if (!ok) return res.status(409).json({ error: 'The payment run is still going' });
   res.json({ ok: true });
 });
@@ -6931,7 +6939,7 @@ app.post('/api/void/start', async (req, res) => {
 
   const { invoices, force = false, delay = 0 } = req.body;
   try {
-    const id = startVoidJob(realmId, { invoices, force, delay });
+    const id = startVoidJob(req.desk, { invoices, force, delay });
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -6942,21 +6950,21 @@ app.get('/api/void/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = voidSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  const snap = voidSnapshot(req.desk, req.query.since || 0, req.query.full === '1');
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/void/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopVoidJob(realmId) });
+  res.json({ ok: stopVoidJob(req.desk) });
 });
 
 app.post('/api/void/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeVoidJob(realmId);
+    resumeVoidJob(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -6966,7 +6974,7 @@ app.post('/api/void/resume', async (req, res) => {
 app.post('/api/void/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearVoidJob(realmId);
+  const ok = clearVoidJob(req.desk);
   if (!ok) return res.status(409).json({ error: 'The void run is still going' });
   res.json({ ok: true });
 });
@@ -6979,7 +6987,7 @@ app.post('/api/void/check-start', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const id = startSheetCheck(realmId, {
+    const id = startSheetCheck(req.desk, {
       numbers: req.body.numbers,
       sheetId: req.body.sheetId,
       sheetName: req.body.sheetName,
@@ -6998,21 +7006,21 @@ app.get('/api/void/check-status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   res.setHeader('Cache-Control', 'no-store');
-  const snap = sheetCheckSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  const snap = sheetCheckSnapshot(req.desk, req.query.since || 0, req.query.full === '1');
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/void/check-stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopSheetCheck(realmId) });
+  res.json({ ok: stopSheetCheck(req.desk) });
 });
 
 app.post('/api/void/check-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    resumeSheetCheck(realmId);
+    resumeSheetCheck(req.desk);
     res.json({ ok: true });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -7022,14 +7030,14 @@ app.post('/api/void/check-resume', async (req, res) => {
 app.post('/api/void/check-clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearSheetCheck(realmId);
+  const ok = clearSheetCheck(req.desk);
   if (!ok) return res.status(409).json({ error: 'The return sheet check is still going' });
   res.json({ ok: true });
 });
 // ==================== Upload ====================
 // Convert hands the list over here instead of squeezing it through the
 // browser, so a run of any size makes it across.
-const handovers = new Map();      // realmId -> { invoices, at }
+const handovers = new Map();      // desk -> { invoices, at }
 
 app.post('/api/upload/handover', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -7040,7 +7048,7 @@ app.post('/api/upload/handover', async (req, res) => {
     return res.status(400).json({ error: 'No invoices were sent' });
   }
 
-  handovers.set(realmId, { invoices: list, at: Date.now() });
+  handovers.set(req.desk, { invoices: list, at: Date.now() });
 
   // anything left lying about for a day is not coming back for it
   const cutoff = Date.now() - 24 * 3600 * 1000;
@@ -7053,12 +7061,12 @@ app.get('/api/upload/handover', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const held = handovers.get(realmId);
+  const held = handovers.get(req.desk);
   if (!held) return res.json({ invoices: [] });
 
     // the page can be reloaded, or the server can restart mid-handover, so the
   // list stays put until an upload has actually been started with it
-  if (req.query.drop === '1') handovers.delete(realmId);
+  if (req.query.drop === '1') handovers.delete(req.desk);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ invoices: held.invoices, at: held.at });
 });
@@ -7074,7 +7082,7 @@ app.post('/api/upload/start', async (req, res) => {
   }
 
   try {
-   const id = startJob(realmId, { invoices, delay, negativeItems, batchSize });
+   const id = startJob(req.desk, { invoices, delay, negativeItems, batchSize });
     res.json({ ok: true, jobId: id });
   } catch (e) {
     res.status(409).json({ error: e.message });
@@ -7085,28 +7093,28 @@ app.get('/api/upload/status', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 res.setHeader('Cache-Control', 'no-store');
-  const snap = snapshot(realmId, req.query.since || 0, req.query.full === '1');
+  const snap = snapshot(req.desk, req.query.since || 0, req.query.full === '1');
   res.json(snap ? { job: snap } : { job: null });
 });
 
 app.post('/api/upload/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: stopJob(realmId) });
+  res.json({ ok: stopJob(req.desk) });
 });
 // Pause holds the run where it is; Resume carries on from the same place,
 // so nothing already in QuickBooks is sent again.
 app.post('/api/upload/pause', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  res.json({ ok: pauseJob(realmId) });
+  res.json({ ok: pauseJob(req.desk) });
 });
 
 app.post('/api/upload/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    res.json({ ok: true, jobId: resumeJob(realmId) });
+    res.json({ ok: true, jobId: resumeJob(req.desk) });
   } catch (e) {
     res.status(409).json({ error: e.message });
   }
@@ -7114,7 +7122,7 @@ app.post('/api/upload/resume', async (req, res) => {
 app.post('/api/upload/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const ok = clearJob(realmId);
+  const ok = clearJob(req.desk);
   if (!ok) return res.status(409).json({ error: 'The upload is still running' });
   res.json({ ok: true });
 });
@@ -7123,7 +7131,7 @@ app.post('/api/upload/retry', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
-    res.json({ ok: true, jobId: retryFailed(realmId) });
+    res.json({ ok: true, jobId: retryFailed(req.desk) });
   } catch (e) {
     res.status(409).json({ error: e.message });
   }
@@ -7134,7 +7142,7 @@ app.get('/api/upload/remaining-file', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
 
-  const list = remainingInvoices(realmId);
+  const list = remainingInvoices(req.desk);
   if (!list.length) return res.status(404).json({ error: 'Nothing left to send' });
 
   const HEADER = ['*InvoiceNo','*Customer','*InvoiceDate','*DueDate','Terms','Location','Memo',
@@ -7177,6 +7185,7 @@ import { buildWorkbook, fileName as cprFileName } from './cprsheet.js';
 import { setPortalLogin, clearPortalLogin, markCprReceived } from './couriers.js';
 import { login as portalLogin } from './postexportal.js';
 import { encrypt as encryptSecret } from './secrets.js';
+import { deskKey } from './desk.js';
 
 // Save (or replace) the portal sign-in for one courier account. The password
 // is tried before it is kept, so a typo is caught here and not at midnight.
@@ -7665,7 +7674,7 @@ app.post('/api/receipts/receive', async (req, res) => {
       });
     }
 
-    const jobId = startPayJob(realmId, {
+    const jobId = startPayJob(req.desk, {
       courier: 'postex',
       cprNumber: cpr,
       cprDate,
@@ -7825,7 +7834,7 @@ app.get('/api/receipts/export', async (req, res) => {
 // stock is worth, and what was bought. Reading it is a minute's work, so it is
 // read once and asked of many times.
 
-const prodStore = new Map();       // realmId -> { scan, rows, summary, from, to, at }
+const prodStore = new Map();       // desk -> { scan, rows, summary, from, to, at }
 
 const prodRound = n => Math.round(n * 100) / 100;
 
@@ -7838,7 +7847,7 @@ app.post('/api/products/scan', async (req, res) => {
     if (!from || !to) throw new Error('Give the dates to look between');
     if (from > to) throw new Error('The first date is after the last one');
 
-    const old = prodStore.get(realmId);
+    const old = prodStore.get(req.desk);
     if (old && old.scan && old.scan.running) throw new Error('A read is still running');
 
     const scan = {
@@ -7846,7 +7855,7 @@ app.post('/api/products/scan', async (req, res) => {
       from, to, started: Date.now(), error: null
     };
     const st = { scan, rows: [], summary: null, from, to, at: Date.now() };
-    prodStore.set(realmId, st);
+    prodStore.set(req.desk, st);
 
     (async () => {
       const token = await getAccessToken(realmId);
@@ -7891,7 +7900,7 @@ app.get('/api/products/status', async (req, res) => {
   if (!realmId) return;
 
   res.setHeader('Cache-Control', 'no-store');
-  const st = prodStore.get(realmId);
+  const st = prodStore.get(req.desk);
   if (!st) return res.json({ has: false });
 
   res.json({
@@ -7920,7 +7929,7 @@ app.get('/api/products/rows', async (req, res) => {
   if (!realmId) return;
 
   res.setHeader('Cache-Control', 'no-store');
-  const st = prodStore.get(realmId);
+  const st = prodStore.get(req.desk);
   if (!st) return res.json({ rows: [], total: 0 });
 
   const flag = String(req.query.flag || '');
@@ -7967,7 +7976,7 @@ app.post('/api/products/paste', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = prodStore.get(realmId);
+    const st = prodStore.get(req.desk);
     if (!st || !st.rows.length) throw new Error('Read the books first');
 
     const flag = String((req.body || {}).flag || '');
@@ -8021,9 +8030,9 @@ app.post('/api/products/paste', async (req, res) => {
 app.post('/api/products/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = prodStore.get(realmId);
+  const st = prodStore.get(req.desk);
   if (st && st.scan && st.scan.running) return res.status(400).json({ error: 'A read is still running' });
-  prodStore.delete(realmId);
+  prodStore.delete(req.desk);
   res.json({ ok: true });
 });
 
@@ -8244,7 +8253,7 @@ app.post('/api/products/apply', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = prodStore.get(realmId);
+    const st = prodStore.get(req.desk);
     if (!st) throw new Error('Read the books first');
     if (st.scan && st.scan.running) throw new Error('The read is still running');
     if (st.job && st.job.running) throw new Error('That is already running');
@@ -8306,7 +8315,7 @@ app.get('/api/products/adjust-accounts', async (req, res) => {
 app.post('/api/products/clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = prodStore.get(realmId);
+  const st = prodStore.get(req.desk);
   if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
   if (st) st.job = null;
   res.json({ ok: true });
@@ -8315,7 +8324,7 @@ app.post('/api/products/clear-log', async (req, res) => {
 app.post('/api/products/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = prodStore.get(realmId);
+  const st = prodStore.get(req.desk);
   if (st && st.job) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
@@ -8349,7 +8358,7 @@ app.post('/api/products/record/clear', async (req, res) => {
 // other half of the products page: that one says the cost is missing, this one
 // is where it is put in.
 
-const purchStore = new Map();      // realmId -> { kind, from, to, docs, at }
+const purchStore = new Map();      // desk -> { kind, from, to, docs, at }
 
 app.get('/api/purchases/who', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -8381,7 +8390,7 @@ app.get('/api/purchases/list', async (req, res) => {
     const token = await getAccessToken(realmId);
     const docs = await readDocs(realmId, token, kind, { from, to });
 
-    purchStore.set(realmId, { kind, from, to, docs, at: Date.now() });
+    purchStore.set(req.desk, { kind, from, to, docs, at: Date.now() });
 
     // the lines are what make this heavy, and the list does not show them until
     // one is opened
@@ -8486,7 +8495,7 @@ app.post('/api/purchases/create', async (req, res) => {
 // swapped for the new one on the lines that carry it. Held in memory like the
 // description change: reading it again is cheaper than keeping it.
 
-const replStore = new Map();       // realmId -> { pairs, bad, scan, rows, job, at }
+const replStore = new Map();       // desk -> { pairs, bad, scan, rows, job, at }
 
 app.get('/api/replace/kinds', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -8502,7 +8511,7 @@ app.post('/api/replace/pairs', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const old = replStore.get(realmId);
+    const old = replStore.get(req.desk);
     if (old && ((old.scan && old.scan.running) || (old.job && old.job.running))) {
       throw new Error('A read or a run is still going');
     }
@@ -8515,7 +8524,7 @@ app.post('/api/replace/pairs', async (req, res) => {
     const items = await readItems(realmId, token);
     const { ok, bad } = resolveReplacePairs(pasted, items);
 
-    replStore.set(realmId, { pairs: ok, bad, scan: null, rows: [], job: null, at: Date.now() });
+    replStore.set(req.desk, { desk: req.desk, pairs: ok, bad, scan: null, rows: [], job: null, at: Date.now() });
     res.json({ pairs: ok, bad, pasted: pasted.length });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -8547,7 +8556,7 @@ app.post('/api/replace/shopify', upload.single('file'), async (req, res) => {
   if (!realmId) return;
 
   try {
-    const old = replStore.get(realmId);
+    const old = replStore.get(req.desk);
     if (old && ((old.scan && old.scan.running) || (old.job && old.job.running))) {
       throw new Error('A read or a run is still going');
     }
@@ -8564,7 +8573,7 @@ app.post('/api/replace/shopify', upload.single('file'), async (req, res) => {
     const items = await readItems(realmId, token);
     const out = pairsFromShopify(variants, items, { twinKeys, sameVariant });
 
-    replStore.set(realmId, { pairs: out.pairs, bad: out.bad, scan: null, rows: [], job: null, at: Date.now() });
+    replStore.set(req.desk, { desk: req.desk, pairs: out.pairs, bad: out.bad, scan: null, rows: [], job: null, at: Date.now() });
     res.json({
       variants: variants.length, notActive: skipped, keepers: out.keepers,
       pairs: out.pairs, bad: out.bad
@@ -8581,7 +8590,7 @@ app.post('/api/replace/pick', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const old = replStore.get(realmId);
+    const old = replStore.get(req.desk);
     if (old && ((old.scan && old.scan.running) || (old.job && old.job.running))) {
       throw new Error('A read or a run is still going');
     }
@@ -8590,7 +8599,7 @@ app.post('/api/replace/pick', async (req, res) => {
 
     const token = await getAccessToken(realmId);
     const from = await replaceItemById(realmId, token, id);
-    replStore.set(realmId, { pairs: [{ line: 1, from, to: null }], bad: [], scan: null, rows: [], job: null, at: Date.now() });
+    replStore.set(req.desk, { desk: req.desk, pairs: [{ line: 1, from, to: null }], bad: [], scan: null, rows: [], job: null, at: Date.now() });
     res.json({ pair: { from, to: null } });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -8605,7 +8614,7 @@ app.post('/api/replace/target', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = replStore.get(realmId);
+    const st = replStore.get(req.desk);
     if (!st || st.pairs.length !== 1) throw new Error('Pick the product to replace first');
     if (st.job && st.job.running) throw new Error('A run is still going');
     const id = String((req.body || {}).id || '');
@@ -8642,7 +8651,7 @@ app.post('/api/replace/pairs-keep', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = replStore.get(realmId);
+    const st = replStore.get(req.desk);
     if (!st || !st.pairs.length) throw new Error('There are no pairs to narrow');
     if ((st.scan && st.scan.running) || (st.job && st.job.running)) throw new Error('A read or a run is still going');
 
@@ -8667,7 +8676,7 @@ app.post('/api/replace/scan', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = replStore.get(realmId);
+    const st = replStore.get(req.desk);
     if (!st || !st.pairs.length) throw new Error('Check the pairs first');
     if ((st.scan && st.scan.running) || (st.job && st.job.running)) throw new Error('A read or a run is still going');
 
@@ -8693,7 +8702,7 @@ app.post('/api/replace/scan', async (req, res) => {
     st.rows = [];
     st.onNew = {};
     st.job = null;
-    clearReplace(realmId).catch(() => {});
+    clearReplace(req.desk).catch(() => {});
 
     const getToken = tokenKeeper(() => getAccessToken(realmId), await getAccessToken(realmId));
     scanReplace(realmId, getToken,
@@ -8736,7 +8745,7 @@ app.get('/api/replace/status', async (req, res) => {
   if (!realmId) return;
 
   res.setHeader('Cache-Control', 'no-store');
-  const st = replStore.get(realmId);
+  const st = replStore.get(req.desk);
   if (!st) return res.json({ has: false });
 
   const byPair = new Map(st.pairs.map(p => [p.from.id, {
@@ -8807,7 +8816,7 @@ async function runReplace(realmId, st, job) {
                           String(b.doc || '').localeCompare(String(a.doc || '')));
 
   // written down before it starts, so a restart in the first minutes is not lost
-  await saveReplace(realmId, st).catch(e => console.error('replace save:', e.message));
+  await saveReplace(st.desk, st).catch(e => console.error('replace save:', e.message));
 
   // A refusal is very often not about the transaction at all - a lock held by
   // another edit, a gateway that timed out, a token that ran out mid-run. So the
@@ -8832,7 +8841,7 @@ async function runReplace(realmId, st, job) {
   job.running = false;
   job.finished = Date.now();
   // finished - there is nothing for a restart to carry on with
-  await clearReplace(realmId).catch(e => console.error('replace clear:', e.message));
+  await clearReplace(st.desk).catch(e => console.error('replace clear:', e.message));
 }
 
 async function replacePass(realmId, getToken, job, todo, pairById) {
@@ -8840,7 +8849,7 @@ async function replacePass(realmId, getToken, job, todo, pairById) {
   const saveNow = async (force) => {
     if (!force && sinceSave < 5 && Date.now() - savedAt < 20000) return;
     sinceSave = 0; savedAt = Date.now();
-    await saveReplace(realmId, job.st).catch(e => console.error('replace save:', e.message));
+    await saveReplace(job.st.desk, job.st).catch(e => console.error('replace save:', e.message));
   };
 
   for (const row of todo) {
@@ -8919,7 +8928,7 @@ app.post('/api/replace/run', async (req, res) => {
   if (!realmId) return;
 
   try {
-    const st = replStore.get(realmId);
+    const st = replStore.get(req.desk);
     if (!st || !st.rows.length) throw new Error('Find the transactions first');
     if (st.scan && st.scan.running) throw new Error('The read is still running');
     if (st.job && st.job.running) throw new Error('That is already running');
@@ -8956,7 +8965,7 @@ app.post('/api/replace/run', async (req, res) => {
 app.post('/api/replace/stop', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = replStore.get(realmId);
+  const st = replStore.get(req.desk);
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   if (st && st.job && st.job.running) st.job.stop = true;
   res.json({ ok: true });
@@ -8967,7 +8976,7 @@ app.post('/api/replace/stop', async (req, res) => {
 app.post('/api/replace/clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = replStore.get(realmId);
+  const st = replStore.get(req.desk);
   if (st && st.job && st.job.running) {
     return res.status(400).json({ error: 'The run is still going' });
   }
@@ -8978,11 +8987,11 @@ app.post('/api/replace/clear-log', async (req, res) => {
 app.post('/api/replace/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
-  const st = replStore.get(realmId);
+  const st = replStore.get(req.desk);
   if (st && ((st.scan && st.scan.running) || (st.job && st.job.running))) {
     return res.status(400).json({ error: 'A read or a run is still going' });
   }
-  replStore.delete(realmId);
+  replStore.delete(req.desk);
   res.json({ ok: true });
 });
 
@@ -8994,9 +9003,11 @@ async function resumeReplace() {
     try {
       const saved = r.job || {};
       const all = (r.rows || []);
-      if (!all.some(x => x.state === 'ready' || x.state === 'failed')) { await clearReplace(r.realm_id); continue; }
+      const desk = deskKey(r.realm_id, r.user_sub || '');
+      if (!all.some(x => x.state === 'ready' || x.state === 'failed')) { await clearReplace(desk); continue; }
 
       const st = {
+        desk,
         pairs: r.pairs || [], bad: [],
         scan: Object.assign({ running: false, stopped: false, error: null }, r.scan || {}),
         rows: all, onNew: {}, at: Date.now()
@@ -9016,7 +9027,7 @@ async function resumeReplace() {
         doc: 'Server restarted - carrying on. ' + (all.length - job.rows.length) + ' already done, ' + job.rows.length + ' to go.' });
       job.st = st;
       st.job = job;
-      replStore.set(r.realm_id, st);
+      replStore.set(desk, st);
 
       runReplace(r.realm_id, st, job).catch(e => { job.running = false; job.error = e.message; });
     } catch (e) {

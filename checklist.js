@@ -13,11 +13,14 @@ import {
   loadSheet, isDelivered, findInvoices, clean, digitsOf
 } from './cpr.js';
 import { getSetting } from './settings.js';
+import { realmOf } from './desk.js';
 
 const API = 'https://quickbooks.api.intuit.com';
 const MAX_EVENTS = 2000;
 
 // one read and one fix per company - every computer on the company sees the same
+// both keyed by the desk - the company and the person - so one person's check
+// or fix is not another's to watch, stop or clear
 const scans = new Map();
 const fixes = new Map();
 
@@ -160,10 +163,11 @@ function appliedOf(pay) {
 
 /* ==================== the check ==================== */
 
-export function startCheck(realmId, body) {
-  const live = scans.get(realmId);
+export function startCheck(desk, body) {
+  const realmId = realmOf(desk);
+  const live = scans.get(desk);
   if (live && live.state === 'running') {
-    throw new Error('A check is already going for this company');
+    throw new Error('A check of yours is already going');
   }
 
   const job = {
@@ -179,7 +183,7 @@ export function startCheck(realmId, body) {
     finishedAt: null
   };
 
-  scans.set(realmId, job);
+  scans.set(desk, job);
   runCheck(realmId, job).catch(e => {
     push(job, 'fail', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -469,16 +473,17 @@ async function checkInvoices(realmId, job) {
   push(job, 'ok', `${out.filter(r => r.inQb).length} of ${out.length} found in QuickBooks.`);
 }
 
-export function stopCheck(realmId) {
-  const job = scans.get(realmId);
+export function stopCheck(desk) {
+  const job = scans.get(desk);
   if (!job) return false;
   job.stop = true;
   push(job, 'log', 'Stop requested - finishing the read in flight...');
   return true;
 }
 
-export function resumeCheck(realmId) {
-  const job = scans.get(realmId);
+export function resumeCheck(desk) {
+  const realmId = realmOf(desk);
+  const job = scans.get(desk);
   if (!job) throw new Error('There is no check to carry on');
   if (job.state === 'running') throw new Error('The check is still going');
   job.stop = false;
@@ -493,15 +498,15 @@ export function resumeCheck(realmId) {
   return job.id;
 }
 
-export function clearCheck(realmId) {
-  const job = scans.get(realmId);
+export function clearCheck(desk) {
+  const job = scans.get(desk);
   if (job && job.state === 'running') return false;
-  scans.delete(realmId);
+  scans.delete(desk);
   return true;
 }
 
-export function checkSnapshot(realmId, since, full) {
-  const job = scans.get(realmId);
+export function checkSnapshot(desk, since, full) {
+  const job = scans.get(desk);
   if (!job) return null;
   const out = {
     id: job.id,
@@ -598,10 +603,11 @@ async function editLine(realmId, token, action, job) {
   return { ok: true, msg: 'payment now stands at ' + total.toFixed(2) };
 }
 
-export function startFix(realmId, body) {
-  const live = fixes.get(realmId);
+export function startFix(desk, body) {
+  const realmId = realmOf(desk);
+  const live = fixes.get(desk);
   if (live && live.state === 'running') {
-    throw new Error('A fix is already going for this company');
+    throw new Error('A fix of yours is already going');
   }
 
   const actions = Array.isArray(body.actions) ? body.actions : [];
@@ -623,7 +629,7 @@ export function startFix(realmId, body) {
     finishedAt: null
   };
 
-  fixes.set(realmId, job);
+  fixes.set(desk, job);
   runFix(realmId, job).catch(e => {
     push(job, 'fail', 'ERROR: ' + e.message);
     job.state = 'error';
@@ -727,8 +733,8 @@ async function runFix(realmId, job) {
   job.finishedAt = Date.now();
 }
 
-export function stopFix(realmId) {
-  const job = fixes.get(realmId);
+export function stopFix(desk) {
+  const job = fixes.get(desk);
   if (!job) return false;
   job.stop = true;
   push(job, 'log', 'Stop requested - finishing the change in flight...');
@@ -736,8 +742,9 @@ export function stopFix(realmId) {
 }
 
 // what is not done yet goes again - a change already made is never made twice
-export function resumeFix(realmId) {
-  const job = fixes.get(realmId);
+export function resumeFix(desk) {
+  const realmId = realmOf(desk);
+  const job = fixes.get(desk);
   if (!job) throw new Error('There is no fix to carry on');
   if (job.state === 'running') throw new Error('The fix is still going');
 
@@ -757,15 +764,15 @@ export function resumeFix(realmId) {
   return job.id;
 }
 
-export function clearFix(realmId) {
-  const job = fixes.get(realmId);
+export function clearFix(desk) {
+  const job = fixes.get(desk);
   if (job && job.state === 'running') return false;
-  fixes.delete(realmId);
+  fixes.delete(desk);
   return true;
 }
 
-export function fixSnapshot(realmId, since) {
-  const job = fixes.get(realmId);
+export function fixSnapshot(desk, since) {
+  const job = fixes.get(desk);
   if (!job) return null;
   const left = job.actions.filter((a, i) => !job.done.has(actionKey(a, i))).length;
   const out = {

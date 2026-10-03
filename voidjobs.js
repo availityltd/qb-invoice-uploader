@@ -1,9 +1,12 @@
 import { getAccessToken, qbQuery } from './qb.js';
-import { logUpload, pool } from './db.js';
+import { logUpload, pool, keyRunsByDesk } from './db.js';
+import { realmOf, userOf, deskKey } from './desk.js';
 
 const API = 'https://quickbooks.api.intuit.com';
 
-// one void run per company, kept on the server so leaving the page is safe
+// one void run per desk - the company and the person together - kept on the
+// server so leaving the page, or picking it up on another computer, is safe.
+// Two people in the same books do not share a run, a log or a Stop button.
 const jobs = new Map();
 const MAX_EVENTS = 3000;
 // A refusal is QuickBooks being loaded - it holds the stock for a while after each
@@ -35,15 +38,16 @@ async function tokenFor(realmId, job, force) {
 export async function initVoidStore() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS void_runs (
-      realm_id   TEXT PRIMARY KEY,
+      realm_id   TEXT NOT NULL,
       invoices   JSONB,
       progress   JSONB,
       updated_at TIMESTAMPTZ DEFAULT now()
     )
   `);
+  await keyRunsByDesk('void_runs');
 }
 
-async function saveVoid(realmId, job, withList) {
+async function saveVoid(desk, job, withList) {
   const progress = {
     id: job.id, state: job.state, force: job.force, total: job.total,
     voided: job.voided, held: job.held, failed: job.failed,
@@ -53,35 +57,38 @@ async function saveVoid(realmId, job, withList) {
   };
   if (withList) {
     await pool.query(
-      `INSERT INTO void_runs (realm_id, invoices, progress, updated_at)
-       VALUES ($1,$2,$3, now())
-       ON CONFLICT (realm_id) DO UPDATE SET invoices = $2, progress = $3, updated_at = now()`,
-      [realmId, JSON.stringify(job.invoices), JSON.stringify(progress)]);
+      `INSERT INTO void_runs (realm_id, user_sub, invoices, progress, updated_at)
+       VALUES ($1,$4,$2,$3, now())
+       ON CONFLICT (realm_id, user_sub) DO UPDATE SET
+         invoices = $2, progress = $3, updated_at = now()`,
+      [realmOf(desk), JSON.stringify(job.invoices), JSON.stringify(progress), userOf(desk)]);
   } else {
     await pool.query(
-      `UPDATE void_runs SET progress = $2, updated_at = now() WHERE realm_id = $1`,
-      [realmId, JSON.stringify(progress)]);
+      `UPDATE void_runs SET progress = $2, updated_at = now()
+        WHERE realm_id = $1 AND user_sub = $3`,
+      [realmOf(desk), JSON.stringify(progress), userOf(desk)]);
   }
 }
 
 // written every few results or every 15 seconds, and always when the state changes
-function saveSoon(realmId, job, force) {
+function saveSoon(desk, job, force) {
   job.unsaved = (job.unsaved || 0) + 1;
   if (!force && job.unsaved < 5 && Date.now() - (job.savedAt || 0) < 15000) return;
   job.unsaved = 0;
   job.savedAt = Date.now();
-  return saveVoid(realmId, job, false).catch(e => console.error('void save:', e.message));
+  return saveVoid(desk, job, false).catch(e => console.error('void save:', e.message));
 }
 
 // after a restart: a run that was going carries on, one that had stopped or
 // finished comes back as it was, so its log and its Carry on are still there
 export async function resumeVoidRuns() {
-  const q = await pool.query('SELECT realm_id, invoices, progress FROM void_runs');
+  const q = await pool.query('SELECT realm_id, user_sub, invoices, progress FROM void_runs');
   for (const row of q.rows) {
     try {
       const p = row.progress || {};
+      const desk = deskKey(row.realm_id, row.user_sub || '');
       const job = {
-        id: p.id || Date.now(), state: p.state || 'stopped', stop: false,
+        id: p.id || Date.now(), desk, state: p.state || 'stopped', stop: false,
         invoices: row.invoices || [], force: !!p.force,
         delay: 0, lanes: 1, token: null, tokenAt: 0,
         total: p.total || (row.invoices || []).length,
@@ -90,7 +97,7 @@ export async function resumeVoidRuns() {
         startedAt: p.startedAt || Date.now(), finishedAt: p.finishedAt || null
       };
       job.done = job.voided.length + job.held.length + job.failed.length;
-      jobs.set(row.realm_id, job);
+      jobs.set(desk, job);
       if (job.state !== 'running') continue;
 
       const gone = new Set(job.voided.concat(job.held, job.failed).map(x => String(x.id)));
@@ -102,7 +109,7 @@ export async function resumeVoidRuns() {
         push(job, 'error', 'ERROR: ' + e.message);
         job.state = 'error';
         job.finishedAt = Date.now();
-        saveSoon(row.realm_id, job, true);
+        saveSoon(desk, job, true);
       });
     } catch (e) {
       console.error('void resume:', e.message);
@@ -238,15 +245,17 @@ async function voidOne(realmId, token, inv, force) {
   return { ok: true, notes };
 }
 
-export function startVoidJob(realmId, { invoices, force, delay }) {
-  const live = jobs.get(realmId);
+export function startVoidJob(desk, { invoices, force, delay }) {
+  const realmId = realmOf(desk);
+  const live = jobs.get(desk);
   if (live && live.state === 'running') {
-    throw new Error('A void run is already going for this company');
+    throw new Error('A void run of yours is already going');
   }
   if (!Array.isArray(invoices) || !invoices.length) throw new Error('Nothing to void');
 
   const job = {
     id: Date.now(),
+    desk,
     state: 'running',
     stop: false,
     invoices,
@@ -267,14 +276,14 @@ export function startVoidJob(realmId, { invoices, force, delay }) {
     finishedAt: null
   };
 
-  jobs.set(realmId, job);
+  jobs.set(desk, job);
   // written down before it starts, so a restart in the first minutes is not lost
-  saveVoid(realmId, job, true).catch(e => console.error('void save:', e.message));
+  saveVoid(desk, job, true).catch(e => console.error('void save:', e.message));
   run(realmId, job).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
     job.finishedAt = Date.now();
-    saveSoon(realmId, job, true);
+    saveSoon(job.desk, job, true);
   });
 
   return job.id;
@@ -320,7 +329,7 @@ async function run(realmId, job, only) {
       try {
         await logUpload(realmId, inv.doc, 'voided', `QB Id ${inv.id} voided`, null);
       } catch (e) {}
-      saveSoon(realmId, job);
+      saveSoon(job.desk, job);
       return 'done';
     }
 
@@ -328,7 +337,7 @@ async function run(realmId, job, only) {
       job.done++;
       job.held.push({ doc: inv.doc, id: inv.id, msg: r.msg });
       push(job, 'held', `HELD    ${inv.doc}   ${r.msg}`, { doc: inv.doc });
-      saveSoon(realmId, job);
+      saveSoon(job.desk, job);
       return 'done';
     }
 
@@ -343,7 +352,7 @@ async function run(realmId, job, only) {
     job.done++;
     job.failed.push({ doc: inv.doc, id: inv.id, msg: r.msg });
     push(job, 'fail', `FAILED  ${inv.doc}   ${String(r.msg).slice(0, 200)}`, { doc: inv.doc });
-    saveSoon(realmId, job);
+    saveSoon(job.desk, job);
     return 'final';
   }
 
@@ -384,13 +393,14 @@ async function run(realmId, job, only) {
     job.state = 'done';
   }
   job.finishedAt = Date.now();
-  await saveSoon(realmId, job, true);
+  await saveSoon(job.desk, job, true);
 }
 
 // Carry on after a Stop: whatever was neither voided nor held back - the ones
 // not reached and the ones that failed - goes through the same run again.
-export function resumeVoidJob(realmId) {
-  const job = jobs.get(realmId);
+export function resumeVoidJob(desk) {
+  const realmId = realmOf(desk);
+  const job = jobs.get(desk);
   if (!job) throw new Error('There is no void run to carry on');
   if (job.state === 'running') throw new Error('The void run is still going');
 
@@ -405,33 +415,34 @@ export function resumeVoidJob(realmId) {
   job.stop = false;
   job.state = 'running';
   job.finishedAt = null;
-  saveSoon(realmId, job, true);
+  saveSoon(job.desk, job, true);
   run(realmId, job, left).catch(e => {
     push(job, 'error', 'ERROR: ' + e.message);
     job.state = 'error';
     job.finishedAt = Date.now();
-    saveSoon(realmId, job, true);
+    saveSoon(job.desk, job, true);
   });
 }
 
-export function stopVoidJob(realmId) {
-  const job = jobs.get(realmId);
+export function stopVoidJob(desk) {
+  const job = jobs.get(desk);
   if (!job) return false;
   job.stop = true;
   push(job, 'log', 'Stop requested - finishing the invoice in flight...');
   return true;
 }
 
-export function clearVoidJob(realmId) {
-  const job = jobs.get(realmId);
+export function clearVoidJob(desk) {
+  const job = jobs.get(desk);
   if (job && job.state === 'running') return false;
-  jobs.delete(realmId);
-  pool.query('DELETE FROM void_runs WHERE realm_id = $1', [realmId]).catch(() => {});
+  jobs.delete(desk);
+  pool.query('DELETE FROM void_runs WHERE realm_id = $1 AND user_sub = $2',
+    [realmOf(desk), userOf(desk)]).catch(() => {});
   return true;
 }
 
-export function voidSnapshot(realmId, since, full) {
-  const job = jobs.get(realmId);
+export function voidSnapshot(desk, since, full) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   const out = {

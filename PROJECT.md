@@ -128,19 +128,33 @@ Closing the page changes nothing. `jobs.js` is the reference implementation and
 `jobstore.js` writes its position to Postgres after every batch, so a deploy
 mid-run picks up where it stopped (`resumeUnfinished`).
 
+**A run belongs to a desk, not to the company.** A desk is the company and the
+person signed in, together (`desk.js`: `deskKey`, `realmOf`, `userOf`), and
+`requireCompany` works it out once as `req.desk`. Every job map and every
+half-finished run written to Postgres is keyed by it - `upload_jobs`,
+`void_runs`, `recat_state` and `replace_state` all key on `(realm_id, user_sub)`
+(`keyRunsByDesk` in `db.js` widens a table that was keyed on the company alone).
+So two people signed in to the same books work side by side, the way they do in
+QuickBooks itself: neither sees, stops or clears the other's run, and both can
+run the same kind of job at once. When that load makes QuickBooks time one of
+them out, the run's own retry takes it again a moment later. The company is
+still what QuickBooks is asked about and what the books are written to - that
+never goes through the desk.
+
 **Every read of QuickBooks can be stopped, from any computer.** A read or a run
-lives on the server, one per company, and every computer on that company sees
-the same one. So its Stop button is drawn from the server's state on every poll
-(`scan.running`, `job.running`) - never shown only by the click that started it -
-and a stopped read reports `stopped` rather than an empty result. A page added
-later that reads QuickBooks follows this, or it strands a read nobody can stop.
+lives on the server, one per desk, and every computer that person signs in on
+sees the same one. So its Stop button is drawn from the server's state on every
+poll (`scan.running`, `job.running`) - never shown only by the click that started
+it - and a stopped read reports `stopped` rather than an empty result. A page
+added later that reads QuickBooks follows this, or it strands a read nobody can
+stop.
 
 **Every run has Stop, Carry on and Clear log.** On every page and tab that runs
 something on the server. Stop is drawn from the server's state; Carry on (with the
 count left) shows once the run has stopped or part failed and takes only what is not
 yet done, never twice what is (void, advance, receive payments, delete, swap, replace,
 recat, desc, shipping off, product health, find, backfill, upload); Clear log shows only
-once the run is over, wipes that run's history on the server for every computer, and
+once the run is over, wipes that run's history on the server for that person's every computer, and
 leaves what was read so a new run shows only itself. A new kind of run brings all three.
 
 **One admin; everyone else reads.** Many people sign in to one company with their

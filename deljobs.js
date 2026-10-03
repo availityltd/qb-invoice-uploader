@@ -3,9 +3,10 @@
 
 import { getAccessToken, qbQuery } from './qb.js';
 import { logUpload } from './db.js';
+import { realmOf } from './desk.js';
 
 const API = 'https://quickbooks.api.intuit.com';
-const jobs = new Map();          // realmId -> job
+const jobs = new Map();          // desk (company and person) -> job
 
 const now = () => Date.now();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -15,8 +16,8 @@ function say(job, text, kind) {
   if (job.log.length > 6000) job.log.splice(0, 2000);
 }
 
-export function delSnapshot(realmId, since) {
-  const job = jobs.get(realmId);
+export function delSnapshot(desk, since) {
+  const job = jobs.get(desk);
   if (!job) return null;
 
   return {
@@ -36,8 +37,9 @@ export function delSnapshot(realmId, since) {
 }
 
 // Carry on after a Stop or a failure: what is not yet gone goes through again.
-export function resumeDelJob(realmId) {
-  const job = jobs.get(realmId);
+export function resumeDelJob(desk) {
+  const realmId = realmOf(desk);
+  const job = jobs.get(desk);
   if (!job) throw new Error('There is no run to carry on');
   if (job.state === 'running') throw new Error('The run is still going');
   if (job.done >= job.total) throw new Error('Nothing is left to delete');
@@ -56,22 +58,23 @@ export function resumeDelJob(realmId) {
   });
 }
 
-export function stopDelJob(realmId) {
-  const job = jobs.get(realmId);
+export function stopDelJob(desk) {
+  const job = jobs.get(desk);
   if (!job || job.state !== 'running') return false;
   job.cancel = true;
   return true;
 }
 
-export function clearDelJob(realmId) {
-  const job = jobs.get(realmId);
+export function clearDelJob(desk) {
+  const job = jobs.get(desk);
   if (job && job.state === 'running') return false;
-  jobs.delete(realmId);
+  jobs.delete(desk);
   return true;
 }
 
-export function startDelJob(realmId, opts) {
-  const old = jobs.get(realmId);
+export function startDelJob(desk, opts) {
+  const realmId = realmOf(desk);
+  const old = jobs.get(desk);
   if (old && old.state === 'running') throw new Error('A delete run is already going');
 
   const list = (opts.invoices || [])
@@ -102,7 +105,7 @@ export function startDelJob(realmId, opts) {
     log: []
   };
 
-  jobs.set(realmId, job);
+  jobs.set(desk, job);
   run(realmId, job).catch(e => {
     job.state = 'failed';
     job.error = e.message;
