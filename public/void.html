@@ -188,6 +188,68 @@
               <span class="mono" id="numCount" style="font-size:12px;color:var(--muted);align-self:center"></span>
             </div>
           </div>
+
+          <!-- the other way round: are these on the return sheet at all -->
+          <div class="step" id="stepCheck">
+            <h2>Or look for them in the return sheet</h2>
+            <div class="hint">
+              The other way round. Instead of asking QuickBooks, this reads the return
+              order workbook and says which of the numbers above are on it, and on what day.
+              With or without the <b>#</b>; both spellings are looked for. Nothing is changed.
+            </div>
+
+            <div id="cNoRoot" class="hide" style="font-size:12.5px;color:var(--muted)">
+              Set the return sheet folder on the other tab first.
+            </div>
+
+            <div id="cPicker">
+              <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+                          color:var(--faint);margin-bottom:6px">Workbook</div>
+              <div class="picks" id="cBooks"></div>
+
+              <div id="cTabWrap" class="hide" style="margin-top:14px">
+                <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+                            color:var(--faint);margin-bottom:6px">Tabs to read</div>
+                <div class="days" id="cTabs"></div>
+              </div>
+
+              <div class="range" style="margin-top:14px">
+                <div>
+                  <label>From this day (optional)</label>
+                  <input type="date" id="cFrom">
+                </div>
+                <div>
+                  <label>To this day (optional)</label>
+                  <input type="date" id="cTo">
+                </div>
+              </div>
+
+              <div class="acts">
+                <button class="solid" id="btnCheck">Check the return sheet</button>
+                <button class="solid" id="btnCheckStop" style="display:none;background:var(--neg)">Stop</button>
+                <span class="mono" id="cNote" style="font-size:12px;color:var(--muted);align-self:center"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- what the sheet said -->
+          <div class="step hide" id="stepCheckOut">
+            <h2>What the return sheet says</h2>
+            <div class="hint" id="cHint"></div>
+            <div class="prog"><i id="cBar"></i></div>
+            <div class="runline" id="cRunline"></div>
+            <div class="tally" id="cTally"></div>
+            <div id="cBuckets"></div>
+            <div class="vlog" id="cLog"></div>
+            <div class="acts">
+              <button class="mini" id="btnCheckResume" style="display:none">Carry on</button>
+              <button class="mini" id="btnCheckCopy">Copy log</button>
+              <button class="mini" id="btnDlOnSheet">Download the ones on it</button>
+              <button class="mini" id="btnDlOffSheet">Download the ones not on it</button>
+              <button class="mini" id="btnDlCheckAll">Download the whole report</button>
+              <button class="mini" id="btnCheckClear">Clear log</button>
+            </div>
+          </div>
         </div>
 
         <!-- ============ review and run ============ -->
@@ -297,6 +359,9 @@
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
     pollJob(true);
+    // the sheet check runs on the server too, so whatever is going shows up
+    // here however this page was opened
+    pollCheck(true);
 
     get('/api/void/sheet-root').then(function(d){
       if(d.folderId){
@@ -305,6 +370,10 @@
         $('rootNote').textContent = 'Saved.';
         $('stepRoot').classList.add('done');
         loadBooks();
+        loadCheckBooks();
+      } else {
+        $('cPicker').classList.add('hide');
+        $('cNoRoot').classList.remove('hide');
       }
     }).catch(function(){});
   });
@@ -320,6 +389,7 @@
     $('tabSheet').classList.remove('on');
     $('modePaste').classList.remove('hide');
     $('modeSheet').classList.add('hide');
+    if(S.root && !C.books.length) loadCheckBooks();
   });
 
   /* ---------- the return sheet ---------- */
@@ -335,6 +405,7 @@
       $('rootNote').textContent = 'Saved.';
       $('stepRoot').classList.add('done');
       loadBooks();
+      loadCheckBooks();
     }).catch(function(e){
       $('btnRoot').disabled = false;
       $('rootNote').textContent = e.message;
@@ -826,6 +897,350 @@
       .concat(failed.map(function(r){ return [r.doc, 'failed', r.msg]; }));
     if(!rows.length) return say('bad', '<b>Everything went through.</b>');
     download('not-voided.csv', [['Invoice', 'What happened', 'Why']].concat(rows));
+  });
+
+  /* ================= looking the pasted numbers up in the sheet =================
+     The sheet tab takes numbers out of the workbook and asks QuickBooks about
+     them. This goes the other way: it takes the numbers that were pasted and
+     reads the workbook looking for them. It runs on the server like every other
+     run here, so Stop, Carry on and Clear log mean the same thing on every
+     computer, and leaving the page does not end it. */
+
+  var C = {
+    books: [], book: null, excel: false, tabs: [], picked: {}, all: true,
+    job: null, poller: null, lastEventId: 0, logLines: [],
+    open: { found: true, missing: true }
+  };
+
+  function loadCheckBooks(){
+    $('cNoRoot').classList.add('hide');
+    $('cPicker').classList.remove('hide');
+    $('cBooks').innerHTML = '<span style="font-size:13px;color:var(--muted)">Reading the folder...</span>';
+
+    return get('/api/void/sheets').then(function(d){
+      C.books = d.sheets || [];
+      var box = $('cBooks');
+      box.innerHTML = '';
+      if(!C.books.length){
+        box.innerHTML = '<span style="font-size:13px;color:var(--muted)">No workbooks in that folder.</span>';
+        return;
+      }
+      C.books.forEach(function(f){
+        var b = document.createElement('button');
+        b.className = 'pick';
+        b.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+          (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
+        b.addEventListener('click', function(){
+          Array.prototype.forEach.call(box.children, function(c){ c.classList.remove('on'); });
+          b.classList.add('on');
+          C.book = f;
+          C.excel = !!f.excel;
+          loadCheckTabs();
+        });
+        box.appendChild(b);
+      });
+    }).catch(function(e){
+      $('cBooks').innerHTML = '<span style="font-size:13px;color:var(--muted)">' +
+        esc(e.message) + '</span>';
+    });
+  }
+
+  function loadCheckTabs(){
+    $('cTabWrap').classList.remove('hide');
+    $('cTabs').innerHTML = '<span style="font-size:12px;color:var(--muted)">Reading tabs...</span>';
+    C.tabs = []; C.picked = {}; C.all = true;
+
+    get('/api/void/tabs?sheetId=' + encodeURIComponent(C.book.id) + (C.excel ? '&excel=1' : ''))
+      .then(function(d){
+        C.tabs = (d.tabs || []).map(function(t){ return t.title; });
+        drawCheckTabs();
+      }).catch(function(e){
+        $('cTabs').innerHTML = '<span style="font-size:12px;color:var(--muted)">' +
+          esc(e.message) + '</span>';
+      });
+  }
+
+  function drawCheckTabs(){
+    var box = $('cTabs');
+    box.innerHTML = '';
+
+    var every = document.createElement('button');
+    every.className = 'day' + (C.all ? ' on' : '');
+    every.textContent = 'Every tab';
+    every.addEventListener('click', function(){
+      C.all = true; C.picked = {}; drawCheckTabs();
+    });
+    box.appendChild(every);
+
+    C.tabs.forEach(function(t){
+      var b = document.createElement('button');
+      b.className = 'day' + (!C.all && C.picked[t] ? ' on' : '');
+      b.textContent = t;
+      b.addEventListener('click', function(){
+        C.all = false;
+        C.picked[t] = !C.picked[t];
+        if(!Object.keys(C.picked).some(function(k){ return C.picked[k]; })) C.all = true;
+        drawCheckTabs();
+      });
+      box.appendChild(b);
+    });
+
+    var n = C.all ? C.tabs.length
+                  : Object.keys(C.picked).filter(function(k){ return C.picked[k]; }).length;
+    $('cNote').textContent = n + ' tab' + (n === 1 ? '' : 's') + ' will be read';
+  }
+
+  $('btnCheck').addEventListener('click', function(){
+    var text = $('nums').value.trim();
+    if(!text) return say('bad', '<b>Paste some order numbers first.</b>');
+    if(!C.book) return say('bad', '<b>Pick the return workbook first.</b>');
+
+    var tabs = C.all ? [] : Object.keys(C.picked).filter(function(k){ return C.picked[k]; });
+
+    clearSay();
+    $('btnCheck').disabled = true;
+    $('cLog').innerHTML = '';
+    C.logLines = [];
+    C.lastEventId = 0;
+    C.job = null;
+
+    post('/api/void/check-start', {
+      numbers: text,
+      sheetId: C.book.id,
+      sheetName: C.book.name,
+      excel: C.excel,
+      tabs: tabs,
+      from: $('cFrom').value || '',
+      to: $('cTo').value || ''
+    }).then(function(){
+      pollCheck(true);
+      startCheckPolling();
+      $('stepCheckOut').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }).catch(function(e){
+      $('btnCheck').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  $('btnCheckStop').addEventListener('click', function(){
+    $('btnCheckStop').disabled = true;
+    $('btnCheckStop').textContent = 'Stopping...';
+    post('/api/void/check-stop').catch(function(){});
+  });
+
+  $('btnCheckResume').addEventListener('click', function(){
+    $('btnCheckResume').style.display = 'none';
+    post('/api/void/check-resume').then(function(){
+      pollCheck(false);
+      startCheckPolling();
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  $('btnCheckClear').addEventListener('click', function(){
+    post('/api/void/check-clear').then(function(){
+      C.job = null;
+      C.lastEventId = 0;
+      C.logLines = [];
+      $('cLog').innerHTML = '';
+      $('cBuckets').innerHTML = '';
+      $('cTally').innerHTML = '';
+      $('stepCheckOut').classList.add('hide');
+      $('btnCheckResume').style.display = 'none';
+    }).catch(function(e){
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
+  function startCheckPolling(){
+    if(C.poller) return;
+    C.poller = setInterval(function(){ pollCheck(false); }, 2000);
+  }
+  function stopCheckPolling(){
+    if(!C.poller) return;
+    clearInterval(C.poller);
+    C.poller = null;
+  }
+
+  function pollCheck(first){
+    // the lists are only as long as what was pasted, so they come down with
+    // every poll - the matches fill in as the tabs are read, not at the end
+    var u = '/api/void/check-status?since=' + C.lastEventId + '&full=1';
+    return get(u).then(function(d){
+      if(!d.job){ stopCheckPolling(); return; }
+
+      var j = d.job;
+      C.job = j;
+
+      $('body').classList.remove('hide');
+      $('stepCheckOut').classList.remove('hide');
+
+      (j.events || []).forEach(function(e){
+        var stamp = clock(e.at);
+        C.logLines.push(stamp + '  ' + e.msg);
+
+        var line = document.createElement('div');
+        if(e.type === 'ok') line.className = 'ok';
+        else if(e.type === 'retry') line.className = 'held';
+        else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
+
+        var t = document.createElement('span');
+        t.className = 't';
+        t.textContent = stamp;
+        line.appendChild(t);
+        line.appendChild(document.createTextNode(e.msg));
+
+        $('cLog').appendChild(line);
+        $('cLog').scrollTop = $('cLog').scrollHeight;
+      });
+      if(j.lastEventId) C.lastEventId = j.lastEventId;
+
+      var live = j.state === 'running';
+      $('btnCheck').style.display = live ? 'none' : '';
+      $('btnCheck').disabled = false;
+      $('btnCheckStop').style.display = live ? '' : 'none';
+      $('btnCheckStop').disabled = false;
+      $('btnCheckStop').textContent = 'Stop';
+      $('btnCheckClear').style.display = live ? 'none' : '';
+
+      var pct = j.total ? Math.round(j.done / j.total * 100) : 0;
+      $('cBar').style.width = pct + '%';
+      $('cRunline').textContent =
+        nf(j.done) + ' of ' + nf(j.total) + ' tab' + (j.total === 1 ? '' : 's') + ' read' +
+        (j.skippedCount ? ' · ' + nf(j.skippedCount) + ' skipped' : '') +
+        ' · ' + nf(j.foundCount) + ' on the sheet · ' +
+        nf(j.missingCount) + ' not on it' +
+        (live ? '   (running on the server - you can leave this page)' : '');
+
+      $('cHint').innerHTML =
+        nf(j.pasted) + ' number' + (j.pasted === 1 ? '' : 's') + ' pasted, ' +
+        nf(j.unique) + ' after removing repeats, looked for in <b>' + esc(j.sheetName) + '</b>' +
+        ((j.from || j.to) ? ' between ' + esc(j.from || 'the start') + ' and ' +
+                            esc(j.to || 'the end') : '') + '.';
+
+      showCheck(j);
+
+      if(live){ startCheckPolling(); return; }
+
+      stopCheckPolling();
+      if(j.leftCount){
+        $('btnCheckResume').style.display = 'inline-block';
+        $('btnCheckResume').textContent = 'Carry on (' + nf(j.leftCount) + ' tabs left)';
+      } else {
+        $('btnCheckResume').style.display = 'none';
+      }
+    }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  function placesOf(r){
+    return (r.places || []).map(function(p){
+      return esc(p.tab) + (p.date ? ' · ' + esc(p.date) : '');
+    }).join('<br>');
+  }
+
+  function showCheck(j){
+    $('cTally').innerHTML =
+      '<div class="ok"><div class="n">' + nf(j.foundCount) + '</div>' +
+        '<div class="l">On the return sheet</div></div>' +
+      '<div class="bad"><div class="n">' + nf(j.missingCount) + '</div>' +
+        '<div class="l">Not on it</div></div>' +
+      '<div><div class="n">' + nf(j.unique) + '</div>' +
+        '<div class="l">Numbers asked</div></div>' +
+      '<div><div class="n">' + nf(j.done) + ' / ' + nf(j.total) + '</div>' +
+        '<div class="l">Tabs read</div></div>';
+
+    var box = $('cBuckets');
+    box.innerHTML = '';
+
+    checkBucket(box, 'found', 'On the return sheet', j.found || [], false, function(r){
+      return '<tr><td>' + esc(r.doc) + '</td>' +
+             '<td style="color:var(--muted)">' + placesOf(r) + '</td>' +
+             '<td class="num">' + nf((r.places || []).length) + '</td></tr>';
+    });
+
+    checkBucket(box, 'missing', 'Not on the return sheet', j.missing || [], true, function(r){
+      return '<tr><td>' + esc(r.doc) + '</td><td></td><td class="num">0</td></tr>';
+    });
+  }
+
+  function checkBucket(box, key, title, rows, warn, render){
+    if(!rows.length) return;
+    var el = document.createElement('div');
+    el.className = 'bucket' + (warn ? ' warn' : '');
+
+    var open = !!C.open[key];
+    el.innerHTML =
+      '<h4><span>' + esc(title) + ' (' + nf(rows.length) + ')</span>' +
+      '<span>' + (open ? '▲' : '▼') + '</span></h4>' +
+      (open
+        ? '<div class="inner"><table><thead><tr>' +
+          '<th>Invoice</th><th>Where on the sheet</th><th class="num">Times</th>' +
+          '</tr></thead><tbody>' + rows.map(render).join('') + '</tbody></table></div>'
+        : '');
+
+    el.querySelector('h4').addEventListener('click', function(){
+      C.open[key] = !C.open[key];
+      if(C.job) showCheck(C.job);
+    });
+
+    box.appendChild(el);
+  }
+
+  $('btnCheckCopy').addEventListener('click', function(){
+    var ta = document.createElement('textarea');
+    ta.value = C.logLines.join('\n');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); $('btnCheckCopy').textContent = 'Copied'; }
+    catch(e){ $('btnCheckCopy').textContent = 'Copy failed'; }
+    document.body.removeChild(ta);
+    setTimeout(function(){ $('btnCheckCopy').textContent = 'Copy log'; }, 2000);
+  });
+
+  // one row per place it was written, so a number sitting on two days is two
+  // lines - that is the thing being looked for
+  function foundRows(){
+    var out = [];
+    ((C.job && C.job.found) || []).forEach(function(r){
+      (r.places || []).forEach(function(p){
+        out.push([r.doc, p.written, p.tab, p.date, (r.places || []).length]);
+      });
+    });
+    return out;
+  }
+
+  $('btnDlOnSheet').addEventListener('click', function(){
+    var rows = foundRows();
+    if(!rows.length) return say('bad', '<b>None of them is on the return sheet.</b>');
+    download('on-return-sheet.csv',
+      [['Invoice', 'As written on the sheet', 'Tab', 'Date', 'Times on the sheet']].concat(rows));
+  });
+
+  $('btnDlOffSheet').addEventListener('click', function(){
+    var miss = (C.job && C.job.missing) || [];
+    if(!miss.length) return say('bad', '<b>Every one of them is on the return sheet.</b>');
+    download('not-on-return-sheet.csv',
+      [['Invoice', 'Times pasted']].concat(miss.map(function(r){
+        return [r.doc, r.pastedTimes];
+      })));
+  });
+
+  $('btnDlCheckAll').addEventListener('click', function(){
+    if(!C.job) return say('bad', '<b>Nothing has been checked yet.</b>');
+    var rows = ((C.job.found) || []).map(function(r){
+      return [r.doc, 'on the return sheet',
+        (r.places || []).map(function(p){
+          return p.tab + (p.date ? ' ' + p.date : '');
+        }).join(' | '),
+        (r.places || []).length];
+    }).concat(((C.job.missing) || []).map(function(r){
+      return [r.doc, 'not on the return sheet', '', 0];
+    }));
+    download('return-sheet-check.csv',
+      [['Invoice', 'What the sheet says', 'Where', 'Times on the sheet']].concat(rows));
   });
 
   $('btnClearRun').addEventListener('click', function(){

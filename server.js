@@ -61,6 +61,11 @@ import {
     retryFailed, snapshot, remainingInvoices, resumeUnfinished
 } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, resumeVoidJob, voidSnapshot, initVoidStore, resumeVoidRuns } from './voidjobs.js';
+import {
+  startCheckJob as startSheetCheck, stopCheckJob as stopSheetCheck,
+  clearCheckJob as clearSheetCheck, resumeCheckJob as resumeSheetCheck,
+  checkSnapshot as sheetCheckSnapshot
+} from './voidcheck.js';
 import { readDateColumns } from './voidsheet.js';
 import { startDelJob, stopDelJob, clearDelJob, resumeDelJob, delSnapshot } from './deljobs.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
@@ -698,6 +703,9 @@ const USER_MAY_POST = new Set([
   '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
   '/api/adv/recheck', '/api/charges/preview', '/api/charges/scan',
   '/api/void/scan',
+  // reading the return sheet back - looking pasted numbers up in it changes nothing
+  '/api/void/check-start', '/api/void/check-stop',
+  '/api/void/check-resume', '/api/void/check-clear',
   // finding orders in the courier sheets - a read from end to end
   '/api/find/start', '/api/find/resume', '/api/find/clear',
   '/api/find/sheets', '/api/find/columns',
@@ -6960,6 +6968,62 @@ app.post('/api/void/clear', async (req, res) => {
   if (!realmId) return;
   const ok = clearVoidJob(realmId);
   if (!ok) return res.status(409).json({ error: 'The void run is still going' });
+  res.json({ ok: true });
+});
+
+// ---- the other way round: pasted invoice numbers, looked for in the sheet ----
+// Nothing is written by any of these - the workbook is only read - so they are
+// open to anybody who may see the page.
+app.post('/api/void/check-start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const id = startSheetCheck(realmId, {
+      numbers: req.body.numbers,
+      sheetId: req.body.sheetId,
+      sheetName: req.body.sheetName,
+      excel: !!req.body.excel,
+      tabs: req.body.tabs,
+      from: req.body.from,
+      to: req.body.to
+    });
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/void/check-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = sheetCheckSnapshot(realmId, req.query.since || 0, req.query.full === '1');
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/void/check-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopSheetCheck(realmId) });
+});
+
+app.post('/api/void/check-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeSheetCheck(realmId);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/void/check-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearSheetCheck(realmId);
+  if (!ok) return res.status(409).json({ error: 'The return sheet check is still going' });
   res.json({ ok: true });
 });
 // ==================== Upload ====================
