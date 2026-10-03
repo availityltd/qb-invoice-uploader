@@ -59,6 +59,11 @@
   .tally .ok .n{color:var(--ok)}
   .tally .warn .n{color:var(--warn)}
 
+  .colsline{font-size:11.5px;color:var(--muted);margin:-6px 0 12px;line-height:1.7}
+  .colsline b{color:var(--text);font-weight:600}
+  .colsline a{color:var(--qbo);cursor:pointer;text-decoration:none;margin-left:8px;
+    border-bottom:1px dotted var(--qbo)}
+
   .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
   .cols label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
     color:var(--faint);margin-bottom:4px}
@@ -223,6 +228,7 @@
         <div class="step hide" id="stepCpr">
           <h2>CPRs in this sheet</h2>
           <div class="hint" id="cprHint">Checking QuickBooks...</div>
+          <div class="colsline" id="colsLine"></div>
           <div class="cprs" id="cprList"></div>
         </div>
 
@@ -529,18 +535,64 @@
 
   /* ---------- columns ---------- */
 
-  function showCols(d){
-    $('stepCols').classList.remove('hide');
-    $('colsHint').textContent = S.header.length + ' columns found in "' + S.tab +
-      '". Check these are right - they will be remembered for ' + S.courier + '.';
+  // Which columns of the sheet every figure on this page was read from.
+  //
+  // The picker only ever showed itself the first time a courier's sheet was
+  // opened; after that the choice was remembered and never seen again. When a
+  // courier changes their sheet - a column moved, a new one inserted - the
+  // numbers quietly come from the wrong place and nothing says so. So the
+  // choice is written out in a line under the CPRs, where it can be checked at
+  // a glance and changed in two clicks.
+  var COL_FIELDS = [
+    ['invoice', 'Order / invoice number'],
+    ['cpr',     'CPR number'],
+    ['cprDate', 'CPR date'],
+    ['amount',  'Amount'],
+    ['status',  'Status (leave blank if none)']
+  ];
 
-    var fields = [
-      ['invoice', 'Order / invoice number'],
-      ['cpr',     'CPR number'],
-      ['cprDate', 'CPR date'],
-      ['amount',  'Amount'],
-      ['status',  'Status (leave blank if none)']
-    ];
+  function colName(i){
+    if(i === undefined || i === null || i < 0) return null;
+    var head = (S.header || [])[i];
+    return (head && String(head).trim()) ? String(head).trim() : 'column ' + (i + 1);
+  }
+
+  function drawColsLine(){
+    var line = $('colsLine');
+    if(!line) return;
+
+    if(!S.cols || !S.header){ line.innerHTML = ''; return; }
+
+    var bits = COL_FIELDS.map(function(f){
+      var name = colName(S.cols[f[0]]);
+      var what = f[0] === 'cprDate' ? 'Date'
+               : f[0] === 'invoice' ? 'Order'
+               : f[0].charAt(0).toUpperCase() + f[0].slice(1);
+      return what + ' = ' + (name ? '<b>' + esc(name) + '</b>' : 'none');
+    });
+
+    line.innerHTML = 'Read from ' + bits.join(' \u00b7 ') +
+      '<a id="editCols">Check or change the columns</a>';
+
+    var link = $('editCols');
+    if(link) link.addEventListener('click', function(e){
+      e.preventDefault();
+      showCols({ cols: S.cols }, true);
+      $('stepCols').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function showCols(d, again){
+    $('stepCols').classList.remove('hide');
+    $('stepCols').classList.remove('done');
+    $('colsHint').textContent = again
+      ? 'These are the columns "' + S.tab + '" is being read from. Change any of them ' +
+        'and press Save - the CPRs and their totals are worked out again from the new ones, ' +
+        'and ' + S.courier + ' is remembered this way.'
+      : S.header.length + ' columns found in "' + S.tab +
+        '". Check these are right - they will be remembered for ' + S.courier + '.';
+
+    var fields = COL_FIELDS;
 
     var box = $('colsBox');
     box.innerHTML = '';
@@ -595,7 +647,15 @@
       $('stepCols').classList.add('done');
       soak(d);
       S.groups = d.groups;
+      drawColsLine();
+      // the CPR that was open was read with the old columns, so it is read
+      // again with the new ones rather than left saying something out of date
+      var open = S.currentKey;
       afterColumns();
+      if(open && S.groups.some(function(g){ return (g.cprNumber || 'All rows') === open; })){
+        S.currentKey = open;
+        readCpr(open, 'Reading this CPR again from the new columns...');
+      }
     }).catch(function(e){
       $('btnCols').disabled = false;
       say('bad', '<b>' + esc(e.message) + '</b>');
@@ -659,6 +719,7 @@
   function loadSheetStatus(){
     hideFrom('stepCpr');
     $('stepCpr').classList.remove('hide');
+    drawColsLine();
     $('cprHint').textContent = 'Checking QuickBooks for all ' + S.groups.length + ' CPRs...';
     $('cprList').innerHTML = '';
 
