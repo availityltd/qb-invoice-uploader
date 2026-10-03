@@ -252,6 +252,18 @@
           </div>
         </div>
 
+        <!-- ============ the look-up itself ============ -->
+        <div class="step hide" id="stepScanRun">
+          <h2>Looking them up in QuickBooks</h2>
+          <div class="runline" id="scanLine"></div>
+          <div class="vlog" id="scanLog"></div>
+          <div class="acts">
+            <button class="solid" id="btnScanStop" style="display:none;background:var(--neg)">Stop</button>
+            <button class="mini" id="btnScanResume" style="display:none">Carry on</button>
+            <button class="mini" id="btnScanClear" style="display:none">Clear log</button>
+          </div>
+        </div>
+
         <!-- ============ review and run ============ -->
         <div class="step hide" id="stepReview">
           <h2>What QuickBooks found</h2>
@@ -359,6 +371,7 @@
     if(!s.connected){ $('gate').classList.remove('hide'); return; }
     $('body').classList.remove('hide');
     pollJob(true);
+    pollScan(true);
     // the sheet check runs on the server too, so whatever is going shows up
     // here however this page was opened
     pollCheck(true);
@@ -597,21 +610,108 @@
     runScan(text);
   });
 
+  // The look-up runs on the server in batches, so a list pasted by mistake is
+  // stopped at the end of the batch in flight instead of having to be waited
+  // out - and what was already read is kept, to carry on or to clear.
   function runScan(text){
     clearSay();
-    $('btnScan').disabled = true;
-    say('', 'Looking these up in QuickBooks...');
+    S.scanEvent = 0;
+    $('scanLog').innerHTML = '';
+    $('stepScanRun').classList.remove('hide');
 
-    post('/api/void/scan', { numbers: text }).then(function(d){
-      $('btnScan').disabled = false;
-      clearSay();
-      S.scan = d;
-      showScan(d);
-      $('stepReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    post('/api/void/scan-start', { numbers: text }).then(function(){
+      pollScan(true);
+      startScanPoll();
     }).catch(function(e){
-      $('btnScan').disabled = false;
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
+  }
+
+  $('btnScanStop').addEventListener('click', function(){
+    $('btnScanStop').disabled = true;
+    $('btnScanStop').textContent = 'Stopping...';
+    post('/api/void/scan-stop').catch(function(){});
+  });
+
+  $('btnScanResume').addEventListener('click', function(){
+    $('btnScanResume').style.display = 'none';
+    post('/api/void/scan-resume').then(function(){
+      pollScan(false);
+      startScanPoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  $('btnScanClear').addEventListener('click', function(){
+    post('/api/void/scan-clear').then(function(){
+      S.scan = null;
+      S.scanEvent = 0;
+      $('scanLog').innerHTML = '';
+      $('stepScanRun').classList.add('hide');
+      $('scanLine').textContent = '';
+      $('stepReview').classList.add('hide');
+      $('btnScanResume').style.display = 'none';
+      $('btnScanClear').style.display = 'none';
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  function startScanPoll(){
+    if(S.scanPoll) return;
+    S.scanPoll = setInterval(function(){ pollScan(false); }, 1500);
+  }
+  function stopScanPoll(){
+    if(!S.scanPoll) return;
+    clearInterval(S.scanPoll);
+    S.scanPoll = null;
+  }
+
+  function pollScan(first){
+    return get('/api/void/scan-status?since=' + (S.scanEvent || 0)).then(function(d){
+      if(!d.job){
+        stopScanPoll();
+        $('btnScanStop').style.display = 'none';
+        $('btnScanResume').style.display = 'none';
+        $('btnScanClear').style.display = 'none';
+        return;
+      }
+
+      var j = d.job;
+      $('stepScanRun').classList.remove('hide');
+
+      (j.events || []).forEach(function(e){
+        var line = document.createElement('div');
+        if(e.type === 'ok') line.className = 'ok';
+        else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
+        var t = document.createElement('span');
+        t.className = 't';
+        t.textContent = clock(e.at);
+        line.appendChild(t);
+        line.appendChild(document.createTextNode(e.msg));
+        $('scanLog').appendChild(line);
+      });
+      if(j.lastEventId) S.scanEvent = j.lastEventId;
+      $('scanLog').scrollTop = $('scanLog').scrollHeight;
+
+      var live = j.state === 'running';
+      $('btnScan').style.display = live ? 'none' : '';
+      $('btnScanStop').style.display = live ? '' : 'none';
+      $('btnScanStop').disabled = false;
+      $('btnScanStop').textContent = 'Stop';
+      $('btnScanResume').style.display = (!live && j.leftCount) ? '' : 'none';
+      $('btnScanResume').textContent = 'Carry on (' + nf(j.leftCount) + ' left)';
+      $('btnScanClear').style.display = live ? 'none' : '';
+
+      $('scanLine').textContent =
+        nf(j.done) + ' of ' + nf(j.unique) + ' numbers looked up' +
+        (live ? '   (running on the server - you can leave this page)' : '');
+
+      if(j.result){
+        S.scan = j.result;
+        showScan(j.result);
+      }
+
+      if(live){ startScanPoll(); return; }
+      stopScanPoll();
+    }).catch(function(){ /* a missed poll is nothing to worry about */ });
   }
 
   /* ---------- what was found ---------- */
