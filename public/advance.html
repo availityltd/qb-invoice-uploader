@@ -134,6 +134,15 @@
   .result.good{border-color:var(--qbo);background:#F2FAF0}
   .result.bad{border-color:var(--bad);background:#FDF3F3}
 
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;
+    margin-bottom:16px;background:#fff}
+  .seg button{border:0;background:#fff;font-family:inherit;font-size:13px;padding:9px 18px;
+    cursor:pointer;color:var(--muted)}
+  .seg button.on{background:var(--tint);color:var(--ink);font-weight:600}
+
+  textarea#pNums{width:100%;min-height:140px;font-family:var(--mono);font-size:12.5px;
+    line-height:1.7;resize:vertical}
+
   .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .acts button.mini{font-size:11.5px;padding:5px 12px;border-radius:6px;
     border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
@@ -172,6 +181,59 @@
             <button class="solid" id="btnRoot">Save</button>
           </div>
           <div id="rootNote" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+        </div>
+
+        <div class="seg" id="advSeg">
+          <button id="modeDays" class="on">By date</button>
+          <button id="modePaste">Paste order numbers</button>
+        </div>
+
+        <!-- ============ a pasted list of orders ============ -->
+        <div id="panePaste" class="hide">
+          <div class="step">
+            <h2>Order numbers</h2>
+            <div class="hint">
+              One per line, or straight out of a spreadsheet column. With or without the
+              <b>#</b>. Their rows are looked for in the advance sheet - whichever workbook,
+              whichever month - and then sorted against QuickBooks the same way a day is.
+            </div>
+            <textarea id="pNums" placeholder="#91298851&#10;91300886"></textarea>
+            <div class="acts">
+              <span class="mono" id="pCount" style="font-size:12px;color:var(--muted);align-self:center"></span>
+            </div>
+          </div>
+
+          <div class="step" id="pStepWhere">
+            <h2>Where to look</h2>
+            <div class="hint">Every workbook in the folder, or just the ones worth reading.
+              Pick a single workbook and its months can be narrowed down too.</div>
+            <div class="picks" id="pBooks"></div>
+            <div id="pTabWrap" class="hide" style="margin-top:12px">
+              <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+                          color:var(--faint);margin-bottom:6px">Months</div>
+              <div class="days" id="pTabs"></div>
+            </div>
+
+            <div class="acts" style="margin-top:14px">
+              <button class="solid" id="btnPFind">Find these rows in the sheet</button>
+              <button class="solid" id="btnPStop" style="display:none;background:var(--neg)">Stop</button>
+              <button class="mini" id="btnPResume" style="display:none">Carry on</button>
+              <button class="mini" id="btnPClear" style="display:none">Clear log</button>
+              <span class="mono" id="pNote" style="font-size:12px;color:var(--muted);align-self:center"></span>
+            </div>
+
+            <div class="runline" id="pLine" style="margin-top:10px"></div>
+            <div class="rlog hide" id="pLog"></div>
+          </div>
+
+          <div class="step hide" id="pStepFound">
+            <h2>What the sheet says</h2>
+            <div class="hint" id="pFoundHint"></div>
+            <div id="pFound"></div>
+            <div class="acts">
+              <button class="solid" id="btnPMatch">Check these against QuickBooks</button>
+            </div>
+          </div>
         </div>
 
         <div class="step hide" id="stepBook">
@@ -325,6 +387,9 @@
     $('body').classList.remove('hide');
 
     pollJob(true);
+    // a search of the sheet running on the server belongs to whoever opens
+    // this page next on the same sign-in, so it is picked up here
+    pollPaste(true);
     loadOptions();
 
     get('/api/adv/root').then(function(d){
@@ -1134,9 +1199,11 @@
       methodId: $('method').value || null,
       txnDate: $('payDate').value,
       label: S.match.label,
-      sheetId: S.book.id,
-      tab: S.tab,
-      postedCol: (S.cols && S.cols.posted !== undefined) ? S.cols.posted : -1,
+      sheetId: S.book ? S.book.id : null,
+      tab: S.tab || null,
+      postedCol: (S.cols && S.cols.posted !== undefined && S.cols.posted >= 0)
+        ? S.cols.posted
+        : (P && P.postedCol !== undefined ? P.postedCol : -1),
       stamp: 'Posted by Rani',
       courier: 'Advance payments'
     }).then(function(){
@@ -1295,6 +1362,351 @@
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
   });
+
+  /* ================= the same sheet, asked about a pasted list =================
+     By date works forwards: a month, some days, and everything paid on them.
+     This works backwards: here are the order numbers, find their rows wherever
+     they were written. What it finds is sorted against QuickBooks by the very
+     same rule, and received by the very same Receive below. */
+
+  var P = {
+    books: [], pick: {}, all: true,
+    tabs: [], pickedTabs: {}, allTabs: true,
+    event: 0, poller: null, rows: [], missing: [], postedCol: -1
+  };
+
+  $('modeDays').addEventListener('click', function(){ setAdvMode('days'); });
+  $('modePaste').addEventListener('click', function(){ setAdvMode('paste'); });
+
+  function setAdvMode(m){
+    S.pasteMode = (m === 'paste');
+    $('modeDays').classList.toggle('on', m === 'days');
+    $('modePaste').classList.toggle('on', m === 'paste');
+    $('panePaste').classList.toggle('hide', m !== 'paste');
+
+    ['stepBook','stepTab','stepCols','stepDays'].forEach(function(id){
+      var el = $(id);
+      if(!el) return;
+      if(m === 'paste') el.classList.add('hide');
+    });
+
+    // what was matched one way does not belong to the other
+    $('stepMatch').classList.add('hide');
+    $('stepPay').classList.add('hide');
+
+    if(m === 'paste' && !P.books.length) loadPasteBooks();
+    if(m === 'days' && S.root) loadBooks();
+  }
+
+  $('pNums').addEventListener('input', function(){
+    var seen = {};
+    $('pNums').value.split(/[\s,;]+/).forEach(function(n){
+      var d = String(n).replace(/[^0-9]/g, '').replace(/^0+(?=[0-9])/, '');
+      if(d) seen[d] = 1;
+    });
+    var n = Object.keys(seen).length;
+    $('pCount').textContent = n ? nf(n) + ' order number' + (n === 1 ? '' : 's') + ' to look for' : '';
+  });
+
+  /* ---------- which workbooks, which months ---------- */
+
+  function loadPasteBooks(){
+    $('pBooks').innerHTML =
+      '<span style="font-size:12px;color:var(--muted)">Reading the folder...</span>';
+
+    get('/api/adv/sheets').then(function(d){
+      P.books = d.sheets || [];
+      drawPasteBooks();
+    }).catch(function(e){
+      $('pBooks').innerHTML =
+        '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
+    });
+  }
+
+  function drawPasteBooks(){
+    var box = $('pBooks');
+    box.innerHTML = '';
+
+    if(!P.books.length){
+      box.innerHTML = '<span style="font-size:12px;color:var(--muted)">' +
+        'Nothing found at that link.</span>';
+      return;
+    }
+
+    var every = document.createElement('button');
+    every.className = 'pick' + (P.all ? ' on' : '');
+    every.innerHTML = 'Every workbook<small>' + nf(P.books.length) + ' in the folder</small>';
+    every.addEventListener('click', function(){
+      P.all = true; P.pick = {};
+      P.tabs = []; P.pickedTabs = {}; P.allTabs = true;
+      $('pTabWrap').classList.add('hide');
+      drawPasteBooks();
+    });
+    box.appendChild(every);
+
+    P.books.forEach(function(f){
+      var b = document.createElement('button');
+      b.className = 'pick' + (!P.all && P.pick[f.id] ? ' on' : '');
+      b.innerHTML = '\u{1F4C4} ' + esc(f.name) +
+        (f.excel ? '<small>Excel file</small>' : '<small>Google Sheet</small>');
+      b.addEventListener('click', function(){
+        P.all = false;
+        if(P.pick[f.id]) delete P.pick[f.id];
+        else P.pick[f.id] = f;
+        if(!Object.keys(P.pick).length) P.all = true;
+        P.tabs = []; P.pickedTabs = {}; P.allTabs = true;
+        drawPasteBooks();
+        // one workbook on its own can have its months narrowed down
+        var only = Object.keys(P.pick);
+        if(only.length === 1) loadPasteTabs(P.pick[only[0]]);
+        else $('pTabWrap').classList.add('hide');
+      });
+      box.appendChild(b);
+    });
+
+    var n = P.all ? P.books.length : Object.keys(P.pick).length;
+    $('pNote').textContent = n + ' workbook' + (n === 1 ? '' : 's') + ' will be read';
+  }
+
+  function loadPasteTabs(f){
+    $('pTabWrap').classList.remove('hide');
+    $('pTabs').innerHTML = '<span style="font-size:12px;color:var(--muted)">Reading tabs...</span>';
+
+    get('/api/adv/tabs?sheetId=' + encodeURIComponent(f.id) + (f.excel ? '&excel=1' : ''))
+      .then(function(d){
+        P.tabs = (d.tabs || []).map(function(t){ return t.title; });
+        drawPasteTabs();
+      }).catch(function(e){
+        $('pTabs').innerHTML =
+          '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
+      });
+  }
+
+  function drawPasteTabs(){
+    var box = $('pTabs');
+    box.innerHTML = '';
+
+    var every = document.createElement('div');
+    every.className = 'day' + (P.allTabs ? ' on' : '');
+    every.textContent = 'Every month';
+    every.addEventListener('click', function(){
+      P.allTabs = true; P.pickedTabs = {}; drawPasteTabs();
+    });
+    box.appendChild(every);
+
+    P.tabs.forEach(function(t){
+      var d = document.createElement('div');
+      d.className = 'day' + (!P.allTabs && P.pickedTabs[t] ? ' on' : '');
+      d.textContent = t;
+      d.addEventListener('click', function(){
+        P.allTabs = false;
+        if(P.pickedTabs[t]) delete P.pickedTabs[t];
+        else P.pickedTabs[t] = true;
+        if(!Object.keys(P.pickedTabs).length) P.allTabs = true;
+        drawPasteTabs();
+      });
+      box.appendChild(d);
+    });
+  }
+
+  function pasteBooksToRead(){
+    var picked = P.all ? P.books : Object.keys(P.pick).map(function(k){ return P.pick[k]; });
+    var tabs = P.allTabs ? [] : Object.keys(P.pickedTabs);
+    return picked.map(function(f){
+      return {
+        id: f.id, name: f.name, excel: !!f.excel,
+        tabs: (picked.length === 1 ? tabs : [])
+      };
+    });
+  }
+
+  /* ---------- the search itself ---------- */
+
+  $('btnPFind').addEventListener('click', function(){
+    var text = $('pNums').value.trim();
+    if(!text) return say('bad', '<b>Paste some order numbers first.</b>');
+
+    var books = pasteBooksToRead();
+    if(!books.length) return say('bad', '<b>Pick at least one workbook.</b>');
+
+    clearSay();
+    P.event = 0;
+    P.rows = [];
+    P.missing = [];
+    $('pLog').innerHTML = '';
+    $('pLog').classList.remove('hide');
+    $('pStepFound').classList.add('hide');
+    $('stepMatch').classList.add('hide');
+    $('stepPay').classList.add('hide');
+
+    post('/api/adv/find-start', { numbers: text, books: books }).then(function(){
+      pollPaste(true);
+      startPastePoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  $('btnPStop').addEventListener('click', function(){
+    $('btnPStop').disabled = true;
+    $('btnPStop').textContent = 'Stopping...';
+    post('/api/adv/find-stop').catch(function(){});
+  });
+
+  $('btnPResume').addEventListener('click', function(){
+    $('btnPResume').style.display = 'none';
+    post('/api/adv/find-resume').then(function(){
+      pollPaste(false);
+      startPastePoll();
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  $('btnPClear').addEventListener('click', function(){
+    post('/api/adv/find-clear').then(function(){
+      P.event = 0;
+      P.rows = [];
+      P.missing = [];
+      $('pLog').innerHTML = '';
+      $('pLog').classList.add('hide');
+      $('pLine').textContent = '';
+      $('pStepFound').classList.add('hide');
+      $('btnPResume').style.display = 'none';
+      $('btnPClear').style.display = 'none';
+    }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+
+  function startPastePoll(){
+    if(P.poller) return;
+    P.poller = setInterval(function(){ pollPaste(false); }, 2000);
+  }
+  function stopPastePoll(){
+    if(!P.poller) return;
+    clearInterval(P.poller);
+    P.poller = null;
+  }
+
+  function pollPaste(first){
+    return get('/api/adv/find-status?since=' + P.event).then(function(d){
+      if(!d.job){
+        stopPastePoll();
+        $('btnPStop').style.display = 'none';
+        $('btnPResume').style.display = 'none';
+        $('btnPClear').style.display = 'none';
+        return;
+      }
+
+      var j = d.job;
+      if(first && j.state) setAdvModeQuietly();
+      $('pLog').classList.remove('hide');
+
+      (j.events || []).forEach(function(e){
+        var line = document.createElement('div');
+        if(e.type === 'ok') line.className = 'ok';
+        else if(e.type === 'fail' || e.type === 'error') line.className = 'fail';
+        line.textContent = e.msg;
+        $('pLog').appendChild(line);
+      });
+      if(j.lastEventId) P.event = j.lastEventId;
+      $('pLog').scrollTop = $('pLog').scrollHeight;
+
+      var live = j.state === 'running';
+      $('btnPFind').style.display = live ? 'none' : '';
+      $('btnPStop').style.display = live ? '' : 'none';
+      $('btnPStop').disabled = false;
+      $('btnPStop').textContent = 'Stop';
+      $('btnPResume').style.display = (!live && j.leftCount) ? '' : 'none';
+      $('btnPResume').textContent = 'Carry on (' + nf(j.leftCount || 0) + ' tabs left)';
+      $('btnPClear').style.display = live ? 'none' : '';
+
+      $('pLine').textContent =
+        nf(j.done) + ' of ' + nf(j.total) + ' tab' + (j.total === 1 ? '' : 's') + ' read · ' +
+        nf(j.found) + ' of ' + nf(j.asked) + ' orders found' +
+        (j.skippedCount ? ' · ' + nf(j.skippedCount) + ' skipped' : '') +
+        (live ? '   (running on the server - you can leave this page)' : '');
+
+      P.rows = j.rows || [];
+      P.missing = j.missing || [];
+      if(!live) showPasteFound(j);
+
+      if(live){ startPastePoll(); return; }
+      stopPastePoll();
+    }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  // a search found on the server when the page opens belongs to this tab, so
+  // the tab is the one shown
+  function setAdvModeQuietly(){
+    if(S.pasteMode) return;
+    setAdvMode('paste');
+  }
+
+  function showPasteFound(j){
+    if(!P.rows.length && !P.missing.length) return;
+
+    $('pStepFound').classList.remove('hide');
+    $('pFoundHint').innerHTML =
+      nf(j.found) + ' of ' + nf(j.asked) + ' orders have a row in the advance sheet' +
+      (P.rows.length !== j.found
+        ? ' · ' + nf(P.rows.length) + ' rows in all (an order can be part paid twice)'
+        : '') +
+      (P.missing.length ? ' · <b>' + nf(P.missing.length) + ' not in it</b>' : '') +
+      '. <b>Nothing has been written yet.</b>';
+
+    var html = '';
+
+    if(P.rows.length){
+      html += '<div class="bucket"><h4><span>Rows found (' + nf(P.rows.length) + ')</span></h4>' +
+        '<div class="inner"><table><thead><tr>' +
+        '<th>Order</th><th>Month</th><th>Date</th><th>Bank</th>' +
+        '<th class="num">Paid</th><th>Posted</th>' +
+        '</tr></thead><tbody>' +
+        P.rows.map(function(r){
+          return '<tr><td>' + esc(r.invoice) + '</td>' +
+                 '<td style="color:var(--muted)">' + esc(r.tab || '') + '</td>' +
+                 '<td style="color:var(--muted)">' + esc(r.date || '') + '</td>' +
+                 '<td>' + esc(r.bank || '') + '</td>' +
+                 '<td class="num">' + money(r.amount) + '</td>' +
+                 '<td style="color:var(--muted)">' + esc(r.posted || '') + '</td></tr>';
+        }).join('') +
+        '</tbody></table></div></div>';
+    }
+
+    if(P.missing.length){
+      html += '<div class="bucket warn"><h4><span>Not in the advance sheet (' +
+        nf(P.missing.length) + ')</span></h4>' +
+        '<div class="inner"><table><tbody>' +
+        P.missing.map(function(n){
+          return '<tr><td>' + esc(n) + '</td></tr>';
+        }).join('') +
+        '</tbody></table></div></div>';
+    }
+
+    $('pFound').innerHTML = html;
+    $('btnPMatch').style.display = P.rows.length ? '' : 'none';
+  }
+
+  $('btnPMatch').addEventListener('click', function(){
+    if(!P.rows.length) return say('bad', '<b>Nothing was found to check.</b>');
+
+    clearSay();
+    $('btnPMatch').disabled = true;
+    say('', 'Checking QuickBooks...');
+
+    post('/api/adv/find-match', {
+      rows: P.rows,
+      label: 'a pasted list of ' + P.rows.length + ' rows'
+    }).then(function(d){
+      $('btnPMatch').disabled = false;
+      clearSay();
+      if(d.postedCol !== undefined) P.postedCol = d.postedCol;
+      S.match = d;
+      S.pasteMode = true;
+      showMatch(d);
+      $('stepMatch').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }).catch(function(e){
+      $('btnPMatch').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
+
 })();
 </script>
 </body>

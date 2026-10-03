@@ -707,6 +707,9 @@ const USER_MAY_POST = new Set([
   '/api/preview', '/api/gap-check', '/api/negative-items',
   '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
   '/api/adv/recheck', '/api/charges/preview', '/api/charges/scan',
+  // finding pasted orders in the advance sheet - a read, and the sorting of it
+  '/api/adv/find-start', '/api/adv/find-stop', '/api/adv/find-resume',
+  '/api/adv/find-clear', '/api/adv/find-match',
   '/api/void/scan',
   // reading the return sheet back - looking pasted numbers up in it changes nothing
   '/api/void/check-start', '/api/void/check-stop',
@@ -6362,6 +6365,113 @@ app.post('/api/adv/banks', async (req, res) => {
   }
 });
 // the rows in a chosen span, matched against QuickBooks
+// Sort advance rows against QuickBooks.
+//
+// One rule for both ways into this page: the month's days, and a pasted list of
+// order numbers found anywhere in the sheet. A row already marked posted in the
+// sheet is left alone, nothing is handed over for more than the invoice still
+// owes, and nothing goes at all until we know which bank the row's own words
+// name - that is what "needs bank" means.
+async function advanceBuckets(realmId, rows) {
+  const token = await getAccessToken(realmId);
+  const found = await findForAdvance(realmId, token, rows.map(r => r.invoice));
+
+  // every bank name the sheet uses, and what it was mapped to last time
+  const bankMap = (await getSetting(realmId, 'adv:banks', {})) || {};
+  const seenBanks = new Map();
+  rows.forEach(r => {
+    const b = String(r.bank || '').trim();
+    if (!b) return;
+    seenBanks.set(b, (seenBanks.get(b) || 0) + 1);
+  });
+
+  const ready = [], overpaid = [], settled = [], notInQb = [],
+        needsBank = [], alreadyPosted = [];
+
+  rows.forEach(r => {
+    // where the rows came from several tabs at once, each one remembers its
+    // own, so the sheet is marked in the right place afterwards
+    const where = { sheetId: r.sheetId || null, tab: r.tab || null, sheetName: r.sheetName || '' };
+
+    if (r.posted) {
+      alreadyPosted.push(Object.assign({
+        sheetRow: r.sheetRow, date: r.date, invoice: r.invoice,
+        amount: r.amount, bank: r.bank || '', posted: r.posted
+      }, where));
+      return;
+    }
+
+    const inv = found.get(cprDigits(r.invoice));
+    if (!inv) { notInQb.push(Object.assign({}, r, where)); return; }
+
+    const entry = Object.assign({
+      sheetRow: r.sheetRow,
+      date: r.date,
+      invoice: r.invoice,
+      amount: r.amount,
+      payable: r.payable,
+      name: r.name,
+      qbDoc: inv.doc,
+      qbId: inv.id,
+      qbTotal: inv.total,
+      qbBalance: inv.balance,
+      customerId: inv.customerId,
+      customerName: inv.customerName,
+      bank: String(r.bank || '').trim(),
+      accountId: bankMap[String(r.bank || '').trim()] || null
+    }, where);
+
+    if (inv.balance <= 0.005) { settled.push(entry); return; }
+
+    // never hand QuickBooks more than the invoice still owes
+    if (r.amount > inv.balance + 0.005) {
+      entry.willPay = Math.round(inv.balance * 100) / 100;
+      overpaid.push(entry);
+      return;
+    }
+
+    entry.willPay = Math.round(r.amount * 100) / 100;
+
+    // nothing goes to QuickBooks until we know which account it lands in
+    if (!entry.accountId) { needsBank.push(entry); return; }
+    ready.push(entry);
+  });
+
+  const byCustomer = new Map();
+  ready.forEach(m => {
+    const k = m.customerId || 'none';
+    if (!byCustomer.has(k)) {
+      byCustomer.set(k, { customerId: m.customerId, customerName: m.customerName, count: 0, amount: 0 });
+    }
+    const g = byCustomer.get(k);
+    g.count++;
+    g.amount += m.willPay;
+  });
+
+  return {
+    totals: {
+      rows: rows.length,
+      ready: ready.length,
+      overpaid: overpaid.length,
+      settled: settled.length,
+      notInQb: notInQb.length,
+      needsBank: needsBank.length,
+      alreadyPosted: alreadyPosted.length,
+      amount: Math.round(ready.reduce((t, m) => t + m.willPay, 0) * 100) / 100
+    },
+    customers: [...byCustomer.values()].map(g => ({
+      customerId: g.customerId,
+      customerName: g.customerName,
+      count: g.count,
+      amount: Math.round(g.amount * 100) / 100
+    })),
+    banks: [...seenBanks.entries()].map(([name, count]) => ({
+      name, count, accountId: bankMap[name] || null
+    })),
+    ready, overpaid, settled, notInQb, needsBank, alreadyPosted
+  };
+}
+
 app.get('/api/adv/match', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -6379,102 +6489,9 @@ app.get('/api/adv/match', async (req, res) => {
     const rows = d.rows.filter(r => r.date && r.date >= from && r.date <= to);
     if (!rows.length) return res.status(400).json({ error: 'No paid rows in that range' });
 
-    const token = await getAccessToken(realmId);
-    const found = await findForAdvance(realmId, token, rows.map(r => r.invoice));
+    const sorted = await advanceBuckets(realmId, rows);
 
-        // every bank name the sheet uses, and what it was mapped to last time
-    const bankMap = (await getSetting(realmId, 'adv:banks', {})) || {};
-    const seenBanks = new Map();
-    rows.forEach(r => {
-      const b = String(r.bank || '').trim();
-      if (!b) return;
-      seenBanks.set(b, (seenBanks.get(b) || 0) + 1);
-    });
-
-       const ready = [], overpaid = [], settled = [], notInQb = [],
-          needsBank = [], alreadyPosted = [];
-
-       rows.forEach(r => {
-      // a row the sheet already says was posted is left alone, however much
-      // the invoice still shows as owing - that is what stops a second run
-      // paying the same advance twice
-      if (r.posted) {
-        alreadyPosted.push({
-          sheetRow: r.sheetRow, date: r.date, invoice: r.invoice,
-          amount: r.amount, bank: r.bank || '', posted: r.posted
-        });
-        return;
-      }
-      const inv = found.get(cprDigits(r.invoice));
-      if (!inv) { notInQb.push(r); return; }
-
-      const entry = {
-        sheetRow: r.sheetRow,
-        date: r.date,
-        invoice: r.invoice,
-        amount: r.amount,
-        payable: r.payable,
-        name: r.name,
-        qbDoc: inv.doc,
-        qbId: inv.id,
-        qbTotal: inv.total,
-        qbBalance: inv.balance,
-        customerId: inv.customerId,
-                customerName: inv.customerName,
-        bank: String(r.bank || '').trim(),
-        accountId: bankMap[String(r.bank || '').trim()] || null
-      };
-      if (inv.balance <= 0.005) { settled.push(entry); return; }
-
-      // never hand QuickBooks more than the invoice still owes
-      if (r.amount > inv.balance + 0.005) {
-        entry.willPay = Math.round(inv.balance * 100) / 100;
-        overpaid.push(entry);
-        return;
-      }
-
-            entry.willPay = Math.round(r.amount * 100) / 100;
-
-      // nothing goes to QuickBooks until we know which account it lands in
-      if (!entry.accountId) { needsBank.push(entry); return; }
-      ready.push(entry);
-    });
-
-    const byCustomer = new Map();
-    ready.forEach(m => {
-      const k = m.customerId || 'none';
-      if (!byCustomer.has(k)) {
-        byCustomer.set(k, { customerId: m.customerId, customerName: m.customerName, count: 0, amount: 0 });
-      }
-      const g = byCustomer.get(k);
-      g.count++;
-      g.amount += m.willPay;
-    });
-
-    res.json({
-      from, to,
-      label: spanLabel(from, to),
-      totals: {
-        rows: rows.length,
-        ready: ready.length,
-        overpaid: overpaid.length,
-        settled: settled.length,
-        notInQb: notInQb.length,
-                needsBank: needsBank.length,
-                alreadyPosted: alreadyPosted.length,
-        amount: Math.round(ready.reduce((s, m) => s + m.willPay, 0) * 100) / 100
-      },
-      customers: [...byCustomer.values()].map(g => ({
-        customerId: g.customerId,
-        customerName: g.customerName,
-        count: g.count,
-        amount: Math.round(g.amount * 100) / 100
-      })),
-            banks: [...seenBanks.entries()].map(([name, count]) => ({
-        name, count, accountId: bankMap[name] || null
-      })),
-            ready, overpaid, settled, notInQb, needsBank, alreadyPosted
-    });
+    res.json(Object.assign({ from, to, label: spanLabel(from, to) }, sorted));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -6482,6 +6499,87 @@ app.get('/api/adv/match', async (req, res) => {
 // Look up what QuickBooks actually did with a set of advance rows: which
 // payments are sitting on each invoice, how much, and into which account.
 // Works just as well on payments that were entered by hand.
+// ---- the advance sheet read backwards: here are the orders, find their rows ----
+//
+// The page above picks a month and reads the days. This takes a pasted list of
+// order numbers and looks for their rows wherever they were written - any
+// workbook in the folder, any month's tab - and then sorts what it found
+// against QuickBooks exactly as a day's rows are sorted, so the same Receive
+// below it does the rest.
+app.post('/api/adv/find-start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const cols = await getSetting(realmId, 'adv:cols', null);
+    const id = startAdvFind(req.desk, {
+      numbers: req.body.numbers,
+      books: req.body.books,
+      cols
+    });
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/adv/find-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = advFindSnapshot(req.desk, req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/adv/find-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopAdvFind(req.desk) });
+});
+
+app.post('/api/adv/find-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeAdvFind(req.desk);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/adv/find-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearAdvFind(req.desk);
+  if (!ok) return res.status(409).json({ error: 'The search is still going' });
+  res.json({ ok: true });
+});
+
+// the rows the search found, sorted against QuickBooks - nothing is written
+app.post('/api/adv/find-match', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'Nothing to check' });
+
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const sorted = await advanceBuckets(realmId, rows);
+    // which column says a row has been posted - the page needs it to mark the
+    // rows afterwards, and in this way in it never went through the tab picker
+    const cols = (await getSetting(realmId, 'adv:cols', null)) || {};
+    res.json(Object.assign({
+      from: null, to: null,
+      label: req.body.label || 'a pasted list',
+      postedCol: cols.posted === undefined ? -1 : cols.posted
+    }, sorted));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/adv/recheck', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -7342,6 +7440,9 @@ import { setPortalLogin, clearPortalLogin, markCprReceived } from './couriers.js
 import { login as portalLogin } from './postexportal.js';
 import { encrypt as encryptSecret } from './secrets.js';
 import { deskKey } from './desk.js';
+import {
+  startAdvFind, stopAdvFind, resumeAdvFind, clearAdvFind, advFindSnapshot
+} from './advfind.js';
 
 // Save (or replace) the portal sign-in for one courier account. The password
 // is tried before it is kept, so a typo is caught here and not at midnight.

@@ -55,6 +55,7 @@ export function startAdvJob(desk, body) {
     results: [],
     paid: [],
     toStamp: [],
+    stampAt: new Map(),
     stamped: 0,
     events: [],
     lastId: 0,
@@ -130,7 +131,15 @@ async function run(realmId, job, only) {
       job.doneCount += lines.length;
 
       lines.forEach(m => {
-        if (m.sheetRow) job.toStamp.push(m.sheetRow);
+        // A row carries the sheet and tab it came from when the rows were
+        // gathered from several tabs at once - a pasted list can span months.
+        // Where it does not, they all belong to the one tab the page picked.
+        if (m.sheetRow) {
+          job.toStamp.push(m.sheetRow);
+          const where = (m.sheetId || job.body.sheetId || '') + '|' + (m.tab || job.body.tab || '');
+          if (!job.stampAt.has(where)) job.stampAt.set(where, []);
+          job.stampAt.get(where).push(m.sheetRow);
+        }
         job.paid.push({
           invoice: m.invoice,
           qbDoc: m.qbDoc,
@@ -209,14 +218,22 @@ async function run(realmId, job, only) {
   // Mark the rows in the sheet, so a second run leaves them alone. This is
   // what the invoice balance cannot tell us - an advance always leaves some
   // owing, so the sheet has to remember instead.
-  if (sheetId && tab && postedCol >= 0 && job.toStamp.length) {
-     push(job, 'log', `Writing "${stamp}" against ${job.toStamp.length} rows in the sheet...`);
-    try {
-      job.stamped = await stampRows(sheetId, tab, Number(postedCol), job.toStamp, stamp);
-      push(job, 'ok', `Marked ${job.stamped} rows in the sheet.`);
-    } catch (e) {
-      push(job, 'fail', `Could not mark the sheet: ${e.message}`);
+  if (postedCol >= 0 && job.toStamp.length) {
+    push(job, 'log', `Writing "${stamp}" against ${job.toStamp.length} rows in the sheet...`);
+    job.stamped = 0;
+
+    for (const [where, list] of job.stampAt) {
+      const at = where.indexOf('|');
+      const thisSheet = where.slice(0, at), thisTab = where.slice(at + 1);
+      if (!thisSheet || !thisTab || !list.length) continue;
+      try {
+        job.stamped += await stampRows(thisSheet, thisTab, Number(postedCol), list, stamp);
+      } catch (e) {
+        push(job, 'fail', `Could not mark ${thisTab}: ${e.message}`);
+      }
     }
+
+    if (job.stamped) push(job, 'ok', `Marked ${job.stamped} rows in the sheet.`);
   }
 
   if (job.stop) {
@@ -245,6 +262,7 @@ export function resumeAdvJob(desk) {
   job.results = job.results.filter(r => r.ok);
   job.doneCount = job.paid.length;
   job.toStamp = [];
+  job.stampAt = new Map();
   job.stop = false;
   job.state = 'running';
   job.finishedAt = null;
