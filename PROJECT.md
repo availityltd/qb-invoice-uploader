@@ -149,6 +149,17 @@ it - and a stopped read reports `stopped` rather than an empty result. A page
 added later that reads QuickBooks follows this, or it strands a read nobody can
 stop.
 
+**A search is a run too.** A read that takes a while - a span of invoices, a
+pasted list of numbers, a walk of the courier or advance sheets - is not a
+request to be waited out but a run on the server, because a search started by
+mistake is exactly what somebody wants to stop at once. `reads.js` is the small
+engine for the simple ones: hand it `plan`, `step` and `finish`, and it gives
+back Stop, Carry on and Clear log, drawn from the run's own state. The longer
+walks have their own modules the same shape (`voidscan.js`, `voidcheck.js`,
+`advfind.js`, `finder.js`). Two reads are still single-shot and owe this:
+`/api/cpr/match` with `/api/cpr/trace`, and `/api/adv/match`; and the two paste
+boxes on Merge payments.
+
 **Every run has Stop, Carry on and Clear log.** On every page and tab that runs
 something on the server. Stop is drawn from the server's state; Carry on (with the
 count left) shows once the run has stopped or part failed and takes only what is not
