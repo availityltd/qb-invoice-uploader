@@ -107,6 +107,12 @@
               </div>
             </div>
             <p class="hint">Invoices are grouped by their digits, so <code>#91306999</code> and <code>91306999</code> land together — and so do two copies written exactly the same way.</p>
+            <div class="runacts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <button class="mini" id="btnScanStop" style="display:none">Stop</button>
+              <button class="mini" id="btnScanResume" style="display:none">Carry on</button>
+              <button class="mini" id="btnScanClear" style="display:none">Clear log</button>
+            </div>
+            <div class="log hide" id="scanLog" style="height:150px"></div>
             <div class="stat" id="statScan"></div>
           </div>
         </div>
@@ -290,6 +296,12 @@
               </div>
 
               <button class="solid" id="btnLook">Look them up in QuickBooks</button>
+              <div class="runacts" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+                <button class="mini" id="btnLookStop" style="display:none">Stop</button>
+                <button class="mini" id="btnLookResume" style="display:none">Carry on</button>
+                <button class="mini" id="btnLookClear" style="display:none">Clear log</button>
+              </div>
+              <div class="log hide" id="lookLog" style="height:150px"></div>
               <div class="stat" id="statLook"></div>
             </div>
           </div>
@@ -412,31 +424,121 @@
 
   /* ==================== duplicates ==================== */
 
+  // The read goes a week at a time on the server, so a span picked by mistake
+  // is stopped at the end of the week in flight, carried on where it left off,
+  // and cleared away - the same three buttons every other run here has.
+  var scanEvent = 0, scanPoll = null;
+
   function scan(){
     var from = $('dFrom').value, to = $('dTo').value;
     if(!from || !to){ setStat($('statScan'),'bad','Choose both dates first.'); return; }
 
     setStat($('statScan'),'busy','Reading invoices from QuickBooks…');
-    $('btnScan').disabled = true;
     $('resultSheet').classList.add('hide');
+    scanEvent = 0;
+    $('scanLog').innerHTML = '';
+    $('scanLog').classList.remove('hide');
 
-    fetch('/api/qb-invoice-details?from='+from+'&to='+to)
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        $('btnScan').disabled = false;
-        if(d.error){ setStat($('statScan'),'bad', d.error); return; }
-        data = d;
-        setStat($('statScan'),'ok','<b>'+nf(d.total)+' invoices read</b><i>'+from+' to '+to+'</i>');
-        $('scanAside').textContent = from + ' to ' + to;
-        render();
-      })
-      .catch(function(e){
-        $('btnScan').disabled = false;
-        setStat($('statScan'),'bad','Could not reach QuickBooks: '+e.message);
-      });
+    postJSON('/api/invoice-details-start', { from: from, to: to })
+      .then(function(){ pollScan(true); startScanPoll(); })
+      .catch(function(e){ setStat($('statScan'),'bad', e.message); });
   }
   $('btnScan').addEventListener('click', scan);
   $('btnRescan').addEventListener('click', scan);
+
+  function postJSON(url, body){
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  function startScanPoll(){
+    if(scanPoll) return;
+    scanPoll = setInterval(function(){ pollScan(false); }, 1500);
+  }
+  function stopScanPoll(){
+    if(!scanPoll) return;
+    clearInterval(scanPoll);
+    scanPoll = null;
+  }
+
+  function pollScan(){
+    return fetch('/api/invoice-details-status?since=' + scanEvent, { cache:'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d.job){
+          stopScanPoll();
+          $('btnScanStop').style.display = 'none';
+          $('btnScanResume').style.display = 'none';
+          $('btnScanClear').style.display = 'none';
+          return;
+        }
+
+        var j = d.job;
+        $('scanLog').classList.remove('hide');
+        (j.events || []).forEach(function(e){
+          var line = document.createElement('div');
+          line.textContent = e.msg;
+          $('scanLog').appendChild(line);
+        });
+        if(j.lastEventId) scanEvent = j.lastEventId;
+        $('scanLog').scrollTop = $('scanLog').scrollHeight;
+
+        var live = j.state === 'running';
+        $('btnScan').disabled = live;
+        $('btnScanStop').style.display = live ? '' : 'none';
+        $('btnScanStop').disabled = false;
+        $('btnScanStop').textContent = 'Stop';
+        $('btnScanResume').style.display = (!live && j.canCarryOn) ? '' : 'none';
+        $('btnScanClear').style.display = live ? 'none' : '';
+
+        if(live){
+          setStat($('statScan'),'busy',
+            '<b>' + nf(j.counted) + ' invoices read</b><i>' + j.done + ' of ' + j.total +
+            ' weeks · running on the server, you can leave this page</i>');
+          startScanPoll();
+          return;
+        }
+
+        stopScanPoll();
+
+        if(j.result){
+          data = j.result;
+          setStat($('statScan'), j.state === 'stopped' ? 'warn' : 'ok',
+            '<b>' + nf(j.result.total) + ' invoices read</b><i>' + j.label +
+            (j.state === 'stopped' ? ' · stopped part way' : '') + '</i>');
+          $('scanAside').textContent = j.label;
+          render();
+        }
+      }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  $('btnScanStop').addEventListener('click', function(){
+    $('btnScanStop').disabled = true;
+    $('btnScanStop').textContent = 'Stopping…';
+    postJSON('/api/invoice-details-stop').catch(function(){});
+  });
+  $('btnScanResume').addEventListener('click', function(){
+    $('btnScanResume').style.display = 'none';
+    postJSON('/api/invoice-details-resume')
+      .then(function(){ pollScan(); startScanPoll(); })
+      .catch(function(e){ setStat($('statScan'),'bad', e.message); });
+  });
+  $('btnScanClear').addEventListener('click', function(){
+    postJSON('/api/invoice-details-clear').then(function(){
+      scanEvent = 0;
+      $('scanLog').innerHTML = '';
+      $('scanLog').classList.add('hide');
+      $('btnScanResume').style.display = 'none';
+      $('btnScanClear').style.display = 'none';
+      setStat($('statScan'),'','');
+    }).catch(function(e){ setStat($('statScan'),'bad', e.message); });
+  });
 
   var KINDS = ['bothUnpaid','hashPaid','plainPaid','dupOnePaid','dupAllUnpaid',
                'plainOnly','bothPaid','dupAllPaid','amountDiffers'];
@@ -745,30 +847,105 @@
     r.addEventListener('change', function(){ if(delData) drawDel(); });
   });
 
+  var lookEvent = 0, lookPoll = null;
+
   $('btnLook').addEventListener('click', function(){
     var nums = $('delNums').value.trim();
     if(!nums) return setStat($('statLook'),'bad','Paste some invoice numbers first.');
 
     setStat($('statLook'),'busy','Looking them up in QuickBooks…');
-    $('btnLook').disabled = true;
     $('delFound').classList.add('hide');
+    lookEvent = 0;
+    $('lookLog').innerHTML = '';
+    $('lookLog').classList.remove('hide');
 
-    fetch('/api/qb-invoice-find', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ numbers: nums })
-    })
+    postJSON('/api/invoice-find-start', { numbers: nums })
+      .then(function(){ pollLook(); startLookPoll(); })
+      .catch(function(e){ setStat($('statLook'),'bad', e.message); });
+  });
+
+  function startLookPoll(){
+    if(lookPoll) return;
+    lookPoll = setInterval(function(){ pollLook(); }, 1500);
+  }
+  function stopLookPoll(){
+    if(!lookPoll) return;
+    clearInterval(lookPoll);
+    lookPoll = null;
+  }
+
+  function pollLook(){
+    return fetch('/api/invoice-find-status?since=' + lookEvent, { cache:'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(d){
-        $('btnLook').disabled = false;
-        if(d.error){ setStat($('statLook'),'bad', d.error); return; }
-        delData = d;
-        setStat($('statLook'),'ok','<b>' + nf(d.unique) + ' numbers looked up</b>');
-        drawDel();
-      })
-      .catch(function(e){
-        $('btnLook').disabled = false;
-        setStat($('statLook'),'bad','Could not reach QuickBooks: ' + e.message);
-      });
+        if(!d.job){
+          stopLookPoll();
+          $('btnLookStop').style.display = 'none';
+          $('btnLookResume').style.display = 'none';
+          $('btnLookClear').style.display = 'none';
+          return;
+        }
+
+        var j = d.job;
+        $('lookLog').classList.remove('hide');
+        (j.events || []).forEach(function(e){
+          var line = document.createElement('div');
+          line.textContent = e.msg;
+          $('lookLog').appendChild(line);
+        });
+        if(j.lastEventId) lookEvent = j.lastEventId;
+        $('lookLog').scrollTop = $('lookLog').scrollHeight;
+
+        var live = j.state === 'running';
+        $('btnLook').disabled = live;
+        $('btnLookStop').style.display = live ? '' : 'none';
+        $('btnLookStop').disabled = false;
+        $('btnLookStop').textContent = 'Stop';
+        $('btnLookResume').style.display = (!live && j.canCarryOn) ? '' : 'none';
+        $('btnLookClear').style.display = live ? 'none' : '';
+
+        if(live){
+          setStat($('statLook'),'busy',
+            '<b>Looking them up…</b><i>' + nf(j.counted) + ' found so far · running on the ' +
+            'server, you can leave this page</i>');
+          startLookPoll();
+          return;
+        }
+
+        stopLookPoll();
+
+        if(j.result){
+          delData = j.result;
+          setStat($('statLook'), j.state === 'stopped' ? 'warn' : 'ok',
+            '<b>' + nf(j.result.read) + ' numbers looked up</b>' +
+            (j.state === 'stopped'
+              ? '<i>stopped part way · ' + nf(j.result.unique - j.result.read) + ' left</i>'
+              : ''));
+          drawDel();
+        }
+      }).catch(function(){ /* a missed poll is nothing to worry about */ });
+  }
+
+  $('btnLookStop').addEventListener('click', function(){
+    $('btnLookStop').disabled = true;
+    $('btnLookStop').textContent = 'Stopping…';
+    postJSON('/api/invoice-find-stop').catch(function(){});
+  });
+  $('btnLookResume').addEventListener('click', function(){
+    $('btnLookResume').style.display = 'none';
+    postJSON('/api/invoice-find-resume')
+      .then(function(){ pollLook(); startLookPoll(); })
+      .catch(function(e){ setStat($('statLook'),'bad', e.message); });
+  });
+  $('btnLookClear').addEventListener('click', function(){
+    postJSON('/api/invoice-find-clear').then(function(){
+      lookEvent = 0;
+      $('lookLog').innerHTML = '';
+      $('lookLog').classList.add('hide');
+      $('btnLookResume').style.display = 'none';
+      $('btnLookClear').style.display = 'none';
+      setStat($('statLook'),'','');
+    }).catch(function(e){ setStat($('statLook'),'bad', e.message); });
   });
 
   function willGo(){

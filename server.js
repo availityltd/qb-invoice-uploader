@@ -705,7 +705,11 @@ const USER_MAY_POST = new Set([
   '/api/access/request', '/api/access/cancel',
   // reading QuickBooks
   '/api/preview', '/api/gap-check', '/api/negative-items',
-  '/api/qb-invoice-find', '/api/qb-invoice-file', '/api/invoice-delete',
+  '/api/qb-invoice-file', '/api/invoice-delete',
+  '/api/invoice-find-start', '/api/invoice-find-stop', '/api/invoice-find-resume',
+  '/api/invoice-find-clear',
+  '/api/invoice-details-start', '/api/invoice-details-stop',
+  '/api/invoice-details-resume', '/api/invoice-details-clear',
   '/api/adv/recheck', '/api/charges/preview', '/api/charges/scan',
   // finding pasted orders in the advance sheet - a read, and the sorting of it
   '/api/adv/find-start', '/api/adv/find-stop', '/api/adv/find-resume',
@@ -1745,23 +1749,35 @@ app.post('/api/gap-check', (req, res) => {
 });
 
 // ==================== Duplicate finder ====================
-app.get('/api/qb-invoice-details', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
+// Reading a span of invoices to find the ones that exist twice.
+//
+// A week at a time, as a run that can be stopped: a year picked by mistake is
+// taken back at the end of the week in flight instead of being waited out, and
+// what was read up to then is still sorted and shown.
+function invoiceDetailsRead(realmId, from, to) {
+  if (!from || !to) throw new Error('Choose both dates first');
+  if (from > to) throw new Error('The first date is after the last one');
 
-  const { from, to } = req.query;
-  if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
+  // the week-long windows the span falls into
+  const windows = [];
+  let at = from;
+  while (at <= to && windows.length < 400) {
+    let end = shiftDays(at, 6);
+    if (end > to) end = to;
+    windows.push([at, end]);
+    at = shiftDays(end, 1);
+  }
 
   async function fetchWindow(token, a, b, depth) {
     const out = [];
-    let start = 1;
+    let begin = 1;
     let hitCap = false;
 
     while (true) {
       const q = await qbQuery(realmId, token,
-        `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, SyncToken FROM Invoice ` +
-        `WHERE TxnDate >= '${a}' AND TxnDate <= '${b}' ` +
-        `STARTPOSITION ${start} MAXRESULTS 1000`);
+        'SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, SyncToken FROM Invoice ' +
+        "WHERE TxnDate >= '" + a + "' AND TxnDate <= '" + b + "' " +
+        'STARTPOSITION ' + begin + ' MAXRESULTS 1000');
       const arr = q.Invoice || [];
       arr.forEach(inv => {
         const total = Number(inv.TotalAmt || 0);
@@ -1778,10 +1794,11 @@ app.get('/api/qb-invoice-details', async (req, res) => {
         });
       });
       if (arr.length < 1000) break;
-      start += 1000;
-      if (start > 9000) { hitCap = true; break; }
+      begin += 1000;
+      if (begin > 9000) { hitCap = true; break; }
     }
 
+    // too many for one window to carry - split it and read the halves
     if (hitCap && depth < 8 && a !== b) {
       const days = Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
       if (days >= 1) {
@@ -1794,74 +1811,136 @@ app.get('/api/qb-invoice-details', async (req, res) => {
     return out;
   }
 
-  try {
-    const token = await getAccessToken(realmId);
-    const all = [];
-    let cursor = from, windows = 0;
+  return {
+    label: from + ' to ' + to,
+    steps: windows.length,
 
-    while (cursor <= to && windows < 400) {
-      let end = shiftDays(cursor, 6);
-      if (end > to) end = to;
-      all.push(...await fetchWindow(token, cursor, end, 0));
-      cursor = shiftDays(end, 1);
-      windows++;
-    }
+    async plan(run) {
+      run.data.token = await getAccessToken(realmId);
+      run.data.all = [];
+    },
 
-    const groups = new Map();
-    all.forEach(inv => {
-      const k = digitsOf(inv.doc);
-      if (!k) return;
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(inv);
-    });
+    async step(run) {
+      const w = windows[run.cursor];
+      if (!w) { run.ended = true; return { done: true }; }
 
-    const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
-    const isPaid = x => x.paid || x.partial;
+      const got = await fetchWindow(run.data.token, w[0], w[1], 0);
+      run.data.all.push(...got);
 
-    const cat = {
-      bothUnpaid: [],
-      hashPaid: [],
-      plainPaid: [],
-      bothPaid: [],
-      amountDiffers: [],
-      dupOnePaid: [],
-      dupAllUnpaid: [],
-      dupAllPaid: [],
-      plainOnly: []
-    };
+      return {
+        count: got.length,
+        found: got.length > 0,
+        msg: w[0] + ' to ' + w[1] + ': ' + got.length + ' invoices' +
+             ' (' + (run.cursor + 1) + ' of ' + windows.length + ' weeks)'
+      };
+    },
 
-    groups.forEach((list, k) => {
-      const withHash = list.filter(x => x.doc.charAt(0) === '#');
-      const plain = list.filter(x => x.doc.charAt(0) !== '#');
+    endLine(run) {
+      return '--- ' + run.data.all.length + ' invoices read ---';
+    },
 
-      [['hash', withHash], ['plain', plain]].forEach(pair => {
-        const style = pair[0], copies = pair[1];
-        if (copies.length < 2) return;
-        const paidOnes = copies.filter(isPaid);
-        const unpaidOnes = copies.filter(x => !isPaid(x));
-        const entry = { digits: k, style, copies, paidOnes, unpaidOnes };
-        if (!paidOnes.length) cat.dupAllUnpaid.push(entry);
-        else if (!unpaidOnes.length) cat.dupAllPaid.push(entry);
-        else cat.dupOnePaid.push(entry);
+    async finish(run) {
+      const all = run.data.all;
+
+      const groups = new Map();
+      all.forEach(inv => {
+        const k = digitsOf(inv.doc);
+        if (!k) return;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(inv);
       });
 
-      if (withHash.length === 1 && plain.length === 1) {
-        const h = withHash[0], p = plain[0];
-        const entry = { digits: k, hash: h, plain: p };
-        if (!near(h.total, p.total)) cat.amountDiffers.push(entry);
-        else if (!isPaid(h) && !isPaid(p)) cat.bothUnpaid.push(entry);
-        else if (isPaid(h) && !isPaid(p)) cat.hashPaid.push(entry);
-        else if (!isPaid(h) && isPaid(p)) cat.plainPaid.push(entry);
-        else cat.bothPaid.push(entry);
-      }
+      const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+      const isPaid = x => x.paid || x.partial;
 
-      if (plain.length === 1 && !withHash.length) cat.plainOnly.push(plain[0]);
-    });
+      const cat = {
+        bothUnpaid: [],
+        hashPaid: [],
+        plainPaid: [],
+        bothPaid: [],
+        amountDiffers: [],
+        dupOnePaid: [],
+        dupAllUnpaid: [],
+        dupAllPaid: [],
+        plainOnly: []
+      };
 
-    res.json({ total: all.length, cat });
+      groups.forEach((list, k) => {
+        const withHash = list.filter(x => x.doc.charAt(0) === '#');
+        const plain = list.filter(x => x.doc.charAt(0) !== '#');
+
+        [['hash', withHash], ['plain', plain]].forEach(pair => {
+          const style = pair[0], copies = pair[1];
+          if (copies.length < 2) return;
+          const paidOnes = copies.filter(isPaid);
+          const unpaidOnes = copies.filter(x => !isPaid(x));
+          const entry = { digits: k, style, copies, paidOnes, unpaidOnes };
+          if (!paidOnes.length) cat.dupAllUnpaid.push(entry);
+          else if (!unpaidOnes.length) cat.dupAllPaid.push(entry);
+          else cat.dupOnePaid.push(entry);
+        });
+
+        if (withHash.length === 1 && plain.length === 1) {
+          const h = withHash[0], pl = plain[0];
+          const entry = { digits: k, hash: h, plain: pl };
+          if (!near(h.total, pl.total)) cat.amountDiffers.push(entry);
+          else if (!isPaid(h) && !isPaid(pl)) cat.bothUnpaid.push(entry);
+          else if (isPaid(h) && !isPaid(pl)) cat.hashPaid.push(entry);
+          else if (!isPaid(h) && isPaid(pl)) cat.plainPaid.push(entry);
+          else cat.bothPaid.push(entry);
+        }
+
+        if (plain.length === 1 && !withHash.length) cat.plainOnly.push(plain[0]);
+      });
+
+      return { total: all.length, from, to, cat };
+    }
+  };
+}
+
+app.post('/api/invoice-details-start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const id = startRead(req.desk, 'invoice-details',
+      invoiceDetailsRead(realmId, req.body.from, req.body.to));
+    res.json({ ok: true, jobId: id });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(409).json({ error: e.message });
   }
+});
+
+app.get('/api/invoice-details-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = readSnapshot(req.desk, 'invoice-details', req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/invoice-details-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopRead(req.desk, 'invoice-details') });
+});
+
+app.post('/api/invoice-details-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeRead(req.desk, 'invoice-details');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/invoice-details-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearRead(req.desk, 'invoice-details');
+  if (!ok) return res.status(409).json({ error: 'The read is still going' });
+  res.json({ ok: true });
 });
 
 app.post('/api/invoice-rename', async (req, res) => {
@@ -1950,138 +2029,211 @@ app.post('/api/invoice-delete', async (req, res) => {
 // ==================== Deleting invoices in bulk ====================
 // The page shows the whole list first; this only runs on what it is handed.
 
-app.post('/api/qb-invoice-find', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-
-  const raw = req.body.numbers;
-  const list = (Array.isArray(raw) ? raw : String(raw || '').split(/[\s,;]+/))
+// Looking a pasted list of invoice numbers up, forty at a time, as a run that
+// can be stopped. The same read as before - what changed is the waiting: a
+// request nobody could take back is now a run with a Stop on it.
+function invoiceFindRead(realmId, numbers) {
+  const list = (Array.isArray(numbers) ? numbers : String(numbers || '').split(/[\s,;]+/))
     .map(x => String(x).trim())
     .filter(Boolean);
+  if (!list.length) throw new Error('Paste some invoice numbers first');
 
-  if (!list.length) return res.status(400).json({ error: 'Paste some invoice numbers first' });
+  const wanted = [];
+  const seen = new Set();
+  const asWritten = new Map();
+  list.forEach(n => {
+    const d = digitsOf(n);
+    if (!d) return;
+    if (!asWritten.has(d)) asWritten.set(d, n);
+    if (seen.has(d)) return;
+    seen.add(d);
+    wanted.push(d);
+  });
+  if (!wanted.length) throw new Error('None of those lines holds an invoice number');
 
-  try {
-    const token = await getAccessToken(realmId);
+  return {
+    label: wanted.length + ' invoice numbers',
+    steps: Math.ceil(wanted.length / 40),
 
-    const wanted = [];
-    const seen = new Set();
-    const asWritten = new Map();
-    list.forEach(n => {
-      const d = digitsOf(n);
-      if (!d) return;
-      if (!asWritten.has(d)) asWritten.set(d, n);
-      if (seen.has(d)) return;
-      seen.add(d);
-      wanted.push(d);
-    });
+    async plan(run) {
+      run.data.token = await getAccessToken(realmId);
+      run.data.found = new Map();
+      run.data.asked = list.length;
+    },
 
-    const found = new Map();
-    for (let i = 0; i < wanted.length; i += 40) {
-      const chunk = wanted.slice(i, i + 40);
+    async step(run) {
+      const at = run.cursor * 40;
+      if (at >= wanted.length) { run.ended = true; return { done: true }; }
+
+      const chunk = wanted.slice(at, at + 40);
       const variants = [];
-      chunk.forEach(d => variants.push(`'#${d}'`, `'${d}'`));
+      chunk.forEach(d => variants.push("'#" + d + "'", "'" + d + "'"));
 
-      const q = await qbQuery(realmId, token,
-        `SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn ` +
-        `FROM Invoice WHERE DocNumber IN (${variants.join(',')}) MAXRESULTS 1000`);
+      const q = await qbQuery(realmId, run.data.token,
+        'SELECT Id, DocNumber, TxnDate, TotalAmt, Balance, CustomerRef, LinkedTxn ' +
+        'FROM Invoice WHERE DocNumber IN (' + variants.join(',') + ') MAXRESULTS 1000');
 
+      let here = 0;
       (q.Invoice || []).forEach(inv => {
         const d = digitsOf(inv.DocNumber);
         if (!d) return;
-        if (!found.has(d)) found.set(d, []);
-        found.get(d).push(inv);
+        if (!run.data.found.has(d)) run.data.found.set(d, []);
+        run.data.found.get(d).push(inv);
+        here++;
       });
-    }
 
-    const ready = [], paid = [], notFound = [];
-    const payIds = new Set();
-    const ourInvoiceIds = new Set();
+      return {
+        count: here,
+        found: here > 0,
+        msg: Math.min(at + chunk.length, wanted.length) + ' of ' + wanted.length +
+             ' looked up - ' + here + ' found in this batch.'
+      };
+    },
 
-    wanted.forEach(d => {
-      const copies = found.get(d);
-      if (!copies || !copies.length) { notFound.push(asWritten.get(d) || d); return; }
+    endLine(run) {
+      const r = run.result || {};
+      return '--- ' + (r.ready || []).length + ' with no payment, ' +
+             (r.paid || []).length + ' paid, ' +
+             (r.notFound || []).length + ' not in QuickBooks ---';
+    },
 
-      copies.forEach(inv => {
-        ourInvoiceIds.add(String(inv.Id));
+    async finish(run, stopped) {
+      const token = run.data.token;
+      const found = run.data.found;
+      // a stopped read has only reached so far down the list
+      const read = stopped ? wanted.slice(0, run.cursor * 40) : wanted;
 
-        const total = Number(inv.TotalAmt || 0);
-        const linked = (inv.LinkedTxn || [])
-          .filter(t => t.TxnType === 'Payment')
-          .map(t => String(t.TxnId));
+      const ready = [], paid = [], notFound = [];
+      const payIds = new Set();
+      const ourInvoiceIds = new Set();
 
-        const entry = {
-          id: inv.Id,
-          doc: inv.DocNumber || '',
-          hash: (inv.DocNumber || '').charAt(0) === '#',
-          date: inv.TxnDate || '',
-          total,
-          balance: Number(inv.Balance === undefined ? total : inv.Balance),
-          customer: inv.CustomerRef ? (inv.CustomerRef.name || '') : '',
-          paymentIds: linked
-        };
+      read.forEach(d => {
+        const copies = found.get(d);
+        if (!copies || !copies.length) { notFound.push(asWritten.get(d) || d); return; }
 
-        if (linked.length || entry.balance <= 0.005) {
-          linked.forEach(id => payIds.add(id));
-          paid.push(entry);
-        } else {
-          ready.push(entry);
-        }
-      });
-    });
+        copies.forEach(inv => {
+          ourInvoiceIds.add(String(inv.Id));
 
-    // what each of those payments is, and whether it touches anything else
-    const payments = {};
-    if (payIds.size) {
-      const ids = [...payIds];
-      for (let i = 0; i < ids.length; i += 40) {
-        const chunk = ids.slice(i, i + 40).map(x => `'${x}'`).join(',');
-        let q;
-        try {
-          q = await qbQuery(realmId, token,
-            `SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, Line ` +
-            `FROM Payment WHERE Id IN (${chunk}) MAXRESULTS 1000`);
-        } catch (e) { continue; }
+          const total = Number(inv.TotalAmt || 0);
+          const linked = (inv.LinkedTxn || [])
+            .filter(t => t.TxnType === 'Payment')
+            .map(t => String(t.TxnId));
 
-        (q.Payment || []).forEach(p => {
-          // every invoice this payment sits against
-          const touches = [];
-          (p.Line || []).forEach(l => {
-            (l.LinkedTxn || []).forEach(t => {
-              if (t.TxnType === 'Invoice') touches.push(String(t.TxnId));
-            });
-          });
-
-          const outside = touches.filter(id => !ourInvoiceIds.has(id));
-
-          payments[String(p.Id)] = {
-            id: String(p.Id),
-            date: p.TxnDate || '',
-            amount: Number(p.TotalAmt || 0),
-            ref: String(p.PaymentRefNum || '').trim(),
-            bank: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : '',
-            invoices: touches.length,
-            outside: outside.length
+          const entry = {
+            id: inv.Id,
+            doc: inv.DocNumber || '',
+            hash: (inv.DocNumber || '').charAt(0) === '#',
+            date: inv.TxnDate || '',
+            total,
+            balance: Number(inv.Balance === undefined ? total : inv.Balance),
+            customer: inv.CustomerRef ? (inv.CustomerRef.name || '') : '',
+            paymentIds: linked
           };
+
+          if (linked.length || entry.balance <= 0.005) {
+            linked.forEach(id => payIds.add(id));
+            paid.push(entry);
+          } else {
+            ready.push(entry);
+          }
         });
+      });
+
+      // what each of those payments is, and whether it touches anything else
+      const payments = {};
+      if (payIds.size) {
+        const ids = [...payIds];
+        for (let i = 0; i < ids.length; i += 40) {
+          const chunk = ids.slice(i, i + 40).map(x => "'" + x + "'").join(',');
+          let q;
+          try {
+            q = await qbQuery(realmId, token,
+              'SELECT Id, TxnDate, TotalAmt, PaymentRefNum, DepositToAccountRef, Line ' +
+              'FROM Payment WHERE Id IN (' + chunk + ') MAXRESULTS 1000');
+          } catch (e) { continue; }
+
+          (q.Payment || []).forEach(pay => {
+            const touches = [];
+            (pay.Line || []).forEach(l => {
+              (l.LinkedTxn || []).forEach(t => {
+                if (t.TxnType === 'Invoice') touches.push(String(t.TxnId));
+              });
+            });
+
+            const outside = touches.filter(id => !ourInvoiceIds.has(id));
+
+            payments[String(pay.Id)] = {
+              id: String(pay.Id),
+              date: pay.TxnDate || '',
+              amount: Number(pay.TotalAmt || 0),
+              ref: String(pay.PaymentRefNum || '').trim(),
+              bank: pay.DepositToAccountRef ? (pay.DepositToAccountRef.name || '') : '',
+              invoices: touches.length,
+              outside: outside.length
+            };
+          });
+        }
       }
+
+      // a payment that also covers an invoice we are not touching is a warning
+      paid.forEach(x => {
+        x.payments = (x.paymentIds || []).map(id => payments[id]).filter(Boolean);
+        x.shared = x.payments.some(pay => pay.outside > 0);
+        x.paidAmount = x.payments.reduce((t, pay) => t + pay.amount, 0);
+      });
+
+      return {
+        asked: run.data.asked,
+        unique: wanted.length,
+        read: read.length,
+        ready, paid, notFound
+      };
     }
+  };
+}
 
-    // a payment that also covers an invoice we are not touching is a warning
-    paid.forEach(x => {
-      x.payments = (x.paymentIds || []).map(id => payments[id]).filter(Boolean);
-      x.shared = x.payments.some(p => p.outside > 0);
-      x.paidAmount = x.payments.reduce((s, p) => s + p.amount, 0);
-    });
-
-    res.json({
-      asked: list.length,
-      unique: wanted.length,
-      ready, paid, notFound
-    });
+app.post('/api/invoice-find-start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const id = startRead(req.desk, 'invoice-find', invoiceFindRead(realmId, req.body.numbers));
+    res.json({ ok: true, jobId: id });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(409).json({ error: e.message });
   }
+});
+
+app.get('/api/invoice-find-status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = readSnapshot(req.desk, 'invoice-find', req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/invoice-find-stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopRead(req.desk, 'invoice-find') });
+});
+
+app.post('/api/invoice-find-resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeRead(req.desk, 'invoice-find');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/invoice-find-clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const ok = clearRead(req.desk, 'invoice-find');
+  if (!ok) return res.status(409).json({ error: 'The look-up is still going' });
+  res.json({ ok: true });
 });
 
 app.post('/api/invoice-delete-start', async (req, res) => {
@@ -7381,6 +7533,7 @@ import {
 import {
   startVoidScan, stopVoidScan, resumeVoidScan, clearVoidScan, voidScanSnapshot
 } from './voidscan.js';
+import { startRead, stopRead, resumeRead, clearRead, readSnapshot } from './reads.js';
 
 // Save (or replace) the portal sign-in for one courier account. The password
 // is tried before it is kept, so a typo is caught here and not at midnight.
