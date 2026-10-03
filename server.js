@@ -4941,7 +4941,9 @@ async function resumeRecat() {
   const rows = await unfinishedRecat();
 
   for (const r of rows) {
-    const desk = deskKey(r.realm_id, r.user_sub || '');
+    // nobody's run - written before runs had an owner - is not restarted
+    if (!r.user_sub) continue;
+    const desk = deskKey(r.realm_id, r.user_sub);
     const st = {
       desk,
       from: r.from_acct, to: r.to_acct, scan: r.scan,
@@ -9003,7 +9005,8 @@ async function resumeReplace() {
     try {
       const saved = r.job || {};
       const all = (r.rows || []);
-      const desk = deskKey(r.realm_id, r.user_sub || '');
+      if (!r.user_sub) continue;      // nobody's run is not restarted
+      const desk = deskKey(r.realm_id, r.user_sub);
       if (!all.some(x => x.state === 'ready' || x.state === 'failed')) { await clearReplace(desk); continue; }
 
       const st = {

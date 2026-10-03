@@ -86,7 +86,9 @@ export async function resumeVoidRuns() {
   for (const row of q.rows) {
     try {
       const p = row.progress || {};
-      const desk = deskKey(row.realm_id, row.user_sub || '');
+      // nobody's run - written before runs had an owner - is not restarted
+      if (!row.user_sub) continue;
+      const desk = deskKey(row.realm_id, row.user_sub);
       const job = {
         id: p.id || Date.now(), desk, state: p.state || 'stopped', stop: false,
         invoices: row.invoices || [], force: !!p.force,

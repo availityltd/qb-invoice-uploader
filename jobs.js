@@ -509,7 +509,12 @@ export async function resumeUnfinished() {
       const done = new Set(row.done || []);
       const left = all.filter(inv => !done.has(inv.docNumber));
 
-      const desk = deskKey(row.realm_id, row.user_sub || '');
+      // A run written before runs had an owner belongs to nobody now: resuming
+      // it would post to QuickBooks with no page able to see or stop it. It is
+      // dropped instead, and whoever it was carries on from their own page.
+      if (!row.user_sub) { await clearJobRow(deskKey(row.realm_id, '')); continue; }
+
+      const desk = deskKey(row.realm_id, row.user_sub);
       if (!left.length) { await clearJobRow(desk); continue; }
 
       const opts = row.opts || {};
