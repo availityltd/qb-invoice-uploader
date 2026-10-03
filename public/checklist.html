@@ -83,6 +83,24 @@
   table.t .why{font-size:11px;color:var(--warn)}
   table.t .empty{padding:14px;color:var(--muted);text-align:center}
 
+  .colsline{font-size:11.5px;color:var(--muted);margin:-4px 0 12px;line-height:1.7}
+  .colsline b{color:var(--text);font-weight:600}
+  .colsline a{color:var(--qbo);cursor:pointer;text-decoration:none;margin-left:8px;
+    border-bottom:1px dotted var(--qbo)}
+
+  .colsbox{border:1px solid var(--line);border-radius:9px;background:#fff;padding:14px 16px;
+    margin-bottom:14px}
+  .colsbox h4{margin:0 0 4px;font-size:12.5px;font-weight:600}
+  .colsbox p{margin:0 0 10px;font-size:12px;color:var(--muted);line-height:1.55}
+  .colsbox .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+  .colsbox label{display:block;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:4px}
+  .colsbox select{font-size:12px;padding:5px 7px;margin:0;width:100%}
+  .colsbox .co{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+  .colsbox .co:first-of-type{border-top:0;padding-top:0;margin-top:0}
+  .colsbox .note{font-size:11px;color:var(--muted);margin-top:6px}
+  .colsbox .note.saved{color:var(--ok)}
+
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;
     margin-bottom:16px;background:#fff}
   .seg button{border:0;background:#fff;font-family:inherit;font-size:13px;padding:9px 18px;
@@ -175,6 +193,16 @@
           <div class="step hide" id="stepCpr">
             <h2>Which CPR</h2>
             <div class="hint" id="cprHint"></div>
+            <div class="colsline" id="colsLine"></div>
+            <div class="colsbox hide" id="colsBox">
+              <h4>Columns of this sheet</h4>
+              <p id="colsNote"></p>
+              <div class="grid" id="colsGrid"></div>
+              <div class="acts" style="margin-top:12px;display:flex;gap:8px">
+                <button class="solid" id="btnCols">Save and read it again</button>
+                <button id="btnColsHide">Leave them as they are</button>
+              </div>
+            </div>
             <div class="cprs" id="cprList"></div>
           </div>
         </div>
@@ -202,6 +230,15 @@
             </div>
 
             <div id="findTree" style="margin-bottom:12px"></div>
+
+            <div class="colsline" id="findColsLine"></div>
+            <div class="colsbox hide" id="findColsBox">
+              <h4>Columns the search reads</h4>
+              <p>One courier writes its sheets the same way for every account it has, so these
+                are kept per courier and used by Find orders as well. A change is saved as you
+                make it; start the search again to see it take effect.</p>
+              <div id="findColsList"></div>
+            </div>
 
             <div class="runacts">
               <button class="solid" id="btnFind">Find them in the CPR sheets</button>
@@ -526,6 +563,7 @@
   }
 
   function openSheet(file){
+    S.file = file;
     S.sheetId = file.id;
     S.sheetName = file.name;
     S.excel = !!file.excel;
@@ -538,12 +576,121 @@
       clearSay();
       S.tab = d.tab;
       S.groups = d.groups || [];
+      S.cols = d.cols;
+      S.header = d.header || [];
+      S.remembered = !!d.remembered;
       S.bank = (S.options && S.options.prefs && S.options.prefs[S.courier]) || null;
       drawCprs(d);
+      drawColsLine();
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
   }
+
+  /* ---------- which columns this CPR was read from ---------- */
+  //
+  // The figures on this page are only as right as the columns they came from,
+  // and those were chosen once on Receive payments and then never shown again.
+  // A courier who moves a column leaves every total here quietly wrong, so the
+  // choice is written out where it can be checked, and changed on the spot.
+
+  var COL_FIELDS = [
+    ['invoice', 'Order / invoice number'],
+    ['cpr',     'CPR number'],
+    ['cprDate', 'CPR date'],
+    ['amount',  'Amount'],
+    ['status',  'Status (leave blank if none)']
+  ];
+
+  function colName(i){
+    if(i === undefined || i === null || i < 0) return null;
+    var head = (S.header || [])[i];
+    return (head && String(head).trim()) ? String(head).trim() : 'column ' + (i + 1);
+  }
+
+  function drawColsLine(){
+    var line = $('colsLine');
+    if(!line || !S.cols) return;
+
+    var bits = COL_FIELDS.map(function(f){
+      var name = colName(S.cols[f[0]]);
+      var what = f[0] === 'cprDate' ? 'Date'
+               : f[0] === 'invoice' ? 'Order'
+               : f[0].charAt(0).toUpperCase() + f[0].slice(1);
+      return what + ' = ' + (name ? '<b>' + esc(name) + '</b>' : 'none');
+    });
+
+    line.innerHTML = 'Read from ' + bits.join(' \u00b7 ') +
+      (S.remembered ? '' : ' (guessed from the headings)') +
+      '<a id="editCols">Check or change the columns</a>';
+
+    var link = $('editCols');
+    if(link) link.addEventListener('click', function(e){
+      e.preventDefault();
+      drawColsBox();
+      $('colsBox').classList.remove('hide');
+      $('colsBox').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }
+
+  function drawColsBox(){
+    $('colsNote').textContent =
+      (S.header || []).length + ' columns in "' + S.tab + '". What is chosen here is ' +
+      'remembered for ' + S.courier + ' and used by Receive payments too.';
+
+    var box = $('colsGrid');
+    box.innerHTML = '';
+
+    COL_FIELDS.forEach(function(f){
+      var wrap = document.createElement('div');
+      var lab = document.createElement('label');
+      lab.textContent = f[1];
+
+      var sel = document.createElement('select');
+      sel.id = 'ccol_' + f[0];
+      var none = document.createElement('option');
+      none.value = '-1'; none.textContent = '- none -';
+      sel.appendChild(none);
+
+      (S.header || []).forEach(function(h, i){
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = h || ('(column ' + (i + 1) + ')');
+        sel.appendChild(o);
+      });
+
+      sel.value = String(S.cols[f[0]] === undefined ? -1 : S.cols[f[0]]);
+      wrap.appendChild(lab);
+      wrap.appendChild(sel);
+      box.appendChild(wrap);
+    });
+  }
+
+  $('btnColsHide').addEventListener('click', function(){
+    $('colsBox').classList.add('hide');
+  });
+
+  $('btnCols').addEventListener('click', function(){
+    var cols = {};
+    COL_FIELDS.forEach(function(f){ cols[f[0]] = Number($('ccol_' + f[0]).value); });
+
+    if(cols.invoice < 0) return say('bad', '<b>Pick the order / invoice number column.</b>');
+    if(cols.amount < 0)  return say('bad', '<b>Pick the amount column.</b>');
+
+    clearSay();
+    $('btnCols').disabled = true;
+
+    post('/api/cpr/columns', { courier: S.courier, cols: cols }).then(function(){
+      $('btnCols').disabled = false;
+      $('colsBox').classList.add('hide');
+      // read the sheet again, so the CPRs and their totals come from the new
+      // columns rather than standing there worked out from the old ones
+      if(S.file) openSheet(S.file);
+    }).catch(function(e){
+      $('btnCols').disabled = false;
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
 
   function drawCprs(d){
     $('stepCpr').classList.remove('hide');
@@ -1436,6 +1583,7 @@
     get('/api/find/tree').then(function(d){
       F.tree = d.companies || [];
       drawFindTree();
+      if(!FC.loaded) loadFindCols(); else drawFindColsLine();
     }).catch(function(e){
       $('findTree').innerHTML =
         '<span style="font-size:12px;color:var(--bad)">' + esc(e.message) + '</span>';
@@ -1837,6 +1985,184 @@
       startPayPoll();
       $('stepPay').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  /* ---------- which columns the sheet search reads ----------
+     The walk of the courier folders reads whatever columns it was told to,
+     courier by courier - the same ones the Find orders page uses. They were
+     set there and never shown again, so a search that finds nothing can look
+     exactly like a CPR that was never written. Here they are, with the
+     headings they point at, and a way to put them right. */
+
+  var FC = { saved: {}, headers: {}, open: {}, loaded: false };
+
+  // one courier writes its sheets the same way for every account it has, so
+  // "Trax - Elara Beauty" and "Trax CPR Working" share one set of columns
+  function courierKey(name){
+    var bits = String(name || '').trim().split(/[\s\-]+/);
+    return (bits[0] || String(name || '')).toLowerCase();
+  }
+
+  var FC_FIELDS = [
+    ['invoice', 'Order number'],
+    ['amount',  'Amount'],
+    ['status',  'Status (blank = all delivered)']
+  ];
+
+  function loadFindCols(){
+    return get('/api/find/columns').then(function(d){
+      FC.saved = d.cols || {};
+      FC.loaded = true;
+      drawFindColsLine();
+    }).catch(function(){ /* the line is not worth an error of its own */ });
+  }
+
+  function drawFindColsLine(){
+    var line = $('findColsLine');
+    if(!line) return;
+
+    var keys = {};
+    (F.tree || []).forEach(function(c){ keys[courierKey(c.company)] = c.company; });
+    var names = Object.keys(keys);
+
+    if(!names.length){ line.innerHTML = ''; return; }
+
+    var bits = names.map(function(k){
+      var cols = FC.saved[k];
+      if(!cols) return esc(k) + ' = <b>guessed</b>';
+      var head = FC.headers[k] || [];
+      var say = function(i){
+        if(i === undefined || i === null || i < 0) return 'none';
+        var h = head[i];
+        return (h && String(h).trim()) ? String(h).trim() : 'column ' + (i + 1);
+      };
+      return esc(k) + ' = <b>' + esc(say(cols.invoice)) + '</b> / <b>' +
+             esc(say(cols.amount)) + '</b>' +
+             (cols.status >= 0 ? ' / <b>' + esc(say(cols.status)) + '</b>' : '');
+    });
+
+    line.innerHTML = 'The search reads order / amount' +
+      (bits.length > 1 ? ' per courier' : '') + ': ' + bits.join(' · ') +
+      '<a id="editFindCols">Check or change the columns</a>';
+
+    var link = $('editFindCols');
+    if(link) link.addEventListener('click', function(e){
+      e.preventDefault();
+      var box = $('findColsBox');
+      box.classList.toggle('hide');
+      if(!box.classList.contains('hide')) drawFindCols();
+    });
+  }
+
+  function drawFindCols(){
+    var box = $('findColsList');
+    box.innerHTML = '';
+
+    (F.tree || []).forEach(function(c){
+      var key = courierKey(c.company);
+
+      var card = document.createElement('div');
+      card.className = 'co';
+      card.innerHTML =
+        '<h4>' + esc(c.company) + '</h4>' +
+        '<div class="grid" id="fc_' + key + '">' +
+          '<span style="font-size:12px;color:var(--muted)">' +
+          (FC.headers[key] ? '' : 'Reading a sheet to see its headings…') + '</span>' +
+        '</div>' +
+        '<div class="note' + (FC.saved[key] ? ' saved' : '') + '" id="fcn_' + key + '">' +
+          (FC.saved[key]
+            ? 'Remembered - every ' + esc(key) + ' account is read this way.'
+            : 'Not set yet - the headings are guessed each time.') +
+        '</div>';
+      box.appendChild(card);
+
+      if(FC.headers[key]) { fillFindCols(key, c.company); return; }
+
+      // a header to choose from: the first sheet in this courier's newest folder
+      var folders = (c.folders || []).slice().sort(function(a, b){
+        return (b.year - a.year) || (b.month - a.month);
+      });
+      if(!folders.length){
+        $('fc_' + key).innerHTML =
+          '<span style="font-size:12px;color:var(--muted)">No month folders to read.</span>';
+        return;
+      }
+
+      post('/api/find/sheets', { folderIds: [folders[0].id] }).then(function(d){
+        var first = (d.sheets || [])[0];
+        if(!first) throw new Error('no sheets in ' + folders[0].name);
+        return get('/api/find/header?sheetId=' + encodeURIComponent(first.id) +
+                   (first.excel ? '&excel=1' : ''));
+      }).then(function(h){
+        FC.headers[key] = h.header || [];
+        if(!FC.saved[key] && h.guess) FC.saved[key] = h.guess;
+        fillFindCols(key, c.company);
+        drawFindColsLine();
+      }).catch(function(e){
+        var g = $('fc_' + key);
+        if(g) g.innerHTML = '<span style="font-size:12px;color:var(--bad)">' +
+          esc(e.message) + '</span>';
+      });
+    });
+  }
+
+  function fillFindCols(key, company){
+    var grid = $('fc_' + key);
+    if(!grid) return;
+
+    var header = FC.headers[key] || [];
+    var have = FC.saved[key] || {};
+    grid.innerHTML = '';
+
+    FC_FIELDS.forEach(function(f){
+      var wrap = document.createElement('div');
+      var lab = document.createElement('label');
+      lab.textContent = f[1];
+
+      var sel = document.createElement('select');
+      sel.dataset.key = f[0];
+      var none = document.createElement('option');
+      none.value = '-1'; none.textContent = '- none -';
+      sel.appendChild(none);
+
+      header.forEach(function(h, i){
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = h || ('(column ' + (i + 1) + ')');
+        sel.appendChild(o);
+      });
+
+      sel.value = String(have[f[0]] === undefined ? -1 : have[f[0]]);
+      sel.addEventListener('change', function(){ saveFindCols(key); });
+
+      wrap.appendChild(lab);
+      wrap.appendChild(sel);
+      grid.appendChild(wrap);
+    });
+  }
+
+  function saveFindCols(key){
+    var grid = $('fc_' + key);
+    if(!grid) return;
+
+    var cols = FC.saved[key] ? JSON.parse(JSON.stringify(FC.saved[key])) : {};
+    grid.querySelectorAll('select').forEach(function(sel){
+      cols[sel.dataset.key] = Number(sel.value);
+    });
+    if(cols.cpr === undefined) cols.cpr = -1;
+    if(cols.cprDate === undefined) cols.cprDate = -1;
+
+    FC.saved[key] = cols;
+
+    var note = $('fcn_' + key);
+    if(note){
+      note.className = 'note saved';
+      note.textContent = 'Saved - every ' + key + ' account is read this way.';
+    }
+
+    post('/api/find/columns', { company: key, cols: cols })
+      .then(function(){ drawFindColsLine(); })
+      .catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   }
 
 })();
