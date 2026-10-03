@@ -2860,6 +2860,10 @@ app.get('/api/cpr/trace', async (req, res) => {
       else right.push(p);
     });
 
+    // this CPR's own money, and money on the same orders that is not its own
+    const own = sheetCpr ? right : noRef;
+    const other = payments.filter(p => own.indexOf(p) < 0);
+
     const notes = [];
     if (noRef.length) {
       notes.push({
@@ -2918,7 +2922,18 @@ app.get('/api/cpr/trace', async (req, res) => {
       sheetAmount: Math.round(delivered.reduce((s, r) => s + r.amount, 0) * 100) / 100,
       paidCount, openCount, missing,
       payments,
-      qbAmount: Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100,
+      // What this CPR brought in - its own payments only.
+      //
+      // An order can carry money that has nothing to do with this receipt: half
+      // of it taken in advance, into another bank, under another number. Adding
+      // that in made the CPR look bigger than the courier ever sent, and the
+      // card then reported a difference against the sheet that was not real. So
+      // the total is the payments that carry this CPR's number (or, where the
+      // sheet has no number, the ones carrying none), and everything else is
+      // counted separately and said so in the notes above.
+      qbAmount: Math.round(own.reduce((s, p) => s + p.amount, 0) * 100) / 100,
+      otherAmount: Math.round(other.reduce((s, p) => s + p.amount, 0) * 100) / 100,
+      otherCount: other.length,
       right: right.length,
       wrongRef, noRef,
       bank,

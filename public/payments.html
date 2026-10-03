@@ -843,8 +843,19 @@
 
   function openCpr(cprKey){
     hideFrom('stepMatch');
+    return readCpr(cprKey, 'Looking this CPR up in QuickBooks...');
+  }
+
+  // Read one CPR, and only that one.
+  //
+  // Receiving used to be followed by a read of every CPR on the sheet, which is
+  // a long wait for news about CPRs nobody touched. The one that was received
+  // is the one that changed, so it is the only one read again - and the fresh
+  // answer is what the sheet is then coloured from, which is why the colours
+  // now go on by themselves instead of needing the button.
+  function readCpr(cprKey, saying){
     clearSay();
-    say('', 'Looking this CPR up in QuickBooks...');
+    if (saying) say('', saying);
 
     var qs = 'sheetId=' + encodeURIComponent(S.sheetId) +
              '&tab=' + encodeURIComponent(S.tab) +
@@ -864,6 +875,7 @@
       keepOnCard(cprKey, S.match);
       refreshCard(cprKey, S.match, S.trace);
       showMatch(S.match, S.trace);
+      return S.match;
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
@@ -1272,10 +1284,17 @@
 
     S.lastPaid = j.paidInvoices || [];
     if(S.lastPaid.length) drawPaidList();
-    if(j.posted > 0){
+    if(j.posted > 0 && !S.afterPay){
       $('stepPay').classList.add('done');
-      if(S.groups.length) loadSheetStatus();   // repaint the cards from QuickBooks
-      if(!S.excel) colourNow(true);
+      // only the CPR just received is read again - the rest of the sheet was
+      // not touched - and the sheet is coloured from what that read says, so
+      // the rows that have just been paid go green without anybody asking
+      S.afterPay = true;
+      var key = S.currentKey;
+      Promise.resolve(key ? readCpr(key, '') : null)
+        .then(function(){ if(!S.excel) return colourNow(true); })
+        .then(function(){ S.afterPay = false; })
+        .catch(function(){ S.afterPay = false; });
     }
 
   }
