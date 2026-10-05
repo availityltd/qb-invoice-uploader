@@ -738,7 +738,9 @@ const USER_MAY_POST = new Set([
   '/api/replace/scan', '/api/replace/pairs', '/api/replace/pairs-keep',
   '/api/replace/pick', '/api/replace/shopify', '/api/replace/target',
   '/api/replace/clear', '/api/replace/clear-log',
-  '/api/swap/plan', '/api/swap/clear', '/api/swap/clear-log'
+  '/api/swap/plan', '/api/swap/clear', '/api/swap/clear-log',
+  // why invoices are still open - looked up in the attached sheets, nothing written
+  '/api/audit/start', '/api/audit/resume', '/api/audit/clear'
 ]);
 
 // What the admin can hand out, by the name of the job rather than the route behind
@@ -806,6 +808,10 @@ const RIGHT_GROUPS = [
     paths: ['/api/courier/sync', '/api/courier/backfill', '/api/courier/cpr-chase',
             '/api/courier/keeper-now', '/api/courier/backfill-clear',
             '/api/courier/backfill-resume', '/api/receipts/login', '/api/receipts/logout'] },
+
+  { key: 'audit', area: 'sales', label: 'Open invoice audit sheets',
+    what: 'Attach or remove the sheets open invoices are checked against',
+    paths: ['/api/audit/source', '/api/audit/source-remove'] },
 
   { key: 'settings', area: 'items', label: 'SKU mappings',
     what: 'Remembered SKU-to-item matches',
@@ -7534,6 +7540,11 @@ import {
   startVoidScan, stopVoidScan, resumeVoidScan, clearVoidScan, voidScanSnapshot
 } from './voidscan.js';
 import { startRead, stopRead, resumeRead, clearRead, readSnapshot } from './reads.js';
+import {
+  KINDS as AUDIT_KINDS, listSources as listAuditSources, describe as describeAuditSource,
+  addSource as addAuditSource, removeSource as removeAuditSource,
+  parsePasted as parseAuditPasted, auditRead
+} from './audit.js';
 
 // Save (or replace) the portal sign-in for one courier account. The password
 // is tried before it is kept, so a typo is caught here and not at midnight.
@@ -9424,6 +9435,90 @@ async function resetNonAdminAccess() {
     console.error('access reset failed:', e.message);
   }
 }
+
+// ==================== Open invoice audit ====================
+// Why are these invoices still open? The sheets that answer it (bloggers, issues,
+// advances, CPRs, returns) are attached once and kept for the company; an audit
+// looks the open invoices up in all of them. Reading only - nothing is written to
+// QuickBooks - so the look-up is open to everybody, and attaching a sheet is a job
+// that can be handed out ('audit').
+app.get('/api/audit/sources', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const all = await listAuditSources(realmId);
+  res.json({ kinds: AUDIT_KINDS, sources: all.map(describeAuditSource) });
+});
+
+app.post('/api/audit/source', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const rows = req.body.text != null
+      ? parseAuditPasted(req.body.text).map(x => [x.doc, x.amount == null ? '' : x.amount, ''])
+      : req.body.rows;
+    res.json({ ok: true, source: await addAuditSource(realmId, { ...req.body, rows }) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/audit/source-remove', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    await removeAuditSource(realmId, String(req.body.id || ''));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+app.post('/api/audit/start', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const input = req.body.text != null
+      ? { invoices: parseAuditPasted(req.body.text) }
+      : req.body;
+    const id = startRead(req.desk, 'audit', auditRead(realmId, input));
+    res.json({ ok: true, jobId: id });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.get('/api/audit/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.setHeader('Cache-Control', 'no-store');
+  const snap = readSnapshot(req.desk, 'audit', req.query.since || 0);
+  res.json(snap ? { job: snap } : { job: null });
+});
+
+app.post('/api/audit/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: stopRead(req.desk, 'audit') });
+});
+
+app.post('/api/audit/resume', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    resumeRead(req.desk, 'audit');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).json({ error: e.message });
+  }
+});
+
+app.post('/api/audit/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  if (!clearRead(req.desk, 'audit')) return res.status(409).json({ error: 'The look-up is still going' });
+  res.json({ ok: true });
+});
 
 // ==================== Start ====================
 const PORT = process.env.PORT || 3000;

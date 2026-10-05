@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open invoice audit</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F2E24">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 24px;margin-bottom:16px}
+  .step h2{margin:0 0 4px;font-size:14.5px;font-weight:600}
+  .step .hint{font-size:12.5px;color:var(--muted);margin-bottom:14px;line-height:1.6}
+
+  textarea.nums{width:100%;min-height:130px;border:1px solid var(--line);border-radius:8px;
+    padding:11px 13px;font-family:var(--mono);font-size:12.5px;resize:vertical;background:#fff}
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px}
+  .tabs button{border:0;background:none;padding:11px 18px;font:inherit;font-size:13px;
+    cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--qbo)}
+  .pane{display:none}
+  .pane.on{display:block}
+
+  .picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;
+    margin-bottom:14px}
+  .picks label,.lab{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--faint);margin-bottom:5px}
+  .picks select,.picks input{width:100%}
+
+  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .row .aside{font-size:12px;color:var(--faint)}
+
+  .src{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:9px 0;
+    border-bottom:1px solid var(--line);font-size:12.5px}
+  .src:last-child{border-bottom:0}
+  .src .k{min-width:170px;font-weight:600}
+  .src .n{color:var(--muted);flex:1}
+  .src button{font-size:11.5px;padding:3px 10px}
+  .add{border:1px dashed var(--line);border-radius:9px;padding:16px 18px;margin-top:14px;background:#fff}
+
+  .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:14px 0 8px}
+  .bar span{display:block;height:8px;background:var(--qbo);border-radius:4px;width:0;transition:width .3s}
+
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .tile{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff;cursor:pointer}
+  .tile.on{border-color:var(--qbo);box-shadow:0 0 0 1px var(--qbo)}
+  .tile .n{font-family:var(--mono);font-size:21px;font-weight:500;line-height:1.1}
+  .tile .l{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-top:4px}
+  .tile .m{font-size:11.5px;color:var(--muted);margin-top:3px;font-family:var(--mono)}
+  .tile.none .n{color:var(--bad)}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--faint);border-bottom:1px solid var(--line);padding:8px;font-weight:600}
+  table.t td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.t td.r,table.t th.r{text-align:right;font-family:var(--mono)}
+  table.t td.mono{font-family:var(--mono);font-size:12px}
+  .pill{display:inline-block;border-radius:20px;padding:2px 9px;font-size:11px;background:#E8F1FA;color:#2C6396;margin:0 4px 3px 0}
+  .pill.return{background:#FDECEC;color:#B33A34}
+  .pill.cpr{background:#E7F6ED;color:#1B7A45}
+  .pill.advance{background:#F5F0E4;color:#8A7233}
+  .pill.issue{background:#F3E9F7;color:#7A3F8F}
+  .pill.blogger{background:#E8F1FA;color:#2C6396}
+  .pill.none{background:#F0F2F4;color:#69757F}
+  .off{color:var(--bad);font-size:11px}
+  .sub2{color:var(--faint);font-size:11.5px}
+
+  .log{background:#0F2E24;color:#CFE6D9;border-radius:9px;padding:13px 15px;
+    font-family:var(--mono);font-size:11.5px;line-height:1.65;max-height:300px;overflow:auto;
+    white-space:pre-wrap;margin-top:10px}
+  .fold{font-size:12px;color:var(--muted);cursor:pointer;user-select:none;margin-top:12px;display:inline-block}
+  .fold:hover{color:var(--ink)}
+  .msg{padding:13px 15px;border-radius:8px;font-size:12.5px;margin-top:12px}
+  .msg.bad{background:#FDF3F3;border:1px solid var(--bad);color:var(--bad)}
+  .msg.good{background:#F2FAF0;border:1px solid var(--qbo)}
+  .peek{font-size:11.5px;color:var(--faint);margin-top:9px;font-family:var(--mono);white-space:pre-wrap}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="rail"></aside>
+
+  <div class="main">
+    <div class="topline">
+      <div>
+        <h1>Open invoice audit</h1>
+        <div class="sub">Why is an invoice still open? Looked up in the sheets you attach.</div>
+      </div>
+    </div>
+
+    <div class="shell">
+
+      <div id="gate" class="gate hide">
+        <img src="/logo.svg" alt="">
+        <h2>Connect your QuickBooks company</h2>
+        <p>The attached sheets are kept per company.</p>
+        <button class="solid" id="btnConnect">Connect to QuickBooks</button>
+      </div>
+
+      <div id="body" class="hide">
+
+        <!-- ---------- 1. the sheets ---------- -->
+        <div class="step">
+          <h2>1 &middot; Sheets</h2>
+          <div class="hint">
+            Attach each sheet once; it stays here for the next audit. Upload a CSV, or paste
+            order numbers with their amounts. Attaching the same kind again adds to it.
+          </div>
+          <div id="srcList"></div>
+
+          <div class="add" id="addBox">
+            <div class="row" style="margin-bottom:12px">
+              <div style="min-width:220px">
+                <label class="lab">Which sheet</label>
+                <select id="aKind"></select>
+              </div>
+              <div style="flex:1;min-width:200px">
+                <label class="lab">Name (optional)</label>
+                <input type="text" id="aName" placeholder="e.g. Blogger orders - September">
+              </div>
+            </div>
+            <div class="tabs" id="aTabs">
+              <button class="on" data-p="file">Upload CSV</button>
+              <button data-p="paste">Paste orders</button>
+            </div>
+            <div class="pane on" id="aFile">
+              <input type="file" id="aFileIn" accept=".csv,text/csv">
+              <div id="aCols" class="hide" style="margin-top:14px">
+                <div class="picks">
+                  <div><label>Order number column</label><select id="cOrder"></select></div>
+                  <div><label>Amount column</label><select id="cAmount"></select></div>
+                  <div><label>Reason / note column</label><select id="cNote"></select></div>
+                </div>
+                <div class="peek" id="aPeek"></div>
+              </div>
+            </div>
+            <div class="pane" id="aPaste">
+              <textarea class="nums" id="aText" placeholder="91349172 1500&#10;91349171 2300&#10;91349170"></textarea>
+              <div class="sub2" style="margin-top:6px">One order per line, the amount after it (optional).</div>
+            </div>
+            <div class="row" style="margin-top:14px">
+              <button class="solid" id="btnAttach">Attach this sheet</button>
+              <span class="aside" id="attachNote"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- 2. the invoices ---------- -->
+        <div class="step">
+          <h2>2 &middot; Open invoices to look at</h2>
+          <div class="tabs" id="iTabs">
+            <button class="on" data-p="qb">From QuickBooks</button>
+            <button data-p="paste">Paste with amounts</button>
+            <button data-p="file">Upload CSV</button>
+          </div>
+
+          <div class="pane on" id="iqb">
+            <div class="hint">Every invoice in this date range that still has a balance.</div>
+            <div class="picks">
+              <div><label>From</label><input type="date" id="qFrom"></div>
+              <div><label>To</label><input type="date" id="qTo"></div>
+            </div>
+          </div>
+
+          <div class="pane" id="ipaste">
+            <div class="hint">One invoice per line, its amount after it. The hash makes no difference.</div>
+            <textarea class="nums" id="iText" placeholder="#91349172 1500&#10;#91349171 2300"></textarea>
+            <div id="iCount" class="sub2" style="margin-top:7px"></div>
+          </div>
+
+          <div class="pane" id="ifile">
+            <div class="hint">A CSV with the invoice number and, if it has one, the amount.</div>
+            <input type="file" id="iFileIn" accept=".csv,text/csv">
+            <div id="iCols" class="hide" style="margin-top:14px">
+              <div class="picks">
+                <div><label>Invoice number column</label><select id="dInv"></select></div>
+                <div><label>Amount column</label><select id="dAmt"></select></div>
+              </div>
+              <div class="peek" id="iPeek"></div>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top:6px">
+            <button class="solid" id="btnStart">Find the reasons</button>
+            <span class="aside" id="startNote"></span>
+          </div>
+        </div>
+
+        <!-- ---------- the run ---------- -->
+        <div class="step hide" id="stepRun">
+          <h2>Looking <span id="runState" style="font-size:12px;color:var(--faint);font-weight:400"></span></h2>
+          <div class="bar"><span id="barFill"></span></div>
+          <div id="runLine" class="sub2"></div>
+          <div class="row" style="margin-top:14px">
+            <button id="btnStop">Stop</button>
+            <button id="btnCarry" class="hide">Carry on</button>
+            <button id="btnClear" class="hide">Clear log</button>
+          </div>
+          <span class="fold" id="foldLog">Show what it is doing</span>
+          <div class="log hide" id="log"></div>
+        </div>
+
+        <!-- ---------- the answer ---------- -->
+        <div class="step hide" id="stepOut">
+          <h2>What was found</h2>
+          <div class="hint" id="outHint"></div>
+          <div class="tiles" id="tiles"></div>
+          <div class="row" style="margin-bottom:12px">
+            <button id="btnCsv">Download as CSV</button>
+            <span class="aside" id="filterNote"></span>
+          </div>
+          <div id="rowsWrap"></div>
+        </div>
+
+        <div class="stat" id="statBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/nav.js"></script>
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  var kinds = [], sources = [];
+  var aCsv = null, iCsv = null;     // { header, rows }
+  var result = null, filter = '';
+  var since = 0, timer = null;
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function money(v){ return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0}); }
+  function say(cls, html){ $('statBox').className = 'stat' + (cls ? ' ' + cls : ''); $('statBox').innerHTML = html; }
+
+  function get(url){
+    return fetch(url, { cache:'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+  function post(url, body){
+    return fetch(url, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {})
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d.error) throw new Error(d.error);
+      return d;
+    });
+  }
+
+  $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
+
+  /* ---------- csv ---------- */
+  function parseCSV(text){
+    var rows=[], row=[], i=0, n=text.length, nonEmpty=false;
+    if(text.charCodeAt(0)===0xFEFF) i=1;
+    function endRow(){ if(nonEmpty) rows.push(row); row=[]; nonEmpty=false; }
+    while(i<n){
+      var ch=text.charCodeAt(i), val;
+      if(ch===34){
+        var j=i+1, buf=null, seg;
+        for(;;){
+          var q=text.indexOf('"',j);
+          if(q<0){ seg=text.slice(j); j=n; buf=buf===null?seg:buf+seg; break; }
+          if(text.charCodeAt(q+1)===34){ seg=text.slice(j,q+1); buf=buf===null?seg:buf+seg; j=q+2; }
+          else { seg=text.slice(j,q); buf=buf===null?seg:buf+seg; j=q+1; break; }
+        }
+        val=buf===null?"":buf; i=j;
+      }else{
+        var k=i;
+        while(k<n){ var c=text.charCodeAt(k); if(c===44||c===13||c===10) break; k++; }
+        val=text.slice(i,k); i=k;
+      }
+      row.push(val);
+      if(val!=="") nonEmpty=true;
+      if(i<n){
+        var dd=text.charCodeAt(i);
+        if(dd===44){ i++; }
+        else{ if(dd===13&&text.charCodeAt(i+1)===10) i++; i++; endRow(); }
+      }
+    }
+    if(row.length) endRow();
+    return rows;
+  }
+
+  function readCsv(file, done){
+    var fr = new FileReader();
+    fr.onload = function(){
+      var rows = parseCSV(String(fr.result || ''));
+      if(rows.length < 2){ done(null); return; }
+      done({ header: rows[0].map(function(h){ return String(h).trim(); }), rows: rows.slice(1) });
+    };
+    fr.readAsText(file);
+  }
+
+  function fillSelect(sel, header, pick, optional){
+    sel.innerHTML = (optional ? '<option value="-1">(none)</option>' : '') +
+      header.map(function(h, i){
+        return '<option value="' + i + '">' + esc(h || ('Column ' + (i + 1))) + '</option>';
+      }).join('');
+    sel.value = String(pick);
+  }
+  function guess(header, re, skip){
+    for(var i = 0; i < header.length; i++){
+      if(skip && skip.indexOf(i) >= 0) continue;
+      if(re.test(header[i])) return i;
+    }
+    return -1;
+  }
+  var RE_ORDER = /order|invoice|inv\b|doc|number|no\b|#/i;
+  var RE_AMT   = /amount|total|cod|price|paid|advance|balance|value/i;
+  var RE_NOTE  = /reason|issue|note|remark|status|comment|detail|type/i;
+
+  // the columns this kind of sheet used last time, found again by their name
+  function rememberedFor(kind){
+    for(var i = sources.length - 1; i >= 0; i--){
+      if(sources[i].kind === kind && sources[i].cols) return sources[i].cols;
+    }
+    return null;
+  }
+  function byName(header, name){
+    if(!name) return -1;
+    return header.indexOf(name);
+  }
+  function peekOf(csv, cols){
+    var r = csv.rows[0] || [];
+    return 'First row reads: order ' + (cols.o >= 0 ? (r[cols.o] || '-') : '-') +
+      (cols.a != null ? ' | amount ' + (cols.a >= 0 ? (r[cols.a] || '-') : '-') : '') +
+      (cols.n != null ? ' | note ' + (cols.n >= 0 ? (r[cols.n] || '-') : '-') : '') +
+      '   (' + csv.rows.length + ' rows)';
+  }
+
+  /* ---------- tabs ---------- */
+  function wireTabs(tabsId, map){
+    document.querySelectorAll('#' + tabsId + ' button').forEach(function(b){
+      b.addEventListener('click', function(){
+        document.querySelectorAll('#' + tabsId + ' button').forEach(function(x){ x.classList.remove('on'); });
+        b.classList.add('on');
+        Object.keys(map).forEach(function(k){ $(map[k]).classList.toggle('on', k === b.dataset.p); });
+      });
+    });
+  }
+  wireTabs('aTabs', { file:'aFile', paste:'aPaste' });
+  wireTabs('iTabs', { qb:'iqb', paste:'ipaste', file:'ifile' });
+  function tabOf(id){ return document.querySelector('#' + id + ' button.on').dataset.p; }
+
+  /* ---------- start ---------- */
+  window.APP.ready.then(function(s){
+    if(!s.connected){ $('gate').classList.remove('hide'); return; }
+    $('body').classList.remove('hide');
+
+    var d = new Date(), iso = function(x){ return x.toISOString().slice(0,10); };
+    $('qTo').value = iso(d);
+    $('qFrom').value = iso(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+
+    loadSources();
+    poll();
+  });
+
+  /* ---------- 1. sheets ---------- */
+  function loadSources(){
+    return get('/api/audit/sources').then(function(d){
+      kinds = d.kinds; sources = d.sources;
+      $('aKind').innerHTML = kinds.map(function(k){
+        return '<option value="' + esc(k.key) + '">' + esc(k.label) + '</option>';
+      }).join('');
+      drawSources();
+    }).catch(function(e){ say('bad', esc(e.message)); });
+  }
+
+  function drawSources(){
+    if(!sources.length){
+      $('srcList').innerHTML = '<div class="sub2" style="padding:6px 0">No sheet is attached yet.</div>';
+      return;
+    }
+    $('srcList').innerHTML = sources.map(function(s){
+      return '<div class="src"><span class="k">' + esc(s.label) + '</span>' +
+        '<span class="n">' + esc(s.name) + ' &middot; ' + money(s.orders) + ' orders' +
+        (s.withAmount ? ' &middot; ' + money(s.total) : '') + '</span>' +
+        '<button data-rm="' + esc(s.id) + '" data-need="audit">Remove</button></div>';
+    }).join('');
+    document.querySelectorAll('[data-rm]').forEach(function(b){
+      b.addEventListener('click', function(){
+        if(!confirm('Take this sheet away? Past results are not changed.')) return;
+        post('/api/audit/source-remove', { id: b.dataset.rm }).then(loadSources)
+          .catch(function(e){ say('bad', esc(e.message)); });
+      });
+    });
+  }
+
+  function colsOfAttach(){
+    var h = aCsv.header;
+    return {
+      order: h[+$('cOrder').value] || '',
+      amount: +$('cAmount').value >= 0 ? (h[+$('cAmount').value] || '') : '',
+      note: +$('cNote').value >= 0 ? (h[+$('cNote').value] || '') : ''
+    };
+  }
+  function showAttachPeek(){
+    if(!aCsv) return;
+    $('aPeek').textContent = peekOf(aCsv, { o:+$('cOrder').value, a:+$('cAmount').value, n:+$('cNote').value });
+  }
+  ['cOrder','cAmount','cNote'].forEach(function(id){ $(id).addEventListener('change', showAttachPeek); });
+
+  function setupAttachColumns(){
+    if(!aCsv) return;
+    var h = aCsv.header, mem = rememberedFor($('aKind').value);
+    var o = mem ? byName(h, mem.order) : -1; if(o < 0) o = Math.max(0, guess(h, RE_ORDER));
+    var a = mem && mem.amount ? byName(h, mem.amount) : -1; if(a < 0) a = guess(h, RE_AMT, [o]);
+    var n = mem && mem.note ? byName(h, mem.note) : -1; if(n < 0) n = guess(h, RE_NOTE, [o, a]);
+    fillSelect($('cOrder'), h, o, false);
+    fillSelect($('cAmount'), h, a, true);
+    fillSelect($('cNote'), h, n, true);
+    $('aCols').classList.remove('hide');
+    showAttachPeek();
+  }
+  $('aKind').addEventListener('change', setupAttachColumns);
+
+  $('aFileIn').addEventListener('change', function(){
+    var f = $('aFileIn').files[0];
+    aCsv = null; $('aCols').classList.add('hide');
+    if(!f) return;
+    if(!$('aName').value) $('aName').value = f.name.replace(/\.csv$/i, '');
+    readCsv(f, function(c){
+      if(!c){ say('bad', 'That file has no rows to read.'); return; }
+      aCsv = c; setupAttachColumns();
+    });
+  });
+
+  $('btnAttach').addEventListener('click', function(){
+    var body = { kind: $('aKind').value, name: $('aName').value };
+    if(tabOf('aTabs') === 'paste'){
+      body.text = $('aText').value;
+      if(!body.text.trim()){ say('bad', 'Paste some order numbers first.'); return; }
+    } else {
+      if(!aCsv){ say('bad', 'Choose a CSV file first.'); return; }
+      var o = +$('cOrder').value, a = +$('cAmount').value, n = +$('cNote').value;
+      body.cols = colsOfAttach();
+      body.rows = aCsv.rows.map(function(r){
+        return [r[o] || '', a >= 0 ? (r[a] || '') : '', n >= 0 ? (r[n] || '') : ''];
+      });
+    }
+    $('btnAttach').disabled = true; $('attachNote').textContent = 'Attaching...';
+    post('/api/audit/source', body).then(function(d){
+      $('attachNote').textContent = 'Attached: ' + money(d.source.orders) + ' orders.';
+      $('aText').value = ''; $('aFileIn').value = ''; $('aName').value = '';
+      aCsv = null; $('aCols').classList.add('hide');
+      return loadSources();
+    }).catch(function(e){ $('attachNote').textContent = ''; say('bad', esc(e.message)); })
+      .then(function(){ $('btnAttach').disabled = false; });
+  });
+
+  /* ---------- 2. the invoices ---------- */
+  $('iText').addEventListener('input', function(){
+    var n = $('iText').value.split(/\r?\n/).filter(function(l){ return /[0-9]/.test(l); }).length;
+    $('iCount').textContent = n ? money(n) + ' invoices' : '';
+  });
+
+  function setupInvoiceColumns(){
+    var h = iCsv.header;
+    var o = Math.max(0, guess(h, RE_ORDER));
+    fillSelect($('dInv'), h, o, false);
+    fillSelect($('dAmt'), h, guess(h, RE_AMT, [o]), true);
+    $('iCols').classList.remove('hide');
+    showInvoicePeek();
+  }
+  function showInvoicePeek(){
+    if(iCsv) $('iPeek').textContent = peekOf(iCsv, { o:+$('dInv').value, a:+$('dAmt').value });
+  }
+  $('dInv').addEventListener('change', showInvoicePeek);
+  $('dAmt').addEventListener('change', showInvoicePeek);
+  $('iFileIn').addEventListener('change', function(){
+    var f = $('iFileIn').files[0];
+    iCsv = null; $('iCols').classList.add('hide');
+    if(!f) return;
+    readCsv(f, function(c){
+      if(!c){ say('bad', 'That file has no rows to read.'); return; }
+      iCsv = c; setupInvoiceColumns();
+    });
+  });
+
+  $('btnStart').addEventListener('click', function(){
+    var t = tabOf('iTabs'), body;
+    if(!sources.length){ say('bad', 'Attach at least one sheet first.'); return; }
+    if(t === 'qb'){
+      body = { from: $('qFrom').value, to: $('qTo').value };
+    } else if(t === 'paste'){
+      if(!$('iText').value.trim()){ say('bad', 'Paste some invoices first.'); return; }
+      body = { text: $('iText').value };
+    } else {
+      if(!iCsv){ say('bad', 'Choose a CSV file first.'); return; }
+      var o = +$('dInv').value, a = +$('dAmt').value;
+      body = { invoices: iCsv.rows.map(function(r){
+        return { doc: r[o] || '', amount: a >= 0 ? (r[a] || '') : '' };
+      }) };
+    }
+    say('', '');
+    post('/api/audit/start', body).then(function(){
+      since = 0; result = null; filter = '';
+      $('log').innerHTML = '';
+      $('stepOut').classList.add('hide');
+      poll();
+    }).catch(function(e){ say('bad', esc(e.message)); });
+  });
+
+  /* ---------- the run ---------- */
+  function poll(){
+    clearTimeout(timer);
+    get('/api/audit/status?since=' + since).then(function(d){
+      var j = d.job;
+      if(!j){ $('stepRun').classList.add('hide'); return; }
+      draw(j);
+      if(j.state === 'running') timer = setTimeout(poll, 1500);
+    }).catch(function(){ timer = setTimeout(poll, 4000); });
+  }
+
+  function draw(j){
+    $('stepRun').classList.remove('hide');
+    var running = j.state === 'running';
+    $('runState').textContent = running ? '- ' + j.label : j.state === 'stopped' ? '- stopped' :
+      j.state === 'error' ? '- failed' : '- finished';
+    var pct = j.total ? Math.min(100, Math.round(j.done * 100 / j.total)) : (running ? 5 : 100);
+    $('barFill').style.width = (running || j.state === 'stopped' ? pct : 100) + '%';
+    $('runLine').textContent = j.done + ' of ' + (j.total || '?') + ' steps - ' + j.counted + ' invoices';
+
+    $('btnStop').classList.toggle('hide', !running);
+    $('btnCarry').classList.toggle('hide', !j.canCarryOn);
+    $('btnClear').classList.toggle('hide', running);
+
+    (j.events || []).forEach(function(e){
+      var line = document.createElement('div');
+      line.textContent = e.msg;
+      if(e.type === 'error') line.style.color = '#FFB4AE';
+      $('log').appendChild(line);
+      $('log').scrollTop = $('log').scrollHeight;
+    });
+    since = j.lastEventId || since;
+
+    if(j.result && !running && result !== j.result){
+      result = j.result; filter = ''; drawResult(j);
+    } else if(running){ $('stepOut').classList.add('hide'); }
+  }
+
+  $('foldLog').addEventListener('click', function(){
+    var h = $('log').classList.toggle('hide');
+    $('foldLog').textContent = h ? 'Show what it is doing' : 'Hide what it is doing';
+  });
+  $('btnStop').addEventListener('click', function(){ post('/api/audit/stop').then(poll).catch(function(){}); });
+  $('btnCarry').addEventListener('click', function(){
+    post('/api/audit/resume').then(poll).catch(function(e){ say('bad', esc(e.message)); });
+  });
+  $('btnClear').addEventListener('click', function(){
+    post('/api/audit/clear').then(function(){
+      since = 0; result = null; $('log').innerHTML = '';
+      $('stepRun').classList.add('hide'); $('stepOut').classList.add('hide');
+    }).catch(function(e){ say('bad', esc(e.message)); });
+  });
+
+  /* ---------- the answer ---------- */
+  function drawResult(j){
+    var r = result;
+    $('stepOut').classList.remove('hide');
+    $('outHint').textContent = (r.partial ? 'Stopped early - this is only what was read so far. ' : '') +
+      money(r.total) + ' open invoices looked up in ' + r.sources.length + ' sheet(s). ' +
+      'Each is placed under its strongest reason; the others it also appears in are listed beside it.';
+
+    var t = r.byKind, html = '';
+    kinds.forEach(function(k){
+      html += tile(k.key, k.label, t[k.key]);
+    });
+    html += tile('none', 'No reason found', r.none, true);
+    $('tiles').innerHTML = html;
+    document.querySelectorAll('.tile').forEach(function(el){
+      el.addEventListener('click', function(){
+        filter = filter === el.dataset.k ? '' : el.dataset.k;
+        drawResult(j);
+      });
+    });
+    drawRows();
+  }
+  function tile(key, label, v, none){
+    return '<div class="tile' + (none ? ' none' : '') + (filter === key ? ' on' : '') + '" data-k="' + key + '">' +
+      '<div class="n">' + money(v.count) + '</div><div class="l">' + esc(label) + '</div>' +
+      '<div class="m">' + money(v.amount) + '</div></div>';
+  }
+  function shown(){
+    return result.rows.filter(function(r){
+      return !filter || (filter === 'none' ? !r.main : r.main === filter);
+    });
+  }
+  function drawRows(){
+    var rows = shown();
+    $('filterNote').textContent = filter ? 'Showing ' + money(rows.length) + ' - click the same box again to see all.' : '';
+    if(!rows.length){ $('rowsWrap').innerHTML = '<div class="sub2">Nothing here.</div>'; return; }
+    var cut = rows.slice(0, 1500);
+    $('rowsWrap').innerHTML = '<table class="t"><tr><th>Invoice</th><th>Date</th><th>Customer</th>' +
+      '<th class="r">Amount</th><th>Reason</th></tr>' +
+      cut.map(function(r){
+        var why = r.hits.length ? r.hits.map(function(h){
+          return '<div><span class="pill ' + h.kind + '">' + esc(h.label) + '</span>' +
+            '<span class="sub2">' + esc(h.source) +
+            (h.amount != null ? ' &middot; ' + money(h.amount) : '') +
+            (h.note ? ' &middot; ' + esc(h.note) : '') + '</span>' +
+            (h.differs ? ' <span class="off">amount differs</span>' : '') + '</div>';
+        }).join('') : '<span class="pill none">No reason found</span>';
+        return '<tr><td class="mono">' + esc(r.doc) + '</td><td class="mono">' + esc(r.date) + '</td>' +
+          '<td>' + esc(r.customer) + '</td><td class="r">' + (r.amount == null ? '' : money(r.amount)) +
+          '</td><td>' + why + '</td></tr>';
+      }).join('') + '</table>' +
+      (rows.length > cut.length ? '<div class="sub2" style="margin-top:8px">First ' + money(cut.length) +
+        ' shown - the download has all ' + money(rows.length) + '.</div>' : '');
+  }
+
+  $('btnCsv').addEventListener('click', function(){
+    var out = [['Invoice','Date','Customer','Amount','Main reason','Sheet','Note','All reasons']];
+    shown().forEach(function(r){
+      var h = r.hits[0] || {};
+      out.push([r.doc, r.date, r.customer, r.amount == null ? '' : r.amount,
+        h.label || 'No reason found', h.source || '', h.note || '',
+        r.hits.map(function(x){ return x.label + ' (' + x.source + ')'; }).join('; ')]);
+    });
+    var text = out.map(function(r){
+      return r.map(function(c){
+        var s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + text], { type:'text/csv;charset=utf-8;' }));
+    a.download = 'open-invoice-audit' + (filter ? '-' + filter : '') + '.csv';
+    a.click();
+  });
+})();
+</script>
+</body>
+</html>

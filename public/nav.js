@@ -42,6 +42,7 @@
       { href:'/advance.html',  label:'Advance payments', icon:'wallet',  need:'advance' },
       { href:'/charges.html',  label:'Delivery charges', icon:'receipt', need:'charges' },
             { href:'/find.html',     label:'Find orders',      icon:'search' },
+      { href:'/audit.html',    label:'Open invoice audit', icon:'receipt' },
       { href:'/couriers.html', label:'Couriers',         icon:'truck', tree:true,
         need:'couriersync' }
     ]},
