@@ -15,8 +15,10 @@
 import { getAccessToken, qbQuery } from './qb.js';
 import { tokenKeeper } from './replaceitem.js';
 import { getSetting, setSetting } from './settings.js';
-import { digitsOf, splitInvoices, num } from './cpr.js';
-import { listSheets, fileInfo, listTabs, readTab } from './sheets.js';
+import { digitsOf, splitInvoices, num, loadSheet } from './cpr.js';
+import { loadAdvance } from './advance.js';
+import { readDateColumns } from './voidsheet.js';
+import { listSheets, listSheetsIn, fileInfo, listTabs, readTab } from './sheets.js';
 
 // In the order a reason is trusted: an order that came back explains the open
 // invoice whatever else is written about it, and a blogger's free product least.
@@ -318,6 +320,70 @@ async function patiently(work, stopped) {
   }
 }
 
+/* ==================== the three sheets that have a page of their own ==================== */
+
+// CPR, advance and return sheets are already linked, and already understood, by
+// Receive payments, Advance payments and Void invoices. The audit reads them the
+// way those pages do - the same folder, the same way of finding the columns - so
+// nothing is told twice. What the page sends is only what to search this time:
+//
+//   cpr      folders: [{ id, company, name }]   the month folders picked, as Find orders
+//   advance  books:   [{ id, name, excel, tabs }]
+//   return   { id, name, excel, tabs, from, to }
+
+// One courier writes its sheets the same way for every account, so the first
+// word of the folder name is enough to know which columns to use.
+function cprCols(all, company) {
+  if (all[company]) return all[company];
+  const word = String(company || '').trim().split(/[\s\-]+/)[0].toLowerCase();
+  return all[word] || null;
+}
+
+function cprRows(rows, only, company) {
+  const out = [];
+  rows.forEach(r => {
+    (r.invoices || []).forEach(inv => {
+      const d = digitsOf(inv);
+      if (!d || (only && !only.has(d))) return;
+      out.push({
+        d,
+        // a parcel carrying several orders has one amount for all of them
+        a: (r.invoices || []).length === 1 ? (r.amount || null) : null,
+        n: [company, r.status, r.cprNumber ? 'CPR ' + r.cprNumber : ''].filter(Boolean).join(' - ').slice(0, 160)
+      });
+    });
+  });
+  return out;
+}
+
+function advanceRows(rows, only) {
+  const out = [];
+  rows.forEach(r => {
+    splitInvoices(r.invoice).forEach(inv => {
+      const d = digitsOf(inv);
+      if (!d || (only && !only.has(d))) return;
+      out.push({
+        d, a: r.amount || null,
+        n: [r.date, r.name, r.note].filter(Boolean).join(' - ').slice(0, 160)
+      });
+    });
+  });
+  return out;
+}
+
+function returnRows(days, only, from, to) {
+  const out = [];
+  (days || []).forEach(day => {
+    if (from && day.date && day.date < from) return;
+    if (to && day.date && day.date > to) return;
+    (day.numbers || []).forEach(n => {
+      const d = digitsOf(n);
+      if (d && (!only || only.has(d))) out.push({ d, a: null, n: 'Returned' + (day.date ? ' on ' + day.date : '') });
+    });
+  });
+  return out;
+}
+
 /* ==================== the run ==================== */
 
 // `input` is either { from, to } - read the open invoices from QuickBooks - or
@@ -337,6 +403,51 @@ export function auditRead(realmId, input) {
       .map(x => ({ doc: String(x.doc || '').trim(), amount: x.amount == null || x.amount === '' ? null : num(x.amount) }))
       .filter(x => digitsOf(x.doc));
     if (!given.length) throw new Error('There are no invoice numbers to look up');
+  }
+
+  // one tab, read the way the sheet's own page reads it
+  async function tabStep(run, it, where, read, rowsOf2) {
+    await sleep(1100);
+    let d;
+    try {
+      d = await patiently(read, () => run.stop);
+    } catch (e) {
+      return { msg: 'SKIPPED ' + where + '   ' + String(e.message).slice(0, 160) };
+    }
+    const rows = rowsOf2(d);
+    if (rows.length) run.data.live.push({ kind: it.kind, name: where, rows });
+    return { found: rows.length > 0, msg: where + '   ' + (rows.length ? 'found ' + rows.length : 'nothing here') };
+  }
+
+  // a CPR workbook: every tab of it, as Find orders reads one
+  async function cprStep(run, it) {
+    const where = it.company + ' / ' + it.month + ' / ' + it.file.name;
+    let tabs;
+    await sleep(1100);
+    try {
+      tabs = await patiently(() => listTabs(it.file.id, it.file.excel), () => run.stop);
+    } catch (e) {
+      return { msg: 'SKIPPED ' + where + '   ' + String(e.message).slice(0, 160) };
+    }
+    const cols = cprCols(run.data.findCols, it.company);
+    let found = 0, trouble = 0;
+    for (const t of tabs) {
+      await sleep(1100);
+      let d;
+      try {
+        d = await patiently(() => loadSheet(it.file.id, t.title, it.file.excel, cols), () => run.stop);
+      } catch (e) { trouble++; continue; }
+      const rows = cprRows(d.rows, run.data.only, it.company);
+      if (rows.length) {
+        run.data.live.push({ kind: 'cpr', name: where + ' / ' + t.title, rows });
+        found += rows.length;
+      }
+    }
+    return {
+      found: found > 0,
+      msg: where + '   ' + (found ? 'found ' + found : 'nothing here') +
+        (trouble ? '   (' + trouble + ' tab' + (trouble === 1 ? '' : 's') + ' could not be read)' : '')
+    };
   }
 
   return {
@@ -363,6 +474,36 @@ export function auditRead(realmId, input) {
         queue.push({ t: 'g' });
       }
 
+      const places = (input && input.places) || {};
+      run.data.findCols = (await getSetting(realmId, 'find:cols', {})) || {};
+      run.data.advCols = (await getSetting(realmId, 'adv:cols', null)) || null;
+
+      if (kinds.includes('cpr') && places.cpr) {
+        const seen = new Set();
+        for (const f of (places.cpr.folders || [])) {
+          if (!f || !f.id || seen.has(f.id)) continue;
+          seen.add(f.id);
+          const files = await patiently(() => listSheetsIn(String(f.id)), () => run.stop);
+          files.forEach(file => queue.push({
+            t: 'c', kind: 'cpr', company: String(f.company || ''), month: String(f.name || ''), file
+          }));
+        }
+      }
+      if (kinds.includes('advance') && places.advance) {
+        for (const b of (places.advance.books || [])) {
+          if (!b || !b.id) continue;
+          const tabs = b.tabs && b.tabs.length ? b.tabs
+            : await patiently(() => tabTitles(b.id, b.excel), () => run.stop);
+          tabs.forEach(tab => queue.push({ t: 'a', kind: 'advance', book: b, tab }));
+        }
+      }
+      if (kinds.includes('return') && places.return && places.return.id) {
+        const r = places.return;
+        const tabs = r.tabs && r.tabs.length ? r.tabs
+          : await patiently(() => tabTitles(r.id, r.excel), () => run.stop);
+        tabs.forEach(tab => queue.push({ t: 'r', kind: 'return', book: r, tab, from: r.from || '', to: r.to || '' }));
+      }
+
       for (const kind of kinds) {
         const l = links[kind];
         if (!l || !l.books || !l.books.length) continue;
@@ -373,8 +514,8 @@ export function auditRead(realmId, input) {
           tabs.forEach(tab => queue.push({ t: 's', kind, book: b, tab, cols: l.cols }));
         }
       }
-      if (!stat.length && !queue.some(q => q.t === 's')) {
-        throw new Error('Nothing is attached for the places you ticked');
+      if (!stat.length && !queue.some(q => q.t !== 'w' && q.t !== 'g')) {
+        throw new Error('Nothing is chosen to search in the places you ticked');
       }
 
       run.data.queue = queue;
@@ -405,6 +546,15 @@ export function auditRead(realmId, input) {
 
       // a tab of a sheet, now that the invoices it is read for are known
       if (!run.data.only) run.data.only = new Set(run.data.got.map(x => digitsOf(x.doc)));
+
+      if (it.t === 'c') return cprStep(run, it);
+      if (it.t === 'a') return tabStep(run, it, it.book.name + ' / ' + it.tab,
+        () => loadAdvance(it.book.id, it.tab, it.book.excel, run.data.advCols),
+        d => advanceRows(d.rows, run.data.only));
+      if (it.t === 'r') return tabStep(run, it, it.book.name + ' / ' + it.tab,
+        () => readDateColumns(it.book.id, it.tab, it.book.excel),
+        d => returnRows(d.days, run.data.only, it.from, it.to));
+
       const where = it.book.name + ' / ' + it.tab;
       await sleep(1100);
       let values;

@@ -9550,6 +9550,29 @@ app.get('/api/audit/header', async (req, res) => {
   }
 });
 
+// The workbooks behind a link some other page already holds: the advance sheet
+// (Advance payments) and the return sheet (Void invoices). Linked and changed
+// there, only read here.
+app.get('/api/audit/place', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const kind = String(req.query.kind || '');
+    const key = kind === 'advance' ? 'adv:root' : kind === 'return' ? 'void:root' : '';
+    if (!key) return res.status(400).json({ error: 'Not a sheet with a page of its own' });
+    const root = await getSetting(realmId, key, '');
+    if (!root) {
+      return res.status(400).json({ error: kind === 'advance'
+        ? 'Set the advance sheet in Advance payments first'
+        : 'Set the return sheet folder in Void invoices first' });
+    }
+    res.json({ books: await auditBooksAt(root) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/audit/pick', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -9565,7 +9588,7 @@ app.post('/api/audit/start', async (req, res) => {
   if (!realmId) return;
   try {
     const input = req.body.text != null
-      ? { invoices: parseAuditPasted(req.body.text), kinds: req.body.kinds }
+      ? { invoices: parseAuditPasted(req.body.text), kinds: req.body.kinds, places: req.body.places }
       : req.body;
     const id = startRead(req.desk, 'audit', auditRead(realmId, input));
     res.json({ ok: true, jobId: id });

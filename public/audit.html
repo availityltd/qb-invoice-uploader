@@ -62,6 +62,11 @@
   .tabsrow{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px 26px}
   .tabsrow label{border:1px solid var(--line);border-radius:20px;padding:3px 11px;font-size:11.5px;
     display:flex;align-items:center;gap:6px;margin:0;text-transform:none;letter-spacing:0;cursor:pointer}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0 14px}
+  .chips button{border:1px solid var(--line);background:#fff;border-radius:20px;
+    padding:5px 13px;font:inherit;font-size:12px;cursor:pointer;color:var(--ink)}
+  .chips button:hover{border-color:var(--qbo)}
+  .chips button.on{background:var(--qbo);border-color:var(--qbo);color:#fff;font-weight:600}
   .add{border:1px dashed var(--line);border-radius:9px;padding:16px 18px;margin-top:14px;background:#fff}
 
   .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:14px 0 8px}
@@ -394,9 +399,20 @@
   });
 
   /* ---------- 1. where to look ---------- */
-  var links = {}, known = {}, ticks = {}, openKind = '', books = {}, tabCache = {};
+  // CPR, advance and return sheets are linked on their own pages (Receive payments,
+  // Advance payments, Void invoices) and are searched here the way those pages
+  // search them: months for the CPR folders, workbooks and tabs for the other two.
+  // Issue and blogger sheets have no page of their own, so the admin links them
+  // here. What is chosen to search this time is each person's own, kept in this
+  // browser; the links are the company's.
+  var OWN = { cpr:1, advance:1, 'return':1 };
+  var MONTHS = ['', 'January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+  var links = {}, known = {}, ticks = {}, picks = {}, openKind = '', books = {}, tabCache = {}, tree = null;
   try { ticks = JSON.parse(localStorage.getItem('audit:ticks') || '{}') || {}; } catch(e){ ticks = {}; }
+  try { picks = JSON.parse(localStorage.getItem('audit:picks') || '{}') || {}; } catch(e){ picks = {}; }
   function saveTicks(){ try { localStorage.setItem('audit:ticks', JSON.stringify(ticks)); } catch(e){} }
+  function savePicks(){ try { localStorage.setItem('audit:picks', JSON.stringify(picks)); } catch(e){} }
 
   function loadSources(){
     return Promise.all([get('/api/audit/sources'), get('/api/audit/links')]).then(function(x){
@@ -412,30 +428,45 @@
 
   function staticOf(k){ return sources.filter(function(s){ return s.kind === k; }); }
 
+  var OWN_PAGE = { cpr:'Receive payments', advance:'Advance payments', 'return':'Void invoices' };
+
   function summary(k){
-    var l = links[k], bits = [];
-    if(l){
-      bits.push(l.books && l.books.length
+    var bits = [], st = staticOf(k), p = picks[k];
+    if(OWN[k]){
+      if(!known[k]) bits.push('Not linked yet - set it in ' + OWN_PAGE[k] + ' first');
+      else if(k === 'cpr') bits.push(p && p.months && p.months.length
+        ? p.months.map(function(m){ return MONTHS[m].slice(0, 3); }).join(', ') + ' ' + p.year
+        : 'Choose the months');
+      else if(k === 'advance') bits.push(p && p.books && p.books.length
+        ? p.books.length + (p.books.length === 1 ? ' workbook' : ' workbooks') : 'Choose the workbooks');
+      else bits.push(p && p.id ? p.name + (p.from || p.to ? ' &middot; ' + (p.from || '...') + ' to ' + (p.to || '...') : '')
+        : 'Choose the workbook');
+    } else {
+      var l = links[k];
+      if(l) bits.push(l.books && l.books.length
         ? l.books.length + (l.books.length === 1 ? ' workbook' : ' workbooks') +
           (l.cols ? ' &middot; order column "' + esc(l.cols.order) + '"' : ' &middot; columns not chosen')
         : 'linked - no workbook chosen yet');
     }
-    var st = staticOf(k);
     if(st.length) bits.push(st.length + (st.length === 1 ? ' CSV sheet' : ' CSV sheets') + ' attached');
     return bits.length ? bits.join(' &middot; ') : 'Nothing linked yet';
   }
   function ready(k){
-    var l = links[k];
-    return (l && l.books && l.books.length && l.cols) || staticOf(k).length;
+    var p = picks[k], l = links[k];
+    if(staticOf(k).length) return true;
+    if(OWN[k]) return !!(known[k] && p && ((p.months && p.months.length) || (p.books && p.books.length) || p.id));
+    return !!(l && l.books && l.books.length && l.cols);
   }
 
   function drawPlaces(){
     $('places').innerHTML = kinds.map(function(k){
       var on = ticks[k.key] === undefined ? !!ready(k.key) : !!ticks[k.key];
+      var own = !!OWN[k.key];
       return '<div class="place" data-k="' + k.key + '">' +
         '<div class="ph"><label><input type="checkbox" class="pk"' + (on ? ' checked' : '') + '> ' +
         esc(k.label) + '</label><span class="psum">' + summary(k.key) + '</span>' +
-        '<button class="pset admin-only">' + (openKind === k.key ? 'Close' : (links[k.key] ? 'Change' : 'Set up')) + '</button></div>' +
+        '<button class="pset' + (own ? '' : ' admin-only') + '">' +
+        (openKind === k.key ? 'Close' : own ? 'Choose' : (links[k.key] ? 'Change' : 'Set up')) + '</button></div>' +
         (openKind === k.key ? '<div class="pbody" id="pbody"></div>' : '') + '</div>';
     }).join('');
     document.querySelectorAll('.place').forEach(function(el){
@@ -457,19 +488,201 @@
     }).map(function(k){ return k.key; });
   }
 
+  function refreshSummary(k){
+    var ph = document.querySelector('.place[data-k="' + k + '"] .psum');
+    if(ph) ph.innerHTML = summary(k);
+    var cb = document.querySelector('.place[data-k="' + k + '"] .pk');
+    if(cb && ticks[k] === undefined) cb.checked = !!ready(k);
+  }
+  function tickOn(k){
+    ticks[k] = true; saveTicks();
+    var cb = document.querySelector('.place[data-k="' + k + '"] .pk'); if(cb) cb.checked = true;
+  }
+
   function openPlace(k){
+    if(k === 'cpr') return openCpr();
+    if(OWN[k]) return openOwnBooks(k);
+    return openLinked(k);
+  }
+
+  /* ----- the CPR folders: year, then months, as Find orders does it ----- */
+  function ensureTree(){
+    if(tree) return Promise.resolve(tree);
+    return get('/api/find/tree').then(function(d){ tree = d.companies || []; return tree; });
+  }
+
+  function openCpr(){
+    var box = $('pbody');
+    if(!known.cpr){ box.innerHTML = '<div class="msg bad">Set the Drive folder in Receive payments first.</div>'; return; }
+    box.innerHTML = '<div class="sub2">Reading the folders...</div>';
+    ensureTree().then(function(t){
+      var years = {};
+      t.forEach(function(c){ c.folders.forEach(function(f){ if(f.year) years[f.year] = 1; }); });
+      var ys = Object.keys(years).sort().reverse();
+      if(!ys.length){ box.innerHTML = '<div class="msg bad">No month folders were found in the CPR folder.</div>'; return; }
+      var p = picks.cpr || { year: +ys[0], months: [] };
+      if(ys.indexOf(String(p.year)) < 0) p = { year: +ys[0], months: [] };
+      picks.cpr = p;
+
+      box.innerHTML = '<div class="picks"><div><label>Year</label><select id="cYear">' +
+        ys.map(function(y){ return '<option' + (+y === p.year ? ' selected' : '') + '>' + y + '</option>'; }).join('') +
+        '</select></div></div><div class="lab">Months</div><div class="chips" id="cMonths"></div>' +
+        '<div class="row"><button id="cAll">Every month</button><button id="cNone">Clear</button></div>' +
+        '<div class="sub2" style="margin-top:10px">Every sheet in those months is searched, for every courier. ' +
+        'The columns are the ones remembered from Find orders.</div>';
+
+      function months(){
+        var have = {};
+        t.forEach(function(c){ c.folders.forEach(function(f){ if(f.year === p.year && f.month) have[f.month] = 1; }); });
+        return Object.keys(have).map(Number).sort(function(a, b){ return a - b; });
+      }
+      function chips(){
+        var list = months();
+        $('cMonths').innerHTML = list.length ? list.map(function(m){
+          return '<button data-m="' + m + '"' + (p.months.indexOf(m) >= 0 ? ' class="on"' : '') + '>' + MONTHS[m] + '</button>';
+        }).join('') : '<span class="sub2">Nothing filed under that year.</span>';
+        $('cMonths').querySelectorAll('button').forEach(function(b){
+          b.addEventListener('click', function(){
+            var m = +b.dataset.m, at = p.months.indexOf(m);
+            if(at >= 0) p.months.splice(at, 1); else p.months.push(m);
+            changed();
+          });
+        });
+      }
+      function changed(){
+        p.months.sort(function(a, b){ return a - b; });
+        picks.cpr = p; savePicks(); chips(); refreshSummary('cpr');
+        if(p.months.length) tickOn('cpr');
+      }
+      $('cYear').addEventListener('change', function(){ p.year = +$('cYear').value; p.months = []; changed(); });
+      $('cAll').addEventListener('click', function(){ p.months = months(); changed(); });
+      $('cNone').addEventListener('click', function(){ p.months = []; changed(); });
+      chips();
+    }).catch(function(e){ box.innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // the folders those months stand for, in every courier's folder
+  function cprFolders(){
+    var p = picks.cpr;
+    if(!p || !p.months || !p.months.length) return Promise.resolve([]);
+    return ensureTree().then(function(t){
+      var out = [];
+      t.forEach(function(c){
+        c.folders.forEach(function(f){
+          if(f.year === p.year && p.months.indexOf(f.month) >= 0) out.push({ id: f.id, company: c.company, name: f.name });
+        });
+      });
+      return out;
+    });
+  }
+
+  /* ----- a list of workbooks, each with its tabs ----- */
+  // `saved` is [{ id, tabs }] - what was chosen before; `radio` allows only one.
+  function renderBooks(area, list, saved, radio, onChange){
+    area.innerHTML = list.map(function(b, i){
+      var sv = saved.filter(function(x){ return x.id === b.id; })[0];
+      return '<div class="bk" data-i="' + i + '"><label><input type="' + (radio ? 'radio' : 'checkbox') +
+        '" name="bpick" class="bpick"' + (sv ? ' checked' : '') + '> ' + esc(b.name) + '</label>' +
+        (b.path ? '<span class="pth">' + esc(b.path) + '</span>' : '') +
+        '<button class="tb">' + (sv && sv.tabs ? sv.tabs.length + ' tabs' : 'All tabs') + '</button>' +
+        '<div class="tabsrow hide" style="flex-basis:100%"></div></div>';
+    }).join('');
+
+    area.querySelectorAll('.bk').forEach(function(row){
+      var b = list[+row.dataset.i];
+      var sv = saved.filter(function(x){ return x.id === b.id; })[0];
+      b.chosen = sv && sv.tabs ? sv.tabs.slice() : null;
+      row.querySelector('.tb').addEventListener('click', function(){
+        var tr = row.querySelector('.tabsrow');
+        if(!tr.classList.contains('hide')){ tr.classList.add('hide'); return; }
+        tr.classList.remove('hide');
+        tr.innerHTML = '<span class="sub2">Reading the tabs...</span>';
+        var have = tabCache[b.id] ? Promise.resolve(tabCache[b.id]) :
+          get('/api/audit/tabs?id=' + encodeURIComponent(b.id) + '&excel=' + (b.excel ? 1 : 0))
+            .then(function(d){ tabCache[b.id] = d.tabs; return d.tabs; });
+        have.then(function(tabs){
+          tr.innerHTML = tabs.map(function(t){
+            var on = !b.chosen || b.chosen.indexOf(t) >= 0;
+            return '<label><input type="checkbox" value="' + esc(t) + '"' + (on ? ' checked' : '') + '> ' + esc(t) + '</label>';
+          }).join('');
+          tr.querySelectorAll('input').forEach(function(inp){
+            inp.addEventListener('change', function(){
+              var all = [].slice.call(tr.querySelectorAll('input'));
+              var pick = all.filter(function(x){ return x.checked; }).map(function(x){ return x.value; });
+              b.chosen = pick.length === all.length ? null : pick;
+              row.querySelector('.tb').textContent = b.chosen ? b.chosen.length + ' tabs' : 'All tabs';
+              onChange();
+            });
+          });
+        }).catch(function(e){ tr.innerHTML = '<span class="off">' + esc(e.message) + '</span>'; });
+      });
+      row.querySelector('.bpick').addEventListener('change', onChange);
+    });
+  }
+  function chosenBooks(area, list){
+    var out = [];
+    area.querySelectorAll('.bk').forEach(function(row){
+      if(!row.querySelector('.bpick').checked) return;
+      var b = list[+row.dataset.i];
+      out.push({ id: b.id, name: b.name, excel: b.excel, tabs: b.chosen });
+    });
+    return out;
+  }
+
+  /* ----- the advance sheet and the return sheet ----- */
+  function openOwnBooks(k){
+    var box = $('pbody');
+    if(!known[k]){ box.innerHTML = '<div class="msg bad">Set it in ' + OWN_PAGE[k] + ' first.</div>'; return; }
+    box.innerHTML = '<div class="sub2">Reading what is there...</div>';
+    get('/api/audit/place?kind=' + k).then(function(d){
+      var list = d.books || [];
+      if(!list.length){ box.innerHTML = '<div class="msg bad">No sheet was found there.</div>'; return; }
+      var p = picks[k] || {};
+      var saved = k === 'return' ? (p.id ? [{ id: p.id, tabs: p.tabs }] : []) : (p.books || []);
+      box.innerHTML = '<div class="lab">' + (k === 'return' ? 'Return workbook' : 'Workbooks to search') + '</div>' +
+        '<div id="obk"></div>' +
+        (k === 'return' ? '<div class="picks" style="margin-top:12px"><div><label>From</label><input type="date" id="rFrom"></div>' +
+          '<div><label>To</label><input type="date" id="rTo"></div></div>' +
+          '<div class="sub2">Only the days in this range are searched. Leave both empty for every day.</div>' : '') +
+        '<div class="sub2" style="margin-top:10px">Read the way ' + OWN_PAGE[k] + ' reads it.</div>';
+      if(k === 'return'){ $('rFrom').value = p.from || ''; $('rTo').value = p.to || ''; }
+
+      function changed(){
+        var got = chosenBooks($('obk'), list);
+        if(k === 'return'){
+          var b = got[0];
+          picks[k] = b ? { id: b.id, name: b.name, excel: b.excel, tabs: b.tabs, from: $('rFrom').value, to: $('rTo').value } : {};
+        } else picks[k] = { books: got };
+        savePicks(); refreshSummary(k);
+        if(got.length) tickOn(k);
+      }
+      renderBooks($('obk'), list, saved, k === 'return', changed);
+      if(k === 'return'){ $('rFrom').addEventListener('change', changed); $('rTo').addEventListener('change', changed); }
+    }).catch(function(e){ box.innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>'; });
+  }
+
+  // what the page hands the server to search in, for the places ticked
+  function placesFor(where){
+    var out = {};
+    var p = Promise.resolve();
+    if(where.indexOf('cpr') >= 0) p = p.then(cprFolders).then(function(f){ out.cpr = { folders: f }; });
+    if(where.indexOf('advance') >= 0) out.advance = { books: (picks.advance && picks.advance.books) || [] };
+    if(where.indexOf('return') >= 0) out['return'] = picks['return'] || {};
+    return p.then(function(){ return out; });
+  }
+
+  /* ----- issue and blogger sheets: linked here, by the admin ----- */
+  function openLinked(k){
     var l = links[k], box = $('pbody');
     box.innerHTML =
       '<div class="lab">Link to the folder or sheet</div>' +
       '<div class="lnk"><input id="lnkIn" placeholder="https://drive.google.com/drive/folders/... or https://docs.google.com/spreadsheets/d/...">' +
       '<button class="solid" id="lnkSave">Save link</button>' +
-      (known[k] && !l ? '<button id="lnkUse">Use the one already saved on its own page</button>' : '') +
       (l ? '<button id="lnkDrop">Unlink</button>' : '') + '</div>' +
       '<div class="sub2" id="lnkNote"></div><div id="bkArea"></div>';
     if(l) $('lnkIn').value = l.root;
 
     $('lnkSave').addEventListener('click', function(){ saveLink(k, $('lnkIn').value); });
-    if($('lnkUse')) $('lnkUse').addEventListener('click', function(){ saveLink(k, known[k]); });
     if($('lnkDrop')) $('lnkDrop').addEventListener('click', function(){
       if(!confirm('Unlink this place? The sheet itself is not touched.')) return;
       post('/api/audit/link-remove', { kind: k }).then(function(){ openKind = ''; return loadSources(); })
@@ -495,26 +708,13 @@
     }).catch(function(e){ area.innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>'; });
   }
 
-  function savedBook(k, id){
-    var l = links[k];
-    return l && l.books ? l.books.filter(function(b){ return b.id === id; })[0] : null;
-  }
-
   function drawBooks(k){
     var list = books[k] || [], area = $('bkArea');
     if(!list.length){
       area.innerHTML = '<div class="msg bad">No sheet was found there. Check the link is shared with the app.</div>';
       return;
     }
-    area.innerHTML = '<div class="lab" style="margin-top:12px">Workbooks to search</div>' +
-      list.map(function(b, i){
-        var sv = savedBook(k, b.id);
-        return '<div class="bk" data-i="' + i + '"><label><input type="checkbox" class="bpick"' +
-          (sv ? ' checked' : '') + '> ' + esc(b.name) + '</label>' +
-          (b.path ? '<span class="pth">' + esc(b.path) + '</span>' : '') +
-          '<button class="tb">' + (sv && sv.tabs ? sv.tabs.length + ' tabs' : 'All tabs') + '</button>' +
-          '<div class="tabsrow hide" style="flex-basis:100%"></div></div>';
-      }).join('') +
+    area.innerHTML = '<div class="lab" style="margin-top:12px">Workbooks to search</div><div id="lbk"></div>' +
       '<div class="lab" style="margin-top:14px">Which columns</div>' +
       '<div class="picks"><div><label>Order number</label><select id="pcOrder"></select></div>' +
       '<div><label>Amount</label><select id="pcAmount"></select></div>' +
@@ -522,38 +722,8 @@
       '<div class="sub2" id="pcNote2" style="margin-bottom:10px"></div>' +
       '<div class="row"><button class="solid" id="pSave">Save this choice</button>' +
       '<span class="aside" id="pDone"></span></div>';
-
-    area.querySelectorAll('.bk').forEach(function(row){
-      var b = list[+row.dataset.i];
-      var sv = savedBook(k, b.id);
-      b.chosen = sv && sv.tabs ? sv.tabs.slice() : null;
-      row.querySelector('.tb').addEventListener('click', function(){
-        var tr = row.querySelector('.tabsrow');
-        if(!tr.classList.contains('hide')){ tr.classList.add('hide'); return; }
-        tr.classList.remove('hide');
-        tr.innerHTML = '<span class="sub2">Reading the tabs...</span>';
-        var have = tabCache[b.id] ? Promise.resolve(tabCache[b.id]) :
-          get('/api/audit/tabs?id=' + encodeURIComponent(b.id) + '&excel=' + (b.excel ? 1 : 0))
-            .then(function(d){ tabCache[b.id] = d.tabs; return d.tabs; });
-        have.then(function(tabs){
-          tr.innerHTML = tabs.map(function(t){
-            var on = !b.chosen || b.chosen.indexOf(t) >= 0;
-            return '<label><input type="checkbox" value="' + esc(t) + '"' + (on ? ' checked' : '') + '> ' + esc(t) + '</label>';
-          }).join('');
-          tr.querySelectorAll('input').forEach(function(inp){
-            inp.addEventListener('change', function(){
-              var all = [].slice.call(tr.querySelectorAll('input'));
-              var pick = all.filter(function(x){ return x.checked; }).map(function(x){ return x.value; });
-              b.chosen = pick.length === all.length ? null : pick;
-              row.querySelector('.tb').textContent = b.chosen ? b.chosen.length + ' tabs' : 'All tabs';
-              loadCols(k);
-            });
-          });
-        }).catch(function(e){ tr.innerHTML = '<span class="off">' + esc(e.message) + '</span>'; });
-      });
-      row.querySelector('.bpick').addEventListener('change', function(){ loadCols(k); });
-    });
-
+    var saved = (links[k] && links[k].books) || [];
+    renderBooks($('lbk'), list, saved, false, function(){ loadCols(k); });
     $('pSave').addEventListener('click', function(){ savePick(k); });
     loadCols(k);
   }
@@ -561,9 +731,7 @@
   // The columns are read off the first tab that will be searched.
   function loadCols(k){
     var list = books[k] || [], first = null;
-    document.querySelectorAll('#bkArea .bk').forEach(function(row){
-      if(!first && row.querySelector('.bpick').checked) first = list[+row.dataset.i];
-    });
+    chosenBooks($('lbk'), list).forEach(function(b){ if(!first) first = list.filter(function(x){ return x.id === b.id; })[0]; });
     var mem = links[k] && links[k].cols;
     function fill(header){
       var h = header.filter(Boolean);
@@ -598,25 +766,17 @@
   }
 
   function savePick(k){
-    var list = books[k] || [], out = [];
-    document.querySelectorAll('#bkArea .bk').forEach(function(row){
-      if(!row.querySelector('.bpick').checked) return;
-      var b = list[+row.dataset.i];
-      out.push({ id: b.id, name: b.name, excel: b.excel, tabs: b.chosen });
-    });
+    var out = chosenBooks($('lbk'), books[k] || []);
     if(!out.length){ $('pDone').textContent = 'Tick at least one workbook.'; return; }
     if(!$('pcOrder').value){ $('pDone').textContent = 'Choose the order number column.'; return; }
     post('/api/audit/pick', {
       kind: k, books: out,
       cols: { order: $('pcOrder').value, amount: $('pcAmount').value, note: $('pcNote').value }
     }).then(function(){
-      ticks[k] = true; saveTicks();
       return get('/api/audit/links').then(function(d){ links = d.links || {}; });
     }).then(function(){
       $('pDone').textContent = 'Saved.';
-      var ph = document.querySelector('.place[data-k="' + k + '"] .psum');
-      if(ph) ph.innerHTML = summary(k);
-      var cb = document.querySelector('.place[data-k="' + k + '"] .pk'); if(cb) cb.checked = true;
+      refreshSummary(k); tickOn(k);
     }).catch(function(e){ $('pDone').textContent = e.message; });
   }
 
@@ -754,7 +914,10 @@
     if(!where.length){ say('bad', 'Tick at least one place to look in.'); return; }
     body.kinds = where;
     say('', '');
-    post('/api/audit/start', body).then(function(){
+    placesFor(where).then(function(places){
+      body.places = places;
+      return post('/api/audit/start', body);
+    }).then(function(){
       since = 0; result = null; filter = '';
       $('log').innerHTML = '';
       $('stepOut').classList.add('hide');
