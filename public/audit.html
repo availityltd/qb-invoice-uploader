@@ -136,8 +136,8 @@
           </div>
           <div id="places"></div>
 
-          <span class="fold" id="foldAdd">Or attach a CSV / pasted list instead</span>
-          <div id="addWrap" class="hide">
+          <span class="fold admin-only" id="foldAdd">Or attach a CSV / pasted list instead</span>
+          <div id="addWrap" class="hide admin-only">
           <div id="srcList" style="margin-top:12px"></div>
 
           <div class="add" id="addBox">
@@ -435,7 +435,7 @@
       return '<div class="place" data-k="' + k.key + '">' +
         '<div class="ph"><label><input type="checkbox" class="pk"' + (on ? ' checked' : '') + '> ' +
         esc(k.label) + '</label><span class="psum">' + summary(k.key) + '</span>' +
-        '<button class="pset">' + (openKind === k.key ? 'Close' : (links[k.key] ? 'Change' : 'Set up')) + '</button></div>' +
+        '<button class="pset admin-only">' + (openKind === k.key ? 'Close' : (links[k.key] ? 'Change' : 'Set up')) + '</button></div>' +
         (openKind === k.key ? '<div class="pbody" id="pbody"></div>' : '') + '</div>';
     }).join('');
     document.querySelectorAll('.place').forEach(function(el){
@@ -462,9 +462,9 @@
     box.innerHTML =
       '<div class="lab">Link to the folder or sheet</div>' +
       '<div class="lnk"><input id="lnkIn" placeholder="https://drive.google.com/drive/folders/... or https://docs.google.com/spreadsheets/d/...">' +
-      '<button class="solid" id="lnkSave" data-need="audit">Save link</button>' +
-      (known[k] && !l ? '<button id="lnkUse" data-need="audit">Use the one already saved on its own page</button>' : '') +
-      (l ? '<button id="lnkDrop" data-need="audit">Unlink</button>' : '') + '</div>' +
+      '<button class="solid" id="lnkSave">Save link</button>' +
+      (known[k] && !l ? '<button id="lnkUse">Use the one already saved on its own page</button>' : '') +
+      (l ? '<button id="lnkDrop">Unlink</button>' : '') + '</div>' +
       '<div class="sub2" id="lnkNote"></div><div id="bkArea"></div>';
     if(l) $('lnkIn').value = l.root;
 
@@ -520,7 +520,7 @@
       '<div><label>Amount</label><select id="pcAmount"></select></div>' +
       '<div><label>Reason / note</label><select id="pcNote"></select></div></div>' +
       '<div class="sub2" id="pcNote2" style="margin-bottom:10px"></div>' +
-      '<div class="row"><button class="solid" id="pSave" data-need="audit">Save this choice</button>' +
+      '<div class="row"><button class="solid" id="pSave">Save this choice</button>' +
       '<span class="aside" id="pDone"></span></div>';
 
     area.querySelectorAll('.bk').forEach(function(row){
@@ -629,7 +629,7 @@
       return '<div class="src"><span class="k">' + esc(s.label) + '</span>' +
         '<span class="n">' + esc(s.name) + ' &middot; ' + money(s.orders) + ' orders' +
         (s.withAmount ? ' &middot; ' + money(s.total) : '') + '</span>' +
-        '<button data-rm="' + esc(s.id) + '" data-need="audit">Remove</button></div>';
+        '<button class="admin-only" data-rm="' + esc(s.id) + '">Remove</button></div>';
     }).join('');
     document.querySelectorAll('[data-rm]').forEach(function(b){
       b.addEventListener('click', function(){

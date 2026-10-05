@@ -809,10 +809,9 @@ const RIGHT_GROUPS = [
             '/api/courier/keeper-now', '/api/courier/backfill-clear',
             '/api/courier/backfill-resume', '/api/receipts/login', '/api/receipts/logout'] },
 
-  { key: 'audit', area: 'sales', label: 'Open invoice audit sheets',
-    what: 'Attach or remove the sheets open invoices are checked against',
-    paths: ['/api/audit/source', '/api/audit/source-remove', '/api/audit/link',
-            '/api/audit/link-remove', '/api/audit/pick'] },
+  // The links to the audit's sheets (/api/audit/link, /link-remove, /pick, /source,
+  // /source-remove) are in no group on purpose: only the admin attaches, changes or
+  // removes them, and it cannot be handed out.
 
   { key: 'settings', area: 'items', label: 'SKU mappings',
     what: 'Remembered SKU-to-item matches',
@@ -9444,8 +9443,8 @@ async function resetNonAdminAccess() {
 // Why are these invoices still open? The sheets that answer it (bloggers, issues,
 // advances, CPRs, returns) are attached once and kept for the company; an audit
 // looks the open invoices up in all of them. Reading only - nothing is written to
-// QuickBooks - so the look-up is open to everybody, and attaching a sheet is a job
-// that can be handed out ('audit').
+// QuickBooks - so the look-up is open to everybody, and attaching, changing or
+// removing a sheet is the admin's alone.
 app.get('/api/audit/sources', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
