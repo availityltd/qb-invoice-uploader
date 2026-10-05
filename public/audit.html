@@ -62,6 +62,7 @@
   .tabsrow{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px 26px}
   .tabsrow label{border:1px solid var(--line);border-radius:20px;padding:3px 11px;font-size:11.5px;
     display:flex;align-items:center;gap:6px;margin:0;text-transform:none;letter-spacing:0;cursor:pointer}
+  html.as-admin .user-only{display:none}
   .chips{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0 14px}
   .chips button{border:1px solid var(--line);background:#fff;border-radius:20px;
     padding:5px 13px;font:inherit;font-size:12px;cursor:pointer;color:var(--ink)}
@@ -116,7 +117,7 @@
     <div class="topline">
       <div>
         <h1>Open invoice audit</h1>
-        <div class="sub">Why is an invoice still open? Looked up in the sheets you attach.</div>
+        <div class="sub">Why is an invoice still open? Looked up in the sheets you choose.</div>
       </div>
     </div>
 
@@ -125,7 +126,7 @@
       <div id="gate" class="gate hide">
         <img src="/logo.svg" alt="">
         <h2>Connect your QuickBooks company</h2>
-        <p>The attached sheets are kept per company.</p>
+        <p>The linked sheets are kept per company.</p>
         <button class="solid" id="btnConnect">Connect to QuickBooks</button>
       </div>
 
@@ -140,47 +141,6 @@
             every time, so you only tick what you want searched this time.
           </div>
           <div id="places"></div>
-
-          <span class="fold admin-only" id="foldAdd">Or attach a CSV / pasted list instead</span>
-          <div id="addWrap" class="hide admin-only">
-          <div id="srcList" style="margin-top:12px"></div>
-
-          <div class="add" id="addBox">
-            <div class="row" style="margin-bottom:12px">
-              <div style="min-width:220px">
-                <label class="lab">Which sheet</label>
-                <select id="aKind"></select>
-              </div>
-              <div style="flex:1;min-width:200px">
-                <label class="lab">Name (optional)</label>
-                <input type="text" id="aName" placeholder="e.g. Blogger orders - September">
-              </div>
-            </div>
-            <div class="tabs" id="aTabs">
-              <button class="on" data-p="file">Upload CSV</button>
-              <button data-p="paste">Paste orders</button>
-            </div>
-            <div class="pane on" id="aFile">
-              <input type="file" id="aFileIn" accept=".csv,text/csv">
-              <div id="aCols" class="hide" style="margin-top:14px">
-                <div class="picks">
-                  <div><label>Order number column</label><select id="cOrder"></select></div>
-                  <div><label>Amount column</label><select id="cAmount"></select></div>
-                  <div><label>Reason / note column</label><select id="cNote"></select></div>
-                </div>
-                <div class="peek" id="aPeek"></div>
-              </div>
-            </div>
-            <div class="pane" id="aPaste">
-              <textarea class="nums" id="aText" placeholder="91349172 1500&#10;91349171 2300&#10;91349170"></textarea>
-              <div class="sub2" style="margin-top:6px">One order per line, the amount after it (optional).</div>
-            </div>
-            <div class="row" style="margin-top:14px">
-              <button class="solid" id="btnAttach">Attach this sheet</button>
-              <span class="aside" id="attachNote"></span>
-            </div>
-          </div>
-          </div>
         </div>
 
         <!-- ---------- 2. the invoices ---------- -->
@@ -262,8 +222,8 @@
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
 
-  var kinds = [], sources = [];
-  var aCsv = null, iCsv = null;     // { header, rows }
+  var kinds = [];
+  var iCsv = null;                  // { header, rows }
   var result = null, filter = '';
   var since = 0, timer = null;
 
@@ -352,17 +312,6 @@
   var RE_AMT   = /amount|total|cod|price|paid|advance|balance|value/i;
   var RE_NOTE  = /reason|issue|note|remark|status|comment|detail|type/i;
 
-  // the columns this kind of sheet used last time, found again by their name
-  function rememberedFor(kind){
-    for(var i = sources.length - 1; i >= 0; i--){
-      if(sources[i].kind === kind && sources[i].cols) return sources[i].cols;
-    }
-    return null;
-  }
-  function byName(header, name){
-    if(!name) return -1;
-    return header.indexOf(name);
-  }
   function peekOf(csv, cols){
     var r = csv.rows[0] || [];
     return 'First row reads: order ' + (cols.o >= 0 ? (r[cols.o] || '-') : '-') +
@@ -381,7 +330,6 @@
       });
     });
   }
-  wireTabs('aTabs', { file:'aFile', paste:'aPaste' });
   wireTabs('iTabs', { qb:'iqb', paste:'ipaste', file:'ifile' });
   function tabOf(id){ return document.querySelector('#' + id + ' button.on').dataset.p; }
 
@@ -415,23 +363,16 @@
   function savePicks(){ try { localStorage.setItem('audit:picks', JSON.stringify(picks)); } catch(e){} }
 
   function loadSources(){
-    return Promise.all([get('/api/audit/sources'), get('/api/audit/links')]).then(function(x){
-      kinds = x[0].kinds; sources = x[0].sources;
-      links = x[1].links || {}; known = x[1].known || {};
-      $('aKind').innerHTML = kinds.map(function(k){
-        return '<option value="' + esc(k.key) + '">' + esc(k.label) + '</option>';
-      }).join('');
-      drawSources();
+    return get('/api/audit/links').then(function(x){
+      kinds = x.kinds; links = x.links || {}; known = x.known || {};
       drawPlaces();
     }).catch(function(e){ say('bad', esc(e.message)); });
   }
 
-  function staticOf(k){ return sources.filter(function(s){ return s.kind === k; }); }
-
   var OWN_PAGE = { cpr:'Receive payments', advance:'Advance payments', 'return':'Void invoices' };
 
   function summary(k){
-    var bits = [], st = staticOf(k), p = picks[k];
+    var bits = [], p = picks[k];
     if(OWN[k]){
       if(!known[k]) bits.push('Not linked yet - set it in ' + OWN_PAGE[k] + ' first');
       else if(k === 'cpr') bits.push(p && p.months && p.months.length
@@ -443,30 +384,29 @@
         : 'Choose the workbook');
     } else {
       var l = links[k];
-      if(l) bits.push(l.books && l.books.length
-        ? l.books.length + (l.books.length === 1 ? ' workbook' : ' workbooks') +
-          (l.cols ? ' &middot; order column "' + esc(l.cols.order) + '"' : ' &middot; columns not chosen')
-        : 'linked - no workbook chosen yet');
+      if(!l) bits.push('Not linked yet - the admin links it');
+      else if(!l.cols) bits.push('Linked - the admin has not chosen the columns yet');
+      else {
+        var n = (p && p.books && p.books.length) || (l.books && l.books.length) || 0;
+        bits.push(n ? n + (n === 1 ? ' workbook' : ' workbooks') + ' &middot; order column "' + esc(l.cols.order) + '"'
+          : 'Choose the workbooks');
+      }
     }
-    if(st.length) bits.push(st.length + (st.length === 1 ? ' CSV sheet' : ' CSV sheets') + ' attached');
-    return bits.length ? bits.join(' &middot; ') : 'Nothing linked yet';
+    return bits.join(' &middot; ');
   }
   function ready(k){
     var p = picks[k], l = links[k];
-    if(staticOf(k).length) return true;
     if(OWN[k]) return !!(known[k] && p && ((p.months && p.months.length) || (p.books && p.books.length) || p.id));
-    return !!(l && l.books && l.books.length && l.cols);
+    return !!(l && l.cols && ((p && p.books && p.books.length) || (l.books && l.books.length)));
   }
 
   function drawPlaces(){
     $('places').innerHTML = kinds.map(function(k){
       var on = ticks[k.key] === undefined ? !!ready(k.key) : !!ticks[k.key];
-      var own = !!OWN[k.key];
       return '<div class="place" data-k="' + k.key + '">' +
         '<div class="ph"><label><input type="checkbox" class="pk"' + (on ? ' checked' : '') + '> ' +
         esc(k.label) + '</label><span class="psum">' + summary(k.key) + '</span>' +
-        '<button class="pset' + (own ? '' : ' admin-only') + '">' +
-        (openKind === k.key ? 'Close' : own ? 'Choose' : (links[k.key] ? 'Change' : 'Set up')) + '</button></div>' +
+        '<button class="pset">' + (openKind === k.key ? 'Close' : 'Choose') + '</button></div>' +
         (openKind === k.key ? '<div class="pbody" id="pbody"></div>' : '') + '</div>';
     }).join('');
     document.querySelectorAll('.place').forEach(function(el){
@@ -668,32 +608,39 @@
     if(where.indexOf('cpr') >= 0) p = p.then(cprFolders).then(function(f){ out.cpr = { folders: f }; });
     if(where.indexOf('advance') >= 0) out.advance = { books: (picks.advance && picks.advance.books) || [] };
     if(where.indexOf('return') >= 0) out['return'] = picks['return'] || {};
+    ['issue', 'blogger'].forEach(function(k){
+      if(where.indexOf(k) >= 0 && picks[k] && picks[k].books && picks[k].books.length) out[k] = { books: picks[k].books };
+    });
     return p.then(function(){ return out; });
   }
 
   /* ----- issue and blogger sheets: linked here, by the admin ----- */
+  // The workbooks to search this time are everyone's to choose; the link and the
+  // columns are the admin's, and only the admin is shown them.
   function openLinked(k){
     var l = links[k], box = $('pbody');
     box.innerHTML =
-      '<div class="lab">Link to the folder or sheet</div>' +
+      '<div class="admin-only"><div class="lab">Link to the folder or sheet</div>' +
       '<div class="lnk"><input id="lnkIn" placeholder="https://drive.google.com/drive/folders/... or https://docs.google.com/spreadsheets/d/...">' +
       '<button class="solid" id="lnkSave">Save link</button>' +
       (l ? '<button id="lnkDrop">Unlink</button>' : '') + '</div>' +
-      '<div class="sub2" id="lnkNote"></div><div id="bkArea"></div>';
+      '<div class="sub2" id="lnkNote"></div></div><div id="bkArea"></div>';
     if(l) $('lnkIn').value = l.root;
 
     $('lnkSave').addEventListener('click', function(){ saveLink(k, $('lnkIn').value); });
     if($('lnkDrop')) $('lnkDrop').addEventListener('click', function(){
       if(!confirm('Unlink this place? The sheet itself is not touched.')) return;
-      post('/api/audit/link-remove', { kind: k }).then(function(){ openKind = ''; return loadSources(); })
-        .catch(function(e){ say('bad', esc(e.message)); });
+      post('/api/audit/link-remove', { kind: k }).then(function(){
+        delete picks[k]; savePicks(); openKind = ''; return loadSources();
+      }).catch(function(e){ say('bad', esc(e.message)); });
     });
     if(l) loadBooks(k);
+    else $('bkArea').innerHTML = '<div class="msg bad user-only">Not linked yet - ask the admin to link it.</div>';
   }
 
   function saveLink(k, link){
     post('/api/audit/link', { kind: k, link: link }).then(function(){
-      delete books[k];
+      delete books[k]; delete picks[k]; savePicks();
       return loadSources();
     }).then(function(){ if(openKind === k) openPlace(k); })
       .catch(function(e){ if($('lnkNote')) $('lnkNote').textContent = e.message; else say('bad', esc(e.message)); });
@@ -715,21 +662,30 @@
       return;
     }
     area.innerHTML = '<div class="lab" style="margin-top:12px">Workbooks to search</div><div id="lbk"></div>' +
-      '<div class="lab" style="margin-top:14px">Which columns</div>' +
+      '<div class="admin-only"><div class="lab" style="margin-top:14px">Which columns</div>' +
       '<div class="picks"><div><label>Order number</label><select id="pcOrder"></select></div>' +
       '<div><label>Amount</label><select id="pcAmount"></select></div>' +
       '<div><label>Reason / note</label><select id="pcNote"></select></div></div>' +
       '<div class="sub2" id="pcNote2" style="margin-bottom:10px"></div>' +
-      '<div class="row"><button class="solid" id="pSave">Save this choice</button>' +
-      '<span class="aside" id="pDone"></span></div>';
-    var saved = (links[k] && links[k].books) || [];
-    renderBooks($('lbk'), list, saved, false, function(){ loadCols(k); });
+      '<div class="row"><button class="solid" id="pSave">Save the columns</button>' +
+      '<span class="aside" id="pDone"></span></div></div>';
+
+    var p = picks[k];
+    var saved = p && p.books ? p.books : ((links[k] && links[k].books) || []);
+    function changed(){
+      var got = chosenBooks($('lbk'), list);
+      picks[k] = { books: got }; savePicks(); refreshSummary(k);
+      if(got.length) tickOn(k);
+      loadCols(k);
+    }
+    renderBooks($('lbk'), list, saved, false, changed);
     $('pSave').addEventListener('click', function(){ savePick(k); });
     loadCols(k);
   }
 
   // The columns are read off the first tab that will be searched.
   function loadCols(k){
+    if(!$('pcOrder')) return;                       // only the admin has them
     var list = books[k] || [], first = null;
     chosenBooks($('lbk'), list).forEach(function(b){ if(!first) first = list.filter(function(x){ return x.id === b.id; })[0]; });
     var mem = links[k] && links[k].cols;
@@ -779,93 +735,6 @@
       refreshSummary(k); tickOn(k);
     }).catch(function(e){ $('pDone').textContent = e.message; });
   }
-
-  function drawSources(){
-    if(!sources.length){
-      $('srcList').innerHTML = '<div class="sub2" style="padding:6px 0">No CSV sheet is attached.</div>';
-      return;
-    }
-    $('srcList').innerHTML = sources.map(function(s){
-      return '<div class="src"><span class="k">' + esc(s.label) + '</span>' +
-        '<span class="n">' + esc(s.name) + ' &middot; ' + money(s.orders) + ' orders' +
-        (s.withAmount ? ' &middot; ' + money(s.total) : '') + '</span>' +
-        '<button class="admin-only" data-rm="' + esc(s.id) + '">Remove</button></div>';
-    }).join('');
-    document.querySelectorAll('[data-rm]').forEach(function(b){
-      b.addEventListener('click', function(){
-        if(!confirm('Take this sheet away? Past results are not changed.')) return;
-        post('/api/audit/source-remove', { id: b.dataset.rm }).then(loadSources)
-          .catch(function(e){ say('bad', esc(e.message)); });
-      });
-    });
-  }
-
-  $('foldAdd').addEventListener('click', function(){
-    var h = $('addWrap').classList.toggle('hide');
-    $('foldAdd').textContent = h ? 'Or attach a CSV / pasted list instead' : 'Hide the CSV / pasted list';
-  });
-
-  function colsOfAttach(){
-    var h = aCsv.header;
-    return {
-      order: h[+$('cOrder').value] || '',
-      amount: +$('cAmount').value >= 0 ? (h[+$('cAmount').value] || '') : '',
-      note: +$('cNote').value >= 0 ? (h[+$('cNote').value] || '') : ''
-    };
-  }
-  function showAttachPeek(){
-    if(!aCsv) return;
-    $('aPeek').textContent = peekOf(aCsv, { o:+$('cOrder').value, a:+$('cAmount').value, n:+$('cNote').value });
-  }
-  ['cOrder','cAmount','cNote'].forEach(function(id){ $(id).addEventListener('change', showAttachPeek); });
-
-  function setupAttachColumns(){
-    if(!aCsv) return;
-    var h = aCsv.header, mem = rememberedFor($('aKind').value);
-    var o = mem ? byName(h, mem.order) : -1; if(o < 0) o = Math.max(0, guess(h, RE_ORDER));
-    var a = mem && mem.amount ? byName(h, mem.amount) : -1; if(a < 0) a = guess(h, RE_AMT, [o]);
-    var n = mem && mem.note ? byName(h, mem.note) : -1; if(n < 0) n = guess(h, RE_NOTE, [o, a]);
-    fillSelect($('cOrder'), h, o, false);
-    fillSelect($('cAmount'), h, a, true);
-    fillSelect($('cNote'), h, n, true);
-    $('aCols').classList.remove('hide');
-    showAttachPeek();
-  }
-  $('aKind').addEventListener('change', setupAttachColumns);
-
-  $('aFileIn').addEventListener('change', function(){
-    var f = $('aFileIn').files[0];
-    aCsv = null; $('aCols').classList.add('hide');
-    if(!f) return;
-    if(!$('aName').value) $('aName').value = f.name.replace(/\.csv$/i, '');
-    readCsv(f, function(c){
-      if(!c){ say('bad', 'That file has no rows to read.'); return; }
-      aCsv = c; setupAttachColumns();
-    });
-  });
-
-  $('btnAttach').addEventListener('click', function(){
-    var body = { kind: $('aKind').value, name: $('aName').value };
-    if(tabOf('aTabs') === 'paste'){
-      body.text = $('aText').value;
-      if(!body.text.trim()){ say('bad', 'Paste some order numbers first.'); return; }
-    } else {
-      if(!aCsv){ say('bad', 'Choose a CSV file first.'); return; }
-      var o = +$('cOrder').value, a = +$('cAmount').value, n = +$('cNote').value;
-      body.cols = colsOfAttach();
-      body.rows = aCsv.rows.map(function(r){
-        return [r[o] || '', a >= 0 ? (r[a] || '') : '', n >= 0 ? (r[n] || '') : ''];
-      });
-    }
-    $('btnAttach').disabled = true; $('attachNote').textContent = 'Attaching...';
-    post('/api/audit/source', body).then(function(d){
-      $('attachNote').textContent = 'Attached: ' + money(d.source.orders) + ' orders.';
-      $('aText').value = ''; $('aFileIn').value = ''; $('aName').value = '';
-      aCsv = null; $('aCols').classList.add('hide');
-      return loadSources();
-    }).catch(function(e){ $('attachNote').textContent = ''; say('bad', esc(e.message)); })
-      .then(function(){ $('btnAttach').disabled = false; });
-  });
 
   /* ---------- 2. the invoices ---------- */
   $('iText').addEventListener('input', function(){

@@ -29,16 +29,15 @@ export const KINDS = [
   { key: 'issue',    label: 'Issue (damage / replace)' },
   { key: 'blogger',  label: 'Blogger order' }
 ];
+// the three that are linked and read by a page of their own
+const OWN = ['cpr', 'advance', 'return'];
 const RANK = new Map(KINDS.map((k, i) => [k.key, i]));
 const LABEL = new Map(KINDS.map(k => [k.key, k.label]));
 
 // the sheet and QuickBooks are said to agree within this much, as everywhere else
 const SAME = 10;
 
-const KEY = 'audit:sources';
-const MAX_ROWS = 60000;
-
-/* ==================== the sources ==================== */
+/* ==================== reading a sheet ==================== */
 
 // One line of a sheet - [order, amount, note] - as the rows it stands for. `only`
 // is the set of order numbers anyone is asking about; a live sheet is long and
@@ -57,59 +56,6 @@ function rowsOf(cell, only) {
     if (d && (!only || only.has(d))) out.push({ d, a: amount, n: note });
   });
   return out;
-}
-
-export async function listSources(realmId) {
-  const all = (await getSetting(realmId, KEY, [])) || [];
-  return all;
-}
-
-// what the page is shown: everything but the rows themselves
-export function describe(src) {
-  return {
-    id: src.id, kind: src.kind, label: LABEL.get(src.kind) || src.kind,
-    name: src.name, orders: src.rows.length, withAmount: src.rows.filter(r => r.a != null).length,
-    total: Math.round(src.rows.reduce((t, r) => t + (r.a || 0), 0)),
-    cols: src.cols || null, at: src.at
-  };
-}
-
-// `rows` arrive as [order, amount, note] from either a CSV or a paste box
-export async function addSource(realmId, body) {
-  const kind = String(body.kind || '');
-  if (!RANK.has(kind)) throw new Error('Say which sheet this is');
-  const name = String(body.name || '').trim().slice(0, 120) || LABEL.get(kind);
-  const raw = Array.isArray(body.rows) ? body.rows : [];
-
-  const rows = [];
-  raw.forEach(r => rowsOf(r, null).forEach(x => rows.push(x)));
-  if (!rows.length) throw new Error('No order numbers were found in what was sent');
-
-  const all = await listSources(realmId);
-  const held = all.reduce((t, s) => t + s.rows.length, 0);
-  if (held + rows.length > MAX_ROWS) {
-    throw new Error('That is more than the ' + MAX_ROWS + ' rows kept at once - remove an older sheet first');
-  }
-
-  const src = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    kind, name, rows,
-    cols: body.cols && typeof body.cols === 'object' ? {
-      order: String(body.cols.order || ''), amount: String(body.cols.amount || ''),
-      note: String(body.cols.note || '')
-    } : null,
-    at: new Date().toISOString()
-  };
-  all.push(src);
-  await setSetting(realmId, KEY, all);
-  return describe(src);
-}
-
-export async function removeSource(realmId, id) {
-  const all = await listSources(realmId);
-  const left = all.filter(s => s.id !== id);
-  if (left.length === all.length) throw new Error('That sheet is not there any more');
-  await setSetting(realmId, KEY, left);
 }
 
 /* ==================== the invoices to audit ==================== */
@@ -455,7 +401,6 @@ export function auditRead(realmId, input) {
     steps: 0,
 
     async plan(run) {
-      const stat = (await listSources(realmId)).filter(s => kinds.includes(s.kind));
       const links = await getLinks(realmId);
       const queue = [];
 
@@ -505,21 +450,24 @@ export function auditRead(realmId, input) {
       }
 
       for (const kind of kinds) {
+        if (OWN.includes(kind)) continue;
         const l = links[kind];
-        if (!l || !l.books || !l.books.length) continue;
-        if (!l.cols) throw new Error('Say which columns hold the order number for "' + LABEL.get(kind) + '"');
-        for (const b of l.books) {
+        if (!l) throw new Error('"' + LABEL.get(kind) + '" is not linked yet - the admin links it');
+        const mine = places[kind] && places[kind].books;
+        const chosen = mine && mine.length ? mine : (l.books || []);
+        if (!chosen.length) throw new Error('Choose the workbooks to search for "' + LABEL.get(kind) + '"');
+        if (!l.cols) throw new Error('The admin has not said which columns hold the order number for "' + LABEL.get(kind) + '"');
+        for (const b of chosen) {
           const tabs = b.tabs && b.tabs.length ? b.tabs
             : await patiently(() => tabTitles(b.id, b.excel), () => run.stop);
           tabs.forEach(tab => queue.push({ t: 's', kind, book: b, tab, cols: l.cols }));
         }
       }
-      if (!stat.length && !queue.some(q => q.t !== 'w' && q.t !== 'g')) {
+      if (!queue.some(q => q.t !== 'w' && q.t !== 'g')) {
         throw new Error('Nothing is chosen to search in the places you ticked');
       }
 
       run.data.queue = queue;
-      run.data.stat = stat;
       run.data.live = [];
       run.data.got = [];
       run.data.only = null;
@@ -572,7 +520,7 @@ export function auditRead(realmId, input) {
     },
 
     async finish(run) {
-      const res = audit(run.data.got, run.data.stat.concat(run.data.live));
+      const res = audit(run.data.got, run.data.live);
       res.sources = kinds.map(k => LABEL.get(k));
       res.fromBooks = fromBooks;
       res.partial = run.cursor < (run.steps || 0);

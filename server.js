@@ -809,8 +809,7 @@ const RIGHT_GROUPS = [
             '/api/courier/keeper-now', '/api/courier/backfill-clear',
             '/api/courier/backfill-resume', '/api/receipts/login', '/api/receipts/logout'] },
 
-  // The links to the audit's sheets (/api/audit/link, /link-remove, /pick, /source,
-  // /source-remove) are in no group on purpose: only the admin attaches, changes or
+  // The links to the audit's sheets (/api/audit/link, /link-remove, /pick) are in no group on purpose: only the admin attaches, changes or
   // removes them, and it cannot be handed out.
 
   { key: 'settings', area: 'items', label: 'SKU mappings',
@@ -7541,8 +7540,7 @@ import {
 } from './voidscan.js';
 import { startRead, stopRead, resumeRead, clearRead, readSnapshot } from './reads.js';
 import {
-  KINDS as AUDIT_KINDS, listSources as listAuditSources, describe as describeAuditSource,
-  addSource as addAuditSource, removeSource as removeAuditSource,
+  KINDS as AUDIT_KINDS,
   parsePasted as parseAuditPasted, auditRead,
   getLinks as getAuditLinks, saveLink as saveAuditLink, dropLink as dropAuditLink,
   booksAt as auditBooksAt, tabTitles as auditTabTitles, savePick as saveAuditPick,
@@ -9445,38 +9443,6 @@ async function resetNonAdminAccess() {
 // looks the open invoices up in all of them. Reading only - nothing is written to
 // QuickBooks - so the look-up is open to everybody, and attaching, changing or
 // removing a sheet is the admin's alone.
-app.get('/api/audit/sources', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-  res.setHeader('Cache-Control', 'no-store');
-  const all = await listAuditSources(realmId);
-  res.json({ kinds: AUDIT_KINDS, sources: all.map(describeAuditSource) });
-});
-
-app.post('/api/audit/source', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-  try {
-    const rows = req.body.text != null
-      ? parseAuditPasted(req.body.text).map(x => [x.doc, x.amount == null ? '' : x.amount, ''])
-      : req.body.rows;
-    res.json({ ok: true, source: await addAuditSource(realmId, { ...req.body, rows }) });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-app.post('/api/audit/source-remove', async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-  try {
-    await removeAuditSource(realmId, String(req.body.id || ''));
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(404).json({ error: e.message });
-  }
-});
-
 // Where each kind of sheet lives in Google Drive: a folder or one sheet, linked once
 // the way Receive payments and Advance payments do it. The pages that already keep
 // a link (CPR, advance, return) offer theirs as the starting point.
@@ -9486,6 +9452,7 @@ app.get('/api/audit/links', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
     res.json({
+      kinds: AUDIT_KINDS,
       links: await getAuditLinks(realmId),
       known: {
         cpr: await getSetting(realmId, 'cpr:root', ''),
