@@ -811,7 +811,8 @@ const RIGHT_GROUPS = [
 
   { key: 'audit', area: 'sales', label: 'Open invoice audit sheets',
     what: 'Attach or remove the sheets open invoices are checked against',
-    paths: ['/api/audit/source', '/api/audit/source-remove'] },
+    paths: ['/api/audit/source', '/api/audit/source-remove', '/api/audit/link',
+            '/api/audit/link-remove', '/api/audit/pick'] },
 
   { key: 'settings', area: 'items', label: 'SKU mappings',
     what: 'Remembered SKU-to-item matches',
@@ -7543,7 +7544,10 @@ import { startRead, stopRead, resumeRead, clearRead, readSnapshot } from './read
 import {
   KINDS as AUDIT_KINDS, listSources as listAuditSources, describe as describeAuditSource,
   addSource as addAuditSource, removeSource as removeAuditSource,
-  parsePasted as parseAuditPasted, auditRead
+  parsePasted as parseAuditPasted, auditRead,
+  getLinks as getAuditLinks, saveLink as saveAuditLink, dropLink as dropAuditLink,
+  booksAt as auditBooksAt, tabTitles as auditTabTitles, savePick as saveAuditPick,
+  headerOf as auditHeaderOf
 } from './audit.js';
 
 // Save (or replace) the portal sign-in for one courier account. The password
@@ -9474,12 +9478,95 @@ app.post('/api/audit/source-remove', async (req, res) => {
   }
 });
 
+// Where each kind of sheet lives in Google Drive: a folder or one sheet, linked once
+// the way Receive payments and Advance payments do it. The pages that already keep
+// a link (CPR, advance, return) offer theirs as the starting point.
+app.get('/api/audit/links', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      links: await getAuditLinks(realmId),
+      known: {
+        cpr: await getSetting(realmId, 'cpr:root', ''),
+        advance: await getSetting(realmId, 'adv:root', ''),
+        return: await getSetting(realmId, 'void:root', '')
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/audit/link', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.json({ ok: true, link: await saveAuditLink(realmId, String(req.body.kind || ''), req.body.link) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/audit/link-remove', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  await dropAuditLink(realmId, String(req.body.kind || ''));
+  res.json({ ok: true });
+});
+
+app.get('/api/audit/books', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    const l = (await getAuditLinks(realmId))[String(req.query.kind || '')];
+    if (!l) return res.status(400).json({ error: 'Save the link first' });
+    res.json({ books: await auditBooksAt(l.root) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/audit/tabs', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ tabs: await auditTabTitles(String(req.query.id || ''), req.query.excel === '1') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/audit/header', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await auditHeaderOf(String(req.query.id || ''), String(req.query.tab || ''), req.query.excel === '1'));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/audit/pick', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    res.json({ ok: true, link: await saveAuditPick(realmId, String(req.body.kind || ''), req.body) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 app.post('/api/audit/start', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
   try {
     const input = req.body.text != null
-      ? { invoices: parseAuditPasted(req.body.text) }
+      ? { invoices: parseAuditPasted(req.body.text), kinds: req.body.kinds }
       : req.body;
     const id = startRead(req.desk, 'audit', auditRead(realmId, input));
     res.json({ ok: true, jobId: id });

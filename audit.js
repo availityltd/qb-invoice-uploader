@@ -16,6 +16,7 @@ import { getAccessToken, qbQuery } from './qb.js';
 import { tokenKeeper } from './replaceitem.js';
 import { getSetting, setSetting } from './settings.js';
 import { digitsOf, splitInvoices, num } from './cpr.js';
+import { listSheets, fileInfo, listTabs, readTab } from './sheets.js';
 
 // In the order a reason is trusted: an order that came back explains the open
 // invoice whatever else is written about it, and a blogger's free product least.
@@ -36,6 +37,25 @@ const KEY = 'audit:sources';
 const MAX_ROWS = 60000;
 
 /* ==================== the sources ==================== */
+
+// One line of a sheet - [order, amount, note] - as the rows it stands for. `only`
+// is the set of order numbers anyone is asking about; a live sheet is long and
+// nearly all of it is nobody's business in this audit.
+function rowsOf(cell, only) {
+  const c = Array.isArray(cell) ? cell : [];
+  const orders = splitInvoices(c[0]);
+  if (!orders.length) return [];
+  // a parcel carrying several orders has one amount for all of them, which
+  // belongs to none of them in particular
+  const amount = orders.length === 1 && String(c[1] ?? '').trim() !== '' ? num(c[1]) : null;
+  const note = String(c[2] ?? '').trim().slice(0, 160);
+  const out = [];
+  orders.forEach(o => {
+    const d = digitsOf(o);
+    if (d && (!only || only.has(d))) out.push({ d, a: amount, n: note });
+  });
+  return out;
+}
 
 export async function listSources(realmId) {
   const all = (await getSetting(realmId, KEY, [])) || [];
@@ -60,19 +80,7 @@ export async function addSource(realmId, body) {
   const raw = Array.isArray(body.rows) ? body.rows : [];
 
   const rows = [];
-  raw.forEach(r => {
-    const cell = Array.isArray(r) ? r : [];
-    const orders = splitInvoices(cell[0]);
-    if (!orders.length) return;
-    // a parcel carrying several orders has one amount for all of them, which
-    // belongs to none of them in particular
-    const amount = orders.length === 1 && String(cell[1] ?? '').trim() !== '' ? num(cell[1]) : null;
-    const note = String(cell[2] ?? '').trim().slice(0, 160);
-    orders.forEach(o => {
-      const d = digitsOf(o);
-      if (d) rows.push({ d, a: amount, n: note });
-    });
-  });
+  raw.forEach(r => rowsOf(r, null).forEach(x => rows.push(x)));
   if (!rows.length) throw new Error('No order numbers were found in what was sent');
 
   const all = await listSources(realmId);
@@ -121,20 +129,6 @@ function shiftDays(iso, n) {
   const d = new Date(iso + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
-}
-
-// A week of open invoices at a time, so Stop takes effect within one and what
-// was read until then is still audited.
-function openInvoicesFrom(realmId, from, to, run) {
-  const windows = [];
-  let at = from;
-  while (at <= to && windows.length < 400) {
-    let end = shiftDays(at, 6);
-    if (end > to) end = to;
-    windows.push([at, end]);
-    at = shiftDays(end, 1);
-  }
-  run.data.windows = windows;
 }
 
 async function readWindow(realmId, getToken, a, b, depth) {
@@ -205,14 +199,136 @@ export function audit(invoices, sources) {
   return { rows, byKind, none, total: rows.length };
 }
 
+/* ==================== sheets that live in Google Drive ==================== */
+
+// Each kind of sheet can be pointed at a Drive folder or one Google Sheet, the way
+// Receive payments and Advance payments are: the link is saved once, which
+// workbooks (and tabs) to read are ticked once, and which columns hold the order,
+// the amount and the reason are said once. They are read live at every audit, so
+// what somebody wrote in the sheet this morning is what is looked up.
+const LINKS = 'audit:links';
+
+export async function getLinks(realmId) {
+  return (await getSetting(realmId, LINKS, {})) || {};
+}
+
+function idOf(link) {
+  const m = String(link || '').trim().match(/[-\w]{25,}/);
+  return m ? m[0] : '';
+}
+
+export async function saveLink(realmId, kind, link) {
+  if (!RANK.has(kind)) throw new Error('Say which sheet this is');
+  const root = idOf(link);
+  if (!root) throw new Error('Paste the link to the folder or sheet');
+  const all = await getLinks(realmId);
+  // a new place has its own workbooks and columns
+  all[kind] = { root, books: [], cols: null };
+  await setSetting(realmId, LINKS, all);
+  return all[kind];
+}
+
+export async function dropLink(realmId, kind) {
+  const all = await getLinks(realmId);
+  delete all[kind];
+  await setSetting(realmId, LINKS, all);
+}
+
+// what is behind a link: every workbook under a folder, or the one sheet
+export async function booksAt(root) {
+  let books = [];
+  try { books = await listSheets(root); } catch (e) { /* not a folder, then */ }
+  if (!books.length) {
+    const info = await fileInfo(root);
+    if (info && info.mimeType !== 'application/vnd.google-apps.folder') {
+      books = [{
+        id: info.id, name: info.name, path: '',
+        excel: info.mimeType !== 'application/vnd.google-apps.spreadsheet'
+      }];
+    }
+  }
+  return books.map(b => ({ id: b.id, name: b.name, path: b.path || '', excel: !!b.excel }));
+}
+
+export async function tabTitles(id, excel) {
+  return (await listTabs(id, !!excel)).map(t => t.title);
+}
+
+export async function savePick(realmId, kind, body) {
+  const all = await getLinks(realmId);
+  if (!all[kind]) throw new Error('Save the link first');
+  all[kind].books = (Array.isArray(body.books) ? body.books : [])
+    .filter(b => b && b.id)
+    .map(b => ({
+      id: String(b.id), name: String(b.name || ''), excel: !!b.excel,
+      tabs: Array.isArray(b.tabs) && b.tabs.length ? b.tabs.map(String) : null
+    }));
+  const c = body.cols || {};
+  all[kind].cols = c.order ? {
+    order: String(c.order), amount: String(c.amount || ''), note: String(c.note || '')
+  } : null;
+  await setSetting(realmId, LINKS, all);
+  return all[kind];
+}
+
+const norm = v => String(v ?? '').replace(/[​-‍﻿ ]/g, '').trim().toLowerCase();
+
+// The header of a tab is not always its first row - sheets keep a title or a
+// total above it. The busiest of the first rows is taken to be it.
+export async function headerOf(id, tab, excel) {
+  const values = await readTab(id, tab, !!excel);
+  let best = -1, most = 0;
+  values.slice(0, 15).forEach((r, i) => {
+    const n = (r || []).filter(c => String(c ?? '').trim() !== '').length;
+    if (n > most) { most = n; best = i; }
+  });
+  if (best < 0) return { header: [], row: 0 };
+  return { header: (values[best] || []).map(c => String(c ?? '').trim()), row: best };
+}
+
+function rowsFromTab(values, cols, only) {
+  const want = norm(cols.order);
+  let at = -1;
+  for (let i = 0; i < Math.min(values.length, 15); i++) {
+    if ((values[i] || []).some(c => norm(c) === want)) { at = i; break; }
+  }
+  if (at < 0) return null;                          // a tab laid out some other way
+  const head = values[at].map(norm);
+  const o = head.indexOf(want);
+  const a = cols.amount ? head.indexOf(norm(cols.amount)) : -1;
+  const n = cols.note ? head.indexOf(norm(cols.note)) : -1;
+  const out = [];
+  for (let i = at + 1; i < values.length; i++) {
+    const r = values[i] || [];
+    rowsOf([r[o], a >= 0 ? r[a] : '', n >= 0 ? r[n] : ''], only).forEach(x => out.push(x));
+  }
+  return out;
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Google says no now and then, and allows only so many reads a minute
+async function patiently(work, stopped) {
+  const waits = [4000, 12000, 30000];
+  for (let at = 0; ; at++) {
+    try { return await work(); } catch (e) {
+      if (at >= waits.length || stopped()) throw e;
+      await sleep(waits[at]);
+    }
+  }
+}
+
 /* ==================== the run ==================== */
 
 // `input` is either { from, to } - read the open invoices from QuickBooks - or
-// { invoices: [{ doc, amount }] }, which is already in hand.
+// { invoices: [{ doc, amount }] }, which is already in hand. `kinds` is where to
+// look: the sheets of those kinds, linked or attached, and no others.
 export function auditRead(realmId, input) {
   const fromBooks = !!(input && input.from);
+  const kinds = (Array.isArray(input && input.kinds) ? input.kinds : []).filter(k => RANK.has(k));
   let given = [];
 
+  if (!kinds.length) throw new Error('Tick at least one place to look in');
   if (fromBooks) {
     if (!input.to) throw new Error('Choose both dates first');
     if (input.from > input.to) throw new Error('The first date is after the last one');
@@ -228,45 +344,93 @@ export function auditRead(realmId, input) {
     steps: 0,
 
     async plan(run) {
-      run.data.sources = await listSources(realmId);
-      if (!run.data.sources.length) throw new Error('Attach at least one sheet first');
-      run.data.got = [];
+      const stat = (await listSources(realmId)).filter(s => kinds.includes(s.kind));
+      const links = await getLinks(realmId);
+      const queue = [];
+
       if (fromBooks) {
-        openInvoicesFrom(realmId, input.from, input.to, run);
-        run.steps = run.data.windows.length;
+        const windows = [];
+        let at = input.from;
+        while (at <= input.to && windows.length < 400) {
+          let end = shiftDays(at, 6);
+          if (end > input.to) end = input.to;
+          windows.push([at, end]);
+          at = shiftDays(end, 1);
+        }
+        windows.forEach(w => queue.push({ t: 'w', w }));
         run.data.getToken = tokenKeeper(() => getAccessToken(realmId));
       } else {
-        run.steps = 1;
+        queue.push({ t: 'g' });
       }
+
+      for (const kind of kinds) {
+        const l = links[kind];
+        if (!l || !l.books || !l.books.length) continue;
+        if (!l.cols) throw new Error('Say which columns hold the order number for "' + LABEL.get(kind) + '"');
+        for (const b of l.books) {
+          const tabs = b.tabs && b.tabs.length ? b.tabs
+            : await patiently(() => tabTitles(b.id, b.excel), () => run.stop);
+          tabs.forEach(tab => queue.push({ t: 's', kind, book: b, tab, cols: l.cols }));
+        }
+      }
+      if (!stat.length && !queue.some(q => q.t === 's')) {
+        throw new Error('Nothing is attached for the places you ticked');
+      }
+
+      run.data.queue = queue;
+      run.data.stat = stat;
+      run.data.live = [];
+      run.data.got = [];
+      run.data.only = null;
+      run.steps = queue.length;
     },
 
     async step(run) {
-      if (!fromBooks) {
-        // nothing to read; the look-up itself is the finish
-        if (run.cursor >= 1) { run.ended = true; return { done: true }; }
+      const it = run.data.queue[run.cursor];
+      if (!it) { run.ended = true; return { done: true }; }
+
+      if (it.t === 'g') {
         run.data.got = given;
         return { count: given.length, msg: given.length + ' invoices to look up' };
       }
-      const w = run.data.windows[run.cursor];
-      if (!w) { run.ended = true; return { done: true }; }
-      const got = await readWindow(realmId, run.data.getToken, w[0], w[1], 0);
-      run.data.got.push(...got);
-      return {
-        count: got.length, found: got.length > 0,
-        msg: w[0] + ' to ' + w[1] + ': ' + got.length + ' open'
-      };
+
+      if (it.t === 'w') {
+        const got = await readWindow(realmId, run.data.getToken, it.w[0], it.w[1], 0);
+        run.data.got.push(...got);
+        return {
+          count: got.length, found: got.length > 0,
+          msg: it.w[0] + ' to ' + it.w[1] + ': ' + got.length + ' open'
+        };
+      }
+
+      // a tab of a sheet, now that the invoices it is read for are known
+      if (!run.data.only) run.data.only = new Set(run.data.got.map(x => digitsOf(x.doc)));
+      const where = it.book.name + ' / ' + it.tab;
+      await sleep(1100);
+      let values;
+      try {
+        values = await patiently(() => readTab(it.book.id, it.tab, it.book.excel), () => run.stop);
+      } catch (e) {
+        return { msg: 'SKIPPED ' + where + '   ' + String(e.message).slice(0, 160) };
+      }
+      const rows = rowsFromTab(values, it.cols, run.data.only);
+      if (rows === null) {
+        return { msg: 'SKIPPED ' + where + '   no "' + it.cols.order + '" column in it' };
+      }
+      if (rows.length) run.data.live.push({ kind: it.kind, name: where, rows });
+      return { found: rows.length > 0, msg: where + '   ' + (rows.length ? 'found ' + rows.length : 'nothing here') };
     },
 
     async finish(run) {
-      const res = audit(run.data.got, run.data.sources);
-      res.sources = run.data.sources.map(describe);
+      const res = audit(run.data.got, run.data.stat.concat(run.data.live));
+      res.sources = kinds.map(k => LABEL.get(k));
       res.fromBooks = fromBooks;
       res.partial = run.cursor < (run.steps || 0);
       return res;
     },
 
     endLine(run) {
-      return 'Looked ' + run.counted + ' invoices up in ' + (run.data.sources || []).length + ' sheet(s).';
+      return 'Looked ' + run.data.got.length + ' invoices up in ' + kinds.map(k => LABEL.get(k)).join(', ') + '.';
     }
   };
 }

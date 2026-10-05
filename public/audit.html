@@ -43,6 +43,25 @@
   .src .k{min-width:170px;font-weight:600}
   .src .n{color:var(--muted);flex:1}
   .src button{font-size:11.5px;padding:3px 10px}
+  .place{border:1px solid var(--line);border-radius:9px;background:#fff;padding:12px 16px;margin-bottom:10px}
+  .place .ph{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .place .ph label{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;
+    min-width:210px;margin:0;text-transform:none;letter-spacing:0;color:var(--ink);cursor:pointer}
+  .place .ph input{width:auto}
+  .place .psum{flex:1;font-size:12px;color:var(--muted)}
+  .place .ph button{font-size:12px;padding:4px 12px}
+  .place .pbody{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+  .place .lnk{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+  .place .lnk input{flex:1;min-width:260px}
+  .bk{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:12.5px;flex-wrap:wrap}
+  .bk label{display:flex;align-items:center;gap:8px;margin:0;text-transform:none;letter-spacing:0;
+    color:var(--ink);font-size:12.5px;cursor:pointer}
+  .bk input{width:auto}
+  .bk .pth{color:var(--faint);font-size:11.5px}
+  .bk .tb{font-size:11px;padding:2px 9px}
+  .tabsrow{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px 26px}
+  .tabsrow label{border:1px solid var(--line);border-radius:20px;padding:3px 11px;font-size:11.5px;
+    display:flex;align-items:center;gap:6px;margin:0;text-transform:none;letter-spacing:0;cursor:pointer}
   .add{border:1px dashed var(--line);border-radius:9px;padding:16px 18px;margin-top:14px;background:#fff}
 
   .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:14px 0 8px}
@@ -109,12 +128,17 @@
 
         <!-- ---------- 1. the sheets ---------- -->
         <div class="step">
-          <h2>1 &middot; Sheets</h2>
+          <h2>1 &middot; Where to look</h2>
           <div class="hint">
-            Attach each sheet once; it stays here for the next audit. Upload a CSV, or paste
-            order numbers with their amounts. Attaching the same kind again adds to it.
+            Tick the places to search. Each one is linked once - a Drive folder or a Google
+            Sheet, the way Receive payments and Advance payments do it - and is read live
+            every time, so you only tick what you want searched this time.
           </div>
-          <div id="srcList"></div>
+          <div id="places"></div>
+
+          <span class="fold" id="foldAdd">Or attach a CSV / pasted list instead</span>
+          <div id="addWrap" class="hide">
+          <div id="srcList" style="margin-top:12px"></div>
 
           <div class="add" id="addBox">
             <div class="row" style="margin-bottom:12px">
@@ -150,6 +174,7 @@
               <button class="solid" id="btnAttach">Attach this sheet</button>
               <span class="aside" id="attachNote"></span>
             </div>
+          </div>
           </div>
         </div>
 
@@ -368,20 +393,236 @@
     poll();
   });
 
-  /* ---------- 1. sheets ---------- */
+  /* ---------- 1. where to look ---------- */
+  var links = {}, known = {}, ticks = {}, openKind = '', books = {}, tabCache = {};
+  try { ticks = JSON.parse(localStorage.getItem('audit:ticks') || '{}') || {}; } catch(e){ ticks = {}; }
+  function saveTicks(){ try { localStorage.setItem('audit:ticks', JSON.stringify(ticks)); } catch(e){} }
+
   function loadSources(){
-    return get('/api/audit/sources').then(function(d){
-      kinds = d.kinds; sources = d.sources;
+    return Promise.all([get('/api/audit/sources'), get('/api/audit/links')]).then(function(x){
+      kinds = x[0].kinds; sources = x[0].sources;
+      links = x[1].links || {}; known = x[1].known || {};
       $('aKind').innerHTML = kinds.map(function(k){
         return '<option value="' + esc(k.key) + '">' + esc(k.label) + '</option>';
       }).join('');
       drawSources();
+      drawPlaces();
     }).catch(function(e){ say('bad', esc(e.message)); });
+  }
+
+  function staticOf(k){ return sources.filter(function(s){ return s.kind === k; }); }
+
+  function summary(k){
+    var l = links[k], bits = [];
+    if(l){
+      bits.push(l.books && l.books.length
+        ? l.books.length + (l.books.length === 1 ? ' workbook' : ' workbooks') +
+          (l.cols ? ' &middot; order column "' + esc(l.cols.order) + '"' : ' &middot; columns not chosen')
+        : 'linked - no workbook chosen yet');
+    }
+    var st = staticOf(k);
+    if(st.length) bits.push(st.length + (st.length === 1 ? ' CSV sheet' : ' CSV sheets') + ' attached');
+    return bits.length ? bits.join(' &middot; ') : 'Nothing linked yet';
+  }
+  function ready(k){
+    var l = links[k];
+    return (l && l.books && l.books.length && l.cols) || staticOf(k).length;
+  }
+
+  function drawPlaces(){
+    $('places').innerHTML = kinds.map(function(k){
+      var on = ticks[k.key] === undefined ? !!ready(k.key) : !!ticks[k.key];
+      return '<div class="place" data-k="' + k.key + '">' +
+        '<div class="ph"><label><input type="checkbox" class="pk"' + (on ? ' checked' : '') + '> ' +
+        esc(k.label) + '</label><span class="psum">' + summary(k.key) + '</span>' +
+        '<button class="pset">' + (openKind === k.key ? 'Close' : (links[k.key] ? 'Change' : 'Set up')) + '</button></div>' +
+        (openKind === k.key ? '<div class="pbody" id="pbody"></div>' : '') + '</div>';
+    }).join('');
+    document.querySelectorAll('.place').forEach(function(el){
+      var k = el.dataset.k;
+      el.querySelector('.pk').addEventListener('change', function(e){
+        ticks[k] = e.target.checked; saveTicks();
+      });
+      el.querySelector('.pset').addEventListener('click', function(){
+        openKind = openKind === k ? '' : k;
+        drawPlaces();
+        if(openKind) openPlace(k);
+      });
+    });
+  }
+
+  function ticked(){
+    return kinds.filter(function(k){
+      return ticks[k.key] === undefined ? !!ready(k.key) : !!ticks[k.key];
+    }).map(function(k){ return k.key; });
+  }
+
+  function openPlace(k){
+    var l = links[k], box = $('pbody');
+    box.innerHTML =
+      '<div class="lab">Link to the folder or sheet</div>' +
+      '<div class="lnk"><input id="lnkIn" placeholder="https://drive.google.com/drive/folders/... or https://docs.google.com/spreadsheets/d/...">' +
+      '<button class="solid" id="lnkSave" data-need="audit">Save link</button>' +
+      (known[k] && !l ? '<button id="lnkUse" data-need="audit">Use the one already saved on its own page</button>' : '') +
+      (l ? '<button id="lnkDrop" data-need="audit">Unlink</button>' : '') + '</div>' +
+      '<div class="sub2" id="lnkNote"></div><div id="bkArea"></div>';
+    if(l) $('lnkIn').value = l.root;
+
+    $('lnkSave').addEventListener('click', function(){ saveLink(k, $('lnkIn').value); });
+    if($('lnkUse')) $('lnkUse').addEventListener('click', function(){ saveLink(k, known[k]); });
+    if($('lnkDrop')) $('lnkDrop').addEventListener('click', function(){
+      if(!confirm('Unlink this place? The sheet itself is not touched.')) return;
+      post('/api/audit/link-remove', { kind: k }).then(function(){ openKind = ''; return loadSources(); })
+        .catch(function(e){ say('bad', esc(e.message)); });
+    });
+    if(l) loadBooks(k);
+  }
+
+  function saveLink(k, link){
+    post('/api/audit/link', { kind: k, link: link }).then(function(){
+      delete books[k];
+      return loadSources();
+    }).then(function(){ if(openKind === k) openPlace(k); })
+      .catch(function(e){ if($('lnkNote')) $('lnkNote').textContent = e.message; else say('bad', esc(e.message)); });
+  }
+
+  function loadBooks(k){
+    var area = $('bkArea');
+    area.innerHTML = '<div class="sub2" style="margin-top:10px">Reading what is there...</div>';
+    get('/api/audit/books?kind=' + encodeURIComponent(k)).then(function(d){
+      books[k] = d.books;
+      drawBooks(k);
+    }).catch(function(e){ area.innerHTML = '<div class="msg bad">' + esc(e.message) + '</div>'; });
+  }
+
+  function savedBook(k, id){
+    var l = links[k];
+    return l && l.books ? l.books.filter(function(b){ return b.id === id; })[0] : null;
+  }
+
+  function drawBooks(k){
+    var list = books[k] || [], area = $('bkArea');
+    if(!list.length){
+      area.innerHTML = '<div class="msg bad">No sheet was found there. Check the link is shared with the app.</div>';
+      return;
+    }
+    area.innerHTML = '<div class="lab" style="margin-top:12px">Workbooks to search</div>' +
+      list.map(function(b, i){
+        var sv = savedBook(k, b.id);
+        return '<div class="bk" data-i="' + i + '"><label><input type="checkbox" class="bpick"' +
+          (sv ? ' checked' : '') + '> ' + esc(b.name) + '</label>' +
+          (b.path ? '<span class="pth">' + esc(b.path) + '</span>' : '') +
+          '<button class="tb">' + (sv && sv.tabs ? sv.tabs.length + ' tabs' : 'All tabs') + '</button>' +
+          '<div class="tabsrow hide" style="flex-basis:100%"></div></div>';
+      }).join('') +
+      '<div class="lab" style="margin-top:14px">Which columns</div>' +
+      '<div class="picks"><div><label>Order number</label><select id="pcOrder"></select></div>' +
+      '<div><label>Amount</label><select id="pcAmount"></select></div>' +
+      '<div><label>Reason / note</label><select id="pcNote"></select></div></div>' +
+      '<div class="sub2" id="pcNote2" style="margin-bottom:10px"></div>' +
+      '<div class="row"><button class="solid" id="pSave" data-need="audit">Save this choice</button>' +
+      '<span class="aside" id="pDone"></span></div>';
+
+    area.querySelectorAll('.bk').forEach(function(row){
+      var b = list[+row.dataset.i];
+      var sv = savedBook(k, b.id);
+      b.chosen = sv && sv.tabs ? sv.tabs.slice() : null;
+      row.querySelector('.tb').addEventListener('click', function(){
+        var tr = row.querySelector('.tabsrow');
+        if(!tr.classList.contains('hide')){ tr.classList.add('hide'); return; }
+        tr.classList.remove('hide');
+        tr.innerHTML = '<span class="sub2">Reading the tabs...</span>';
+        var have = tabCache[b.id] ? Promise.resolve(tabCache[b.id]) :
+          get('/api/audit/tabs?id=' + encodeURIComponent(b.id) + '&excel=' + (b.excel ? 1 : 0))
+            .then(function(d){ tabCache[b.id] = d.tabs; return d.tabs; });
+        have.then(function(tabs){
+          tr.innerHTML = tabs.map(function(t){
+            var on = !b.chosen || b.chosen.indexOf(t) >= 0;
+            return '<label><input type="checkbox" value="' + esc(t) + '"' + (on ? ' checked' : '') + '> ' + esc(t) + '</label>';
+          }).join('');
+          tr.querySelectorAll('input').forEach(function(inp){
+            inp.addEventListener('change', function(){
+              var all = [].slice.call(tr.querySelectorAll('input'));
+              var pick = all.filter(function(x){ return x.checked; }).map(function(x){ return x.value; });
+              b.chosen = pick.length === all.length ? null : pick;
+              row.querySelector('.tb').textContent = b.chosen ? b.chosen.length + ' tabs' : 'All tabs';
+              loadCols(k);
+            });
+          });
+        }).catch(function(e){ tr.innerHTML = '<span class="off">' + esc(e.message) + '</span>'; });
+      });
+      row.querySelector('.bpick').addEventListener('change', function(){ loadCols(k); });
+    });
+
+    $('pSave').addEventListener('click', function(){ savePick(k); });
+    loadCols(k);
+  }
+
+  // The columns are read off the first tab that will be searched.
+  function loadCols(k){
+    var list = books[k] || [], first = null;
+    document.querySelectorAll('#bkArea .bk').forEach(function(row){
+      if(!first && row.querySelector('.bpick').checked) first = list[+row.dataset.i];
+    });
+    var mem = links[k] && links[k].cols;
+    function fill(header){
+      var h = header.filter(Boolean);
+      if(mem) [mem.order, mem.amount, mem.note].forEach(function(n){ if(n && h.indexOf(n) < 0) h.push(n); });
+      var o = mem && mem.order && h.indexOf(mem.order) >= 0 ? h.indexOf(mem.order) : Math.max(0, guess(h, RE_ORDER));
+      var a = mem && mem.amount && h.indexOf(mem.amount) >= 0 ? h.indexOf(mem.amount) : guess(h, RE_AMT, [o]);
+      var n = mem && mem.note && h.indexOf(mem.note) >= 0 ? h.indexOf(mem.note) : guess(h, RE_NOTE, [o, a]);
+      function opts(sel, pick, optional){
+        sel.innerHTML = (optional ? '<option value="">(none)</option>' : '') +
+          h.map(function(x){ return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('');
+        sel.value = pick >= 0 ? h[pick] : '';
+      }
+      opts($('pcOrder'), o, false); opts($('pcAmount'), a, true); opts($('pcNote'), n, true);
+    }
+    if(!first){
+      $('pcNote2').textContent = 'Tick a workbook and its columns will be listed here.';
+      return;
+    }
+    $('pcNote2').textContent = 'Reading the columns of ' + first.name + '...';
+    var tab = first.chosen && first.chosen.length ? Promise.resolve(first.chosen[0]) :
+      (tabCache[first.id] ? Promise.resolve(tabCache[first.id][0]) :
+        get('/api/audit/tabs?id=' + encodeURIComponent(first.id) + '&excel=' + (first.excel ? 1 : 0))
+          .then(function(d){ tabCache[first.id] = d.tabs; return d.tabs[0]; }));
+    tab.then(function(t){
+      return get('/api/audit/header?id=' + encodeURIComponent(first.id) + '&tab=' + encodeURIComponent(t) +
+        '&excel=' + (first.excel ? 1 : 0)).then(function(d){
+        fill(d.header || []);
+        $('pcNote2').textContent = 'Taken from the tab "' + t + '" of ' + first.name +
+          '. Every other tab is matched by these same column names.';
+      });
+    }).catch(function(e){ $('pcNote2').textContent = e.message; });
+  }
+
+  function savePick(k){
+    var list = books[k] || [], out = [];
+    document.querySelectorAll('#bkArea .bk').forEach(function(row){
+      if(!row.querySelector('.bpick').checked) return;
+      var b = list[+row.dataset.i];
+      out.push({ id: b.id, name: b.name, excel: b.excel, tabs: b.chosen });
+    });
+    if(!out.length){ $('pDone').textContent = 'Tick at least one workbook.'; return; }
+    if(!$('pcOrder').value){ $('pDone').textContent = 'Choose the order number column.'; return; }
+    post('/api/audit/pick', {
+      kind: k, books: out,
+      cols: { order: $('pcOrder').value, amount: $('pcAmount').value, note: $('pcNote').value }
+    }).then(function(){
+      ticks[k] = true; saveTicks();
+      return get('/api/audit/links').then(function(d){ links = d.links || {}; });
+    }).then(function(){
+      $('pDone').textContent = 'Saved.';
+      var ph = document.querySelector('.place[data-k="' + k + '"] .psum');
+      if(ph) ph.innerHTML = summary(k);
+      var cb = document.querySelector('.place[data-k="' + k + '"] .pk'); if(cb) cb.checked = true;
+    }).catch(function(e){ $('pDone').textContent = e.message; });
   }
 
   function drawSources(){
     if(!sources.length){
-      $('srcList').innerHTML = '<div class="sub2" style="padding:6px 0">No sheet is attached yet.</div>';
+      $('srcList').innerHTML = '<div class="sub2" style="padding:6px 0">No CSV sheet is attached.</div>';
       return;
     }
     $('srcList').innerHTML = sources.map(function(s){
@@ -398,6 +639,11 @@
       });
     });
   }
+
+  $('foldAdd').addEventListener('click', function(){
+    var h = $('addWrap').classList.toggle('hide');
+    $('foldAdd').textContent = h ? 'Or attach a CSV / pasted list instead' : 'Hide the CSV / pasted list';
+  });
 
   function colsOfAttach(){
     var h = aCsv.header;
@@ -492,7 +738,6 @@
 
   $('btnStart').addEventListener('click', function(){
     var t = tabOf('iTabs'), body;
-    if(!sources.length){ say('bad', 'Attach at least one sheet first.'); return; }
     if(t === 'qb'){
       body = { from: $('qFrom').value, to: $('qTo').value };
     } else if(t === 'paste'){
@@ -505,6 +750,9 @@
         return { doc: r[o] || '', amount: a >= 0 ? (r[a] || '') : '' };
       }) };
     }
+    var where = ticked();
+    if(!where.length){ say('bad', 'Tick at least one place to look in.'); return; }
+    body.kinds = where;
     say('', '');
     post('/api/audit/start', body).then(function(){
       since = 0; result = null; filter = '';
@@ -572,7 +820,7 @@
     var r = result;
     $('stepOut').classList.remove('hide');
     $('outHint').textContent = (r.partial ? 'Stopped early - this is only what was read so far. ' : '') +
-      money(r.total) + ' open invoices looked up in ' + r.sources.length + ' sheet(s). ' +
+      money(r.total) + ' open invoices looked up in ' + r.sources.join(', ') + '. ' +
       'Each is placed under its strongest reason; the others it also appears in are listed beside it.';
 
     var t = r.byKind, html = '';
