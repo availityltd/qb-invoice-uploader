@@ -306,6 +306,19 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // The run log is the server's, but the colouring happens here after the run
+  // is over. It is part of the same piece of work, so it is written into the
+  // same log rather than left to a quiet note beside a button.
+  function payLine(msg, cls){
+    var box = $('paylog');
+    if(!box) return;
+    var line = document.createElement('div');
+    if(cls) line.className = cls;
+    line.textContent = msg;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+
   function say(cls, html){
     $('statBox').className = 'stat' + (cls ? ' ' + cls : '');
     $('statBox').innerHTML = html;
@@ -1234,6 +1247,7 @@
     $('payOut').innerHTML = '';
     S.lastEventId = 0;
     S.payJob = null;
+    S.colouredFor = null;   // a fresh run colours the sheet again
 
     post('/api/cpr/receive', {
       courier: S.courier,
@@ -1349,17 +1363,58 @@
 
     S.lastPaid = j.paidInvoices || [];
     if(S.lastPaid.length) drawPaidList();
-    if(j.posted > 0 && !S.afterPay){
-      $('stepPay').classList.add('done');
-      // only the CPR just received is read again - the rest of the sheet was
-      // not touched - and the sheet is coloured from what that read says, so
-      // the rows that have just been paid go green without anybody asking
+
+    // The run is over on the server, but the work is not: the sheet still has
+    // to be coloured. That used to happen in silence, with the log sitting on
+    // "payments recorded" while the page was still busy - which read as a run
+    // that had finished and a sheet that never changed. It says so now, step by
+    // step, and only the once: a poll that lands again on the same finished run
+    // must not colour the sheet a second time.
+    // Carry on after a Stop keeps the same run, so the run's id alone would say
+    // "already coloured" and skip the sheet the second time round. What marks
+    // one finish from the next is when it finished.
+    var finishKey = String(j.id) + '|' + String(j.finishedAt || '');
+    if(j.posted > 0 && !S.afterPay && S.colouredFor !== finishKey){
+      S.colouredFor = finishKey;
       S.afterPay = true;
+      $('stepPay').classList.add('done');
+
       var key = S.currentKey;
-      Promise.resolve(key ? readCpr(key, '') : null)
-        .then(function(){ if(!S.excel) return colourNow(true); })
-        .then(function(){ S.afterPay = false; })
-        .catch(function(){ S.afterPay = false; });
+
+      // Colours are put in by the Google Sheets API, which has no hold over a
+      // workbook that is merely sitting in Drive as an Excel file. Saying so is
+      // better than leaving somebody waiting for colours that cannot come.
+      if(S.excel){
+        payLine('The sheet is an Excel workbook, so it cannot be coloured - ' +
+                'only a Google Sheet can. "Received" has still been written into it.');
+        payLine('--- Process complete ---', 'ok');
+        S.afterPay = false;
+      } else {
+        // only the CPR just received is read again - the rest of the sheet was
+        // not touched - and the sheet is coloured from what that read says, so
+        // the rows that have just been paid go green without anybody asking
+        payLine('Reading this CPR again, so the colours match what it now says...');
+
+        Promise.resolve(key ? readCpr(key, '') : null)
+          .then(function(){
+            payLine('Colouring the sheet...');
+            return colourNow(true);
+          })
+          .then(function(d){
+            if(d && d.painted){
+              payLine('Coloured ' + nf(d.painted) + ' rows' + (d.text ? ' - ' + d.text : ''), 'ok');
+            } else {
+              payLine('No row needed a colour.');
+            }
+            payLine('--- Process complete ---', 'ok');
+            S.afterPay = false;
+          })
+          .catch(function(e){
+            payLine('The sheet could not be coloured: ' + e.message, 'fail');
+            payLine('--- The payments are recorded; only the colouring did not finish ---', 'fail');
+            S.afterPay = false;
+          });
+      }
     }
 
   }
@@ -1378,6 +1433,7 @@
   $('btnClearRun').addEventListener('click', function(){
     post('/api/cpr/receive-clear').then(function(){
       S.lastEventId = 0;
+      S.colouredFor = null;
       $('paylog').innerHTML = '';
       $('payOut').innerHTML = '';
       $('runBox').classList.add('hide');
@@ -1471,7 +1527,7 @@
     if(!plan.length){
       if(b){ b.disabled = false; b.textContent = 'Colour this CPR in the sheet'; }
       $('colourNote').textContent = 'Nothing to colour yet.';
-      return Promise.resolve();
+      return Promise.resolve(null);
     }
 
     return post('/api/cpr/colour', {
@@ -1489,10 +1545,14 @@
       $('colourNote').textContent = bits.length
         ? 'Coloured ' + nf(d.painted) + ' rows \u2014 ' + bits.join(', ')
         : 'Nothing to colour yet.';
+      // handed back so the run log can say the same thing
+      return { painted: d.painted || 0, text: bits.join(', ') };
     }).catch(function(e){
       if(b){ b.disabled = false; b.textContent = 'Colour this CPR in the sheet'; }
+      $('colourNote').textContent = 'Could not colour the sheet: ' + e.message;
       if(!quiet) say('bad', '<b>' + esc(e.message) + '</b>');
-      else $('colourNote').textContent = 'Could not colour the sheet: ' + e.message;
+      // the caller decides what to say about it - after a run, the log does
+      throw e;
     });
   }
 
