@@ -60,16 +60,17 @@ import {
   startJob, stopJob, pauseJob, resumeJob, clearJob, endJob,
     retryFailed, snapshot, remainingInvoices, resumeUnfinished
 } from './jobs.js';
-import { startVoidJob, stopVoidJob, clearVoidJob, resumeVoidJob, voidSnapshot, initVoidStore, resumeVoidRuns } from './voidjobs.js';
+import { startVoidJob, stopVoidJob, clearVoidJob, endVoidJob, resumeVoidJob, voidSnapshot, initVoidStore, resumeVoidRuns } from './voidjobs.js';
 import {
   startCheckJob as startSheetCheck, stopCheckJob as stopSheetCheck,
-  clearCheckJob as clearSheetCheck, resumeCheckJob as resumeSheetCheck,
+  clearCheckJob as clearSheetCheck, endCheckJob as endSheetCheck,
+  resumeCheckJob as resumeSheetCheck,
   checkSnapshot as sheetCheckSnapshot
 } from './voidcheck.js';
 import { readDateColumns } from './voidsheet.js';
-import { startDelJob, stopDelJob, clearDelJob, resumeDelJob, delSnapshot } from './deljobs.js';
+import { startDelJob, stopDelJob, clearDelJob, endDelJob, resumeDelJob, delSnapshot } from './deljobs.js';
 import { loadAdvance, findForAdvance, spanLabel } from './advance.js';
-import { startAdvJob, stopAdvJob, clearAdvJob, resumeAdvJob, advSnapshot } from './advjobs.js';
+import { startAdvJob, stopAdvJob, clearAdvJob, endAdvJob, resumeAdvJob, advSnapshot } from './advjobs.js';
 import {
   initCouriers, listAccounts as listCourierAccounts, getAccount as getCourierAccount,
   addAccount as addCourierAccount, removeAccount as removeCourierAccount,
@@ -84,17 +85,17 @@ import {
   loadCharges, listAllAccounts, findJournal, postJournal
 } from './journal.js';
 import { loadTraxSummaries, applyLines } from './traxsheet.js';
-import { startPayJob, stopPayJob, clearPayJob, resumePayJob, paySnapshot } from './payjobs.js';
+import { startPayJob, stopPayJob, clearPayJob, endPayJob, resumePayJob, paySnapshot } from './payjobs.js';
 import {
-  startCheck, stopCheck, resumeCheck, clearCheck, checkSnapshot,
-  startFix, stopFix, resumeFix, clearFix, fixSnapshot
+  startCheck, stopCheck, resumeCheck, clearCheck, endCheck, checkSnapshot,
+  startFix, stopFix, resumeFix, clearFix, endFix, fixSnapshot
 } from './checklist.js';
 import {
-  startFindJob, resumeFindJob, stopFindJob, clearFindJob, findSnapshot,
+  startFindJob, resumeFindJob, stopFindJob, clearFindJob, endFindJob, findSnapshot,
   listTree, sheetsIn, peekHeader
 } from './finder.js';
 import {
-  startBackfill, resumeBackfill, stopBackfill, clearBackfill, backfillSnapshot
+  startBackfill, resumeBackfill, stopBackfill, clearBackfill, endBackfill, backfillSnapshot
 } from './backfill.js';
 import {
   openFile as openMergeFile, buildOrders, groupOrders, parsePasted, placeGroups
@@ -1929,6 +1930,16 @@ app.post('/api/invoice-details-stop', async (req, res) => {
   res.json({ ok: stopRead(req.desk, 'invoice-details') });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/invoice-details-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endRead(req.desk, 'invoice-details') });
+});
+
+
 app.post('/api/invoice-details-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -2222,6 +2233,16 @@ app.post('/api/invoice-find-stop', async (req, res) => {
   res.json({ ok: stopRead(req.desk, 'invoice-find') });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/invoice-find-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endRead(req.desk, 'invoice-find') });
+});
+
+
 app.post('/api/invoice-find-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -2266,6 +2287,16 @@ app.post('/api/invoice-delete-stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopDelJob(req.desk) });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/invoice-delete-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endDelJob(req.desk) });
+});
+
 
 app.post('/api/invoice-delete-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -3295,6 +3326,16 @@ app.post('/api/cpr/receive-stop', async (req, res) => {
   res.json({ ok: stopPayJob(req.desk) });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/cpr/receive-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endPayJob(req.desk) });
+});
+
+
 app.post('/api/cpr/receive-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -3366,6 +3407,16 @@ app.post('/api/check/stop', async (req, res) => {
   res.json({ ok: stopCheck(req.desk) });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/check/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endCheck(req.desk) });
+});
+
+
 app.post('/api/check/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -3412,6 +3463,16 @@ app.post('/api/check/fix-stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopFix(req.desk) });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/check/fix-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endFix(req.desk) });
+});
+
 
 app.post('/api/check/fix-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -3475,6 +3536,16 @@ app.post('/api/check/find-stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopFindJob(sheetLane(req)) });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/check/find-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endFindJob(sheetLane(req)) });
+});
+
 
 app.post('/api/check/find-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -3697,6 +3768,16 @@ app.post('/api/find/stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopFindJob(req.desk) });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/find/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endFindJob(req.desk) });
+});
+
 
 app.post('/api/find/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -4276,6 +4357,22 @@ app.post('/api/merge/strip-stop', async (req, res) => {
   res.json({ ok: true });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/merge/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = mergeStore.get(req.desk);
+  if (st) {
+    st.ended = true;
+    if (st.strip) st.strip.stop = true;
+  }
+  mergeStore.delete(req.desk);
+  res.json({ ok: true, had: !!st });
+});
+
+
 // Only the log of a finished run goes; the matched rows stay.
 app.post('/api/merge/strip-clear-log', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -4421,6 +4518,22 @@ app.post('/api/shipfix/stop', async (req, res) => {
   if (st && st.job && st.job.running) st.job.stop = true;
   res.json({ ok: true });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/shipfix/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = shipStore.get(req.desk);
+  if (st) {
+    st.ended = true;
+    if (st.job) st.job.stop = true;
+  }
+  shipStore.delete(req.desk);
+  res.json({ ok: true, had: !!st });
+});
+
 
 // Only the log of a finished run goes; the invoices found stay.
 app.post('/api/shipfix/clear-log', async (req, res) => {
@@ -4646,6 +4759,25 @@ app.post('/api/swap/stop', async (req, res) => {
   if (st && st.job) st.job.stop = true;
   res.json({ ok: true });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/swap/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = swapStore.get(req.desk);
+  const chk = swapChecks.get(req.desk);
+  if (st) {
+    st.ended = true;
+    if (st.job) st.job.stop = true;
+  }
+  if (chk) chk.stop = true;          // the plan being worked out goes too
+  swapStore.delete(req.desk);
+  swapChecks.delete(req.desk);
+  res.json({ ok: true, had: !!(st || chk) });
+});
+
 
 // Only the log of a finished run goes; the invoices checked stay.
 app.post('/api/swap/clear-log', async (req, res) => {
@@ -4903,6 +5035,25 @@ app.post('/api/recat/stop', async (req, res) => {
   if (st && st.job && st.job.running) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/recat/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = recatStore.get(req.desk);
+  if (st) {
+    st.ended = true;                 // nothing of it is written back
+    if (st.job) st.job.stop = true;
+    if (st.scan) st.scan.stop = true;
+  }
+  recatStore.delete(req.desk);
+  // the list goes; what was actually moved stays in recat_moves
+  await clearRecatState(req.desk).catch(e => console.error('recat end:', e.message));
+  res.json({ ok: true, had: !!st });
+});
+
 });
 
 // Only the log of a finished run goes; the transactions found stay.
@@ -5213,6 +5364,23 @@ app.post('/api/desc/stop', async (req, res) => {
   if (st && st.job && st.job.running) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/desc/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = descStore.get(req.desk);
+  if (st) {
+    st.ended = true;
+    if (st.job) st.job.stop = true;
+    if (st.scan) st.scan.stop = true;
+  }
+  descStore.delete(req.desk);
+  res.json({ ok: true, had: !!st });
+});
+
 });
 
 // Only the log of a finished run goes; what was read stays.
@@ -5860,6 +6028,16 @@ app.post('/api/courier/backfill-stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopBackfill(req.desk) });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/courier/backfill-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endBackfill(req.desk) });
+});
+
 
 app.post('/api/courier/backfill-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -6695,6 +6873,16 @@ app.post('/api/adv/find-stop', async (req, res) => {
   res.json({ ok: stopAdvFind(req.desk) });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/adv/find-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endAdvFind(req.desk) });
+});
+
+
 app.post('/api/adv/find-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -7063,6 +7251,16 @@ app.post('/api/adv/receive-stop', async (req, res) => {
   res.json({ ok: stopAdvJob(req.desk) });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/adv/receive-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endAdvJob(req.desk) });
+});
+
+
 app.post('/api/adv/receive-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -7260,6 +7458,16 @@ app.post('/api/void/scan-stop', async (req, res) => {
   res.json({ ok: stopVoidScan(req.desk) });
 });
 
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/void/scan-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endVoidScan(req.desk) });
+});
+
+
 app.post('/api/void/scan-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;
@@ -7305,6 +7513,16 @@ app.post('/api/void/stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopVoidJob(req.desk) });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/void/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endVoidJob(req.desk) });
+});
+
 
 app.post('/api/void/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -7361,6 +7579,16 @@ app.post('/api/void/check-stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopSheetCheck(req.desk) });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/void/check-end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endSheetCheck(req.desk) });
+});
+
 
 app.post('/api/void/check-resume', async (req, res) => {
   const realmId = await requireCompany(req, res);
@@ -7545,12 +7773,12 @@ import { login as portalLogin } from './postexportal.js';
 import { encrypt as encryptSecret } from './secrets.js';
 import { deskKey } from './desk.js';
 import {
-  startAdvFind, stopAdvFind, resumeAdvFind, clearAdvFind, advFindSnapshot
+  startAdvFind, stopAdvFind, resumeAdvFind, clearAdvFind, endAdvFind, advFindSnapshot
 } from './advfind.js';
 import {
-  startVoidScan, stopVoidScan, resumeVoidScan, clearVoidScan, voidScanSnapshot
+  startVoidScan, stopVoidScan, resumeVoidScan, clearVoidScan, endVoidScan, voidScanSnapshot
 } from './voidscan.js';
-import { startRead, stopRead, resumeRead, clearRead, readSnapshot } from './reads.js';
+import { startRead, stopRead, resumeRead, clearRead, endRead, readSnapshot } from './reads.js';
 import {
   KINDS as AUDIT_KINDS,
   parsePasted as parseAuditPasted, auditRead,
@@ -8700,6 +8928,23 @@ app.post('/api/products/stop', async (req, res) => {
   if (st && st.job) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/products/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = prodStore.get(req.desk);
+  if (st) {
+    st.ended = true;
+    if (st.job) st.job.stop = true;
+    if (st.scan) st.scan.stop = true;
+  }
+  prodStore.delete(req.desk);
+  res.json({ ok: true, had: !!st });
+});
+
 });
 
 app.get('/api/products/record', async (req, res) => {
@@ -9341,6 +9586,24 @@ app.post('/api/replace/stop', async (req, res) => {
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   if (st && st.job && st.job.running) st.job.stop = true;
   res.json({ ok: true });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/replace/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = replStore.get(req.desk);
+  if (st) {
+    st.ended = true;                 // nothing of it is written back
+    if (st.scan) st.scan.stop = true;
+    if (st.job) st.job.stop = true;
+  }
+  replStore.delete(req.desk);
+  await clearReplace(req.desk).catch(e => console.error('replace end:', e.message));
+  res.json({ ok: true, had: !!st });
+});
+
 });
 
 // Only the log of a finished run goes - the pairs and what was found stay, so a
@@ -9589,6 +9852,16 @@ app.post('/api/audit/stop', async (req, res) => {
   if (!realmId) return;
   res.json({ ok: stopRead(req.desk, 'audit') });
 });
+
+// End process - the run is over. Whatever is left is dropped and nothing of
+// it stays on the server, not even after a deploy. What is already written
+// to QuickBooks or to the sheets is not undone.
+app.post('/api/audit/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  res.json({ ok: endRead(req.desk, 'audit') });
+});
+
 
 app.post('/api/audit/resume', async (req, res) => {
   const realmId = await requireCompany(req, res);

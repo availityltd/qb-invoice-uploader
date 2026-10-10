@@ -778,6 +778,10 @@
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStripStop', url: '/api/merge/end', what: 'this clean-up' });
+
   $('btnStripStop').addEventListener('click', function(){
     post('/api/merge/strip-stop', {}).catch(function(){});
   });
@@ -1229,6 +1233,10 @@
       $('btnShipRun').disabled = false;
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnShipStop', url: '/api/shipfix/end', what: 'this shipping change' });
+
   $('btnShipStop').addEventListener('click', function(){
     $('btnShipStop').disabled = true;
     post('/api/shipfix/stop').then(function(){ $('btnShipStop').disabled = false; });

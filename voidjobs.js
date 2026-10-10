@@ -72,6 +72,7 @@ async function saveVoid(desk, job, withList) {
 
 // written every few results or every 15 seconds, and always when the state changes
 function saveSoon(desk, job, force) {
+  if (job.ended) return;   // the run was ended - its row is gone and stays gone
   job.unsaved = (job.unsaved || 0) + 1;
   if (!force && job.unsaved < 5 && Date.now() - (job.savedAt || 0) < 15000) return;
   job.unsaved = 0;
@@ -442,6 +443,26 @@ export function clearVoidJob(desk) {
     [realmOf(desk), userOf(desk)]).catch(() => {});
   return true;
 }
+
+// End process. Stop leaves the run sitting on the server so it can be carried
+// on from where it stopped; End means the run is over - whatever is left is
+// dropped and nothing of it stays behind, not even after a restart. What is
+// already written is not undone.
+export function endVoidJob(desk) {
+  const job = jobs.get(desk);
+  if (job) {
+    job.ended = true;
+    job.stop = true;
+    job.state = 'ended';
+  }
+  jobs.delete(desk);
+  // the row goes whether or not anything was still in memory - a run left
+  // behind by an earlier server is exactly what this has to clean up
+  pool.query('DELETE FROM void_runs WHERE realm_id = $1 AND user_sub = $2',
+    [realmOf(desk), userOf(desk)]).catch(() => {});
+  return !!job;
+}
+
 
 export function voidSnapshot(desk, since, full) {
   const job = jobs.get(desk);

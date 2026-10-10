@@ -1390,6 +1390,10 @@
       '<button class="go2" id="rClear" style="display:none">Clear log</button></div>';
   }
   function wireRunButtons(){
+    // End process puts its own button beside Stop: Stop leaves the run on the
+    // server to be carried on, End takes it off for good.
+    window.APP.endProcess({ near: 'rStop', url: '/api/cpr/receive-end', what: 'this payment run' });
+
     $('rStop').addEventListener('click', function(){
       $('rStop').disabled = true;
       fetch('/api/cpr/receive-stop', { method:'POST' })

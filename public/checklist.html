@@ -802,6 +802,10 @@
     S.checkPoll = null;
   }
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnCheckStop', url: '/api/check/end', what: 'this check' });
+
   $('btnCheckStop').addEventListener('click', function(){
     $('btnCheckStop').disabled = true;
     $('btnCheckStop').textContent = 'Stopping...';
@@ -1300,6 +1304,10 @@
     S.fixPoll = null;
   }
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnFixStop', url: '/api/check/fix-end', what: 'this fix run' });
+
   $('btnFixStop').addEventListener('click', function(){
     $('btnFixStop').disabled = true;
     $('btnFixStop').textContent = 'Stopping...';
@@ -1418,6 +1426,10 @@
     clearInterval(S.payPoll);
     S.payPoll = null;
   }
+
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnPayStop', url: '/api/cpr/receive-end', what: 'this payment run' });
 
   $('btnPayStop').addEventListener('click', function(){
     $('btnPayStop').disabled = true;
@@ -1676,6 +1688,10 @@
       startFindPoll();
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
+
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnFindStop', url: '/api/check/find-end', what: 'this search' });
 
   $('btnFindStop').addEventListener('click', function(){
     $('btnFindStop').disabled = true;

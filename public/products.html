@@ -1134,11 +1134,19 @@
   $('btnCsv').addEventListener('click', csv);
   $('btnApply').addEventListener('click', apply);
   $('adjAcct').addEventListener('change', drawApply);
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnScanStop', url: '/api/products/end', what: 'this read' });
+
   $('btnScanStop').addEventListener('click', function(){
     $('btnScanStop').disabled = true;
     say('busy', 'Stopping after the read in hand…');
     post('/api/products/stop');
   });
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnRunStop', url: '/api/products/end', what: 'this product run' });
+
   $('btnRunStop').addEventListener('click', function(){
     $('btnRunStop').disabled = true;
     post('/api/products/stop').then(function(){ $('btnRunStop').disabled = false; });
@@ -1160,6 +1168,10 @@
       drawApply();
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStop', url: '/api/products/end', what: 'this product run' });
+
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     post('/api/products/stop').then(function(){ $('btnStop').disabled = false; });

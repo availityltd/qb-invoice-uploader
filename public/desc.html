@@ -961,11 +961,19 @@
 
   $('btnHistCsv').addEventListener('click', histCsv);
   $('btnRun').addEventListener('click', run);
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnScanStop', url: '/api/desc/end', what: 'this read' });
+
   $('btnScanStop').addEventListener('click', function(){
     $('btnScanStop').disabled = true;
     say('busy', 'Stopping after the read in hand…');
     post('/api/desc/stop');
   });
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStop', url: '/api/desc/end', what: 'this description run' });
+
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     post('/api/desc/stop').then(function(){ $('btnStop').disabled = false; });

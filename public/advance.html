@@ -1216,6 +1216,10 @@
     });
   });
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStop', url: '/api/adv/receive-end', what: 'this advance payment run' });
+
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     $('btnStop').textContent = 'Stopping...';
@@ -1544,6 +1548,10 @@
       startPastePoll();
     }).catch(function(e){ say('bad', '<b>' + esc(e.message) + '</b>'); });
   });
+
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnPStop', url: '/api/adv/find-end', what: 'this search' });
 
   $('btnPStop').addEventListener('click', function(){
     $('btnPStop').disabled = true;

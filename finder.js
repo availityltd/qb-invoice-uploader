@@ -246,6 +246,23 @@ export function clearFindJob(desk) {
   return true;
 }
 
+// End process. Stop leaves the run sitting on the server so it can be carried
+// on from where it stopped; End means the run is over - whatever is left is
+// dropped and nothing of it stays behind, not even after a restart. What is
+// already written is not undone.
+export function endFindJob(desk) {
+  const job = jobs.get(desk);
+  if (job) {
+    job.ended = true;
+    job.stop = true;
+    job.cancel = true;
+    job.state = 'ended';
+  }
+  jobs.delete(desk);
+  return !!job;
+}
+
+
 export function startFindJob(desk, opts) {
   const realmId = realmOf(desk);
   const old = jobs.get(desk);

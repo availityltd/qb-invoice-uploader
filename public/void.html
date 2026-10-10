@@ -627,6 +627,10 @@
     });
   }
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnScanStop', url: '/api/void/scan-end', what: 'this scan' });
+
   $('btnScanStop').addEventListener('click', function(){
     $('btnScanStop').disabled = true;
     $('btnScanStop').textContent = 'Stopping...';
@@ -884,6 +888,10 @@
     });
   });
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStop', url: '/api/void/end', what: 'this void run' });
+
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     $('btnStop').textContent = 'Stopping...';
@@ -1121,6 +1129,10 @@
       say('bad', '<b>' + esc(e.message) + '</b>');
     });
   });
+
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnCheckStop', url: '/api/void/check-end', what: 'this sheet check' });
 
   $('btnCheckStop').addEventListener('click', function(){
     $('btnCheckStop').disabled = true;

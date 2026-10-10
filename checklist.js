@@ -505,6 +505,23 @@ export function clearCheck(desk) {
   return true;
 }
 
+// End process. Stop leaves the run sitting on the server so it can be carried
+// on from where it stopped; End means the run is over - whatever is left is
+// dropped and nothing of it stays behind, not even after a restart. What is
+// already written is not undone.
+export function endCheck(desk) {
+  const job = scans.get(desk);
+  if (job) {
+    job.ended = true;
+    job.stop = true;
+    job.cancel = true;
+    job.state = 'ended';
+  }
+  scans.delete(desk);
+  return !!job;
+}
+
+
 export function checkSnapshot(desk, since, full) {
   const job = scans.get(desk);
   if (!job) return null;
@@ -770,6 +787,23 @@ export function clearFix(desk) {
   fixes.delete(desk);
   return true;
 }
+
+// End process. Stop leaves the run sitting on the server so it can be carried
+// on from where it stopped; End means the run is over - whatever is left is
+// dropped and nothing of it stays behind, not even after a restart. What is
+// already written is not undone.
+export function endFix(desk) {
+  const job = fixes.get(desk);
+  if (job) {
+    job.ended = true;
+    job.stop = true;
+    job.cancel = true;
+    job.state = 'ended';
+  }
+  fixes.delete(desk);
+  return !!job;
+}
+
 
 export function fixSnapshot(desk, since) {
   const job = fixes.get(desk);

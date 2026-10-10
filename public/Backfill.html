@@ -244,6 +244,10 @@
   }
 
   $('startBtn').addEventListener('click', start);
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'stopBtn', url: '/api/courier/backfill-end', what: 'this backfill' });
+
   $('stopBtn').addEventListener('click', stop);
   $('clearBtn').addEventListener('click', clearJob);
   $('carryBtn').addEventListener('click', carryOn);

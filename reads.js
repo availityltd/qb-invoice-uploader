@@ -132,6 +132,23 @@ export function clearRead(desk, name) {
   return true;
 }
 
+// End process. Stop leaves the run sitting on the server so it can be carried
+// on from where it stopped; End means the run is over - whatever is left is
+// dropped and nothing of it stays behind, not even after a restart. What is
+// already written is not undone.
+export function endRead(desk, name) {
+  const key = keyOf(desk, name);
+  const run = runs.get(key);
+  if (run) {
+    run.ended = true;
+    run.stop = true;
+    run.state = 'ended';
+  }
+  runs.delete(key);
+  return !!run;
+}
+
+
 export function readSnapshot(desk, name, since) {
   const run = runs.get(keyOf(desk, name));
   if (!run) return null;

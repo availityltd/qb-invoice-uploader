@@ -705,6 +705,10 @@
     });
   });
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStop', url: '/api/find/end', what: 'this search' });
+
   $('btnStop').addEventListener('click', function(){
     post('/api/find/stop').catch(function(){});
   });

@@ -836,6 +836,10 @@
     var h = $('log').classList.toggle('hide');
     $('foldLog').textContent = h ? 'Show what it is doing' : 'Hide what it is doing';
   });
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStop', url: '/api/audit/end', what: 'this audit' });
+
   $('btnStop').addEventListener('click', function(){ post('/api/audit/stop').then(poll).catch(function(){}); });
   $('btnCarry').addEventListener('click', function(){
     post('/api/audit/resume').then(poll).catch(function(e){ say('bad', esc(e.message)); });

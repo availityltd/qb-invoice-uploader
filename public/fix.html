@@ -518,6 +518,10 @@
       }).catch(function(){ /* a missed poll is nothing to worry about */ });
   }
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnScanStop', url: '/api/invoice-details-end', what: 'this read' });
+
   $('btnScanStop').addEventListener('click', function(){
     $('btnScanStop').disabled = true;
     $('btnScanStop').textContent = 'Stopping…';
@@ -926,6 +930,10 @@
       }).catch(function(){ /* a missed poll is nothing to worry about */ });
   }
 
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnLookStop', url: '/api/invoice-find-end', what: 'this search' });
+
   $('btnLookStop').addEventListener('click', function(){
     $('btnLookStop').disabled = true;
     $('btnLookStop').textContent = 'Stopping…';
@@ -1152,6 +1160,10 @@
         setStat($('statLook'),'bad', e.message);
       });
   }
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnDelStop', url: '/api/invoice-delete-end', what: 'this delete run' });
+
   $('btnDelStop').addEventListener('click', function(){
     fetch('/api/invoice-delete-stop', { method:'POST' }).catch(function(){});
   });

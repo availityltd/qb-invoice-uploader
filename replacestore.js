@@ -51,6 +51,8 @@ function scanRow(s) {
 }
 
 export async function saveReplace(desk, st) {
+  // the run was ended - its row is gone and must not be written back
+  if (st && st.ended) return;
   await pool.query(
     `INSERT INTO replace_state (realm_id, user_sub, pairs, scan, rows, job, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6, now())

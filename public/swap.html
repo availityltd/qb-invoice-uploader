@@ -549,6 +549,10 @@
   $('toFind').addEventListener('input', function(){ drawPicker('to'); });
   $('rewrite').addEventListener('change', function(){ if(S.rows.length) drawPlan(); });
   $('btnCheck').addEventListener('click', check);
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnCheckStop', url: '/api/swap/end', what: 'this plan' });
+
   $('btnCheckStop').addEventListener('click', function(){
     $('btnCheckStop').disabled = true;
     post('/api/swap/plan-stop');
@@ -571,6 +575,10 @@
   $('btnNone').addEventListener('click', function(){ tickAll(false); });
   $('btnCsv').addEventListener('click', csv);
   $('btnRun').addEventListener('click', run);
+  // End process puts its own button beside Stop: Stop leaves the run on the
+  // server to be carried on, End takes it off for good.
+  window.APP.endProcess({ near: 'btnStop', url: '/api/swap/end', what: 'this swap run' });
+
   $('btnStop').addEventListener('click', function(){
     $('btnStop').disabled = true;
     post('/api/swap/stop').then(function(){ $('btnStop').disabled = false; });

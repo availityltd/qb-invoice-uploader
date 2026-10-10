@@ -88,6 +88,8 @@ function scanRow(scan) {
 }
 
 export async function saveRecatState(desk, st) {
+  // the run was ended - its row is gone and must not be written back
+  if (st && st.ended) return;
   await pool.query(
     `INSERT INTO recat_state (realm_id, user_sub, from_acct, to_acct, scan, txns, job, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7, now())
@@ -107,6 +109,8 @@ export async function saveRecatState(desk, st) {
 // after each transaction only the moving parts are written - the two accounts
 // and the scan behind them do not change once the run has started
 export async function saveRecatProgress(desk, st) {
+  // the run was ended - its row is gone and must not be written back
+  if (st && st.ended) return;
   await pool.query(
     `UPDATE recat_state SET txns = $2, job = $3, updated_at = now()
       WHERE realm_id = $1 AND user_sub = $4`,

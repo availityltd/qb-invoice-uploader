@@ -742,6 +742,66 @@
     document.head.appendChild(st);
   })();
 
+  /* ---------- End process ---------- */
+  // Stop leaves a run sitting on the server: the batch in flight finishes and
+  // whatever is left waits there, so Carry on still works and a deploy picks it
+  // up again. There was no way to say the run is simply over. End process is
+  // that - whatever has not been done is dropped, the job leaves the server and
+  // its row is deleted, so no restart brings it back. What is already written to
+  // QuickBooks or to the sheets is not undone; this only ends the run.
+  //
+  // A page says where its Stop button is and which address ends that run. The
+  // button is put beside Stop, and once the server has let go the page is loaded
+  // again from nothing, so what is on the screen is what is on the server.
+  window.APP = window.APP || {};
+  window.APP.endProcess = function(opts){
+    opts = opts || {};
+    var near = typeof opts.near === 'string' ? document.getElementById(opts.near) : opts.near;
+    if(!near || !opts.url) return null;
+
+    var NL = String.fromCharCode(10);
+    var b = document.createElement('button');
+    b.type = 'button';
+    if(opts.id) b.id = opts.id;
+    b.className = opts.className || near.className || 'side';
+    b.textContent = 'End process';
+    b.style.borderColor = 'var(--neg)';
+    b.style.background = 'var(--neg)';
+    b.style.color = '#fff';
+    b.title = 'End this run for good - nothing of it is left on the server';
+    near.parentNode.insertBefore(b, near.nextSibling);
+
+    b.addEventListener('click', function(){
+      if(!confirm(
+        'End ' + (opts.what || 'this run') + ' for good?' + NL + NL +
+        'Anything not done yet is dropped and the job leaves the server, so ' +
+        'there will be nothing left to carry on or retry. What has already been ' +
+        'written stays as it is.'
+      )) return;
+
+      b.disabled = true;
+      b.textContent = 'Ending…';
+
+      fetch(opts.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      })
+        .then(function(r){ return r.json().catch(function(){ return {}; }); })
+        .then(function(d){
+          if(d && d.error) throw new Error(d.error);
+          if(opts.then) opts.then(d); else location.reload();
+        })
+        .catch(function(e){
+          b.disabled = false;
+          b.textContent = 'End process';
+          alert('Could not end it: ' + e.message);
+        });
+    });
+
+    return b;
+  };
+
   window.APP = window.APP || {};
   window.APP.ready = fetch('/auth/status')
     .then(function(r){ return r.json(); })
