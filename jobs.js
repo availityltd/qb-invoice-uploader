@@ -29,6 +29,13 @@ function push(job, type, msg) {
   job.events.push({ id: job.lastId, type, msg: stamp + '  ' + msg });
   if (job.events.length > 4000) job.events.splice(0, job.events.length - 4000);
 }
+// the place is written down after every batch - but never after the run has
+// been ended, or a deleted row would be written back
+function persist(job) {
+  if (job.ended) return;
+  saveJobProgress(job.desk, job).catch(e => console.error('job progress failed:', e.message));
+}
+
 function isAuthError(msg, status) {
   return status === 401 ||
     /AuthenticationFailed|003200|Unauthorized|token expired|invalid_grant/i.test(String(msg || ''));
@@ -310,7 +317,7 @@ async function pass(realmId, job, itemMap, termMap, list, isRetry) {
         job.cursor = Math.min(job.total, i + job.batchSize);
       }
       // the place is written down after every batch, so a restart loses nothing
-            saveJobProgress(job.desk, job).catch(e => console.error('job progress failed:', e.message));
+      persist(job);
       if (i + job.batchSize < pending.length) await nap(job, job.delay);
     }
 
@@ -362,7 +369,7 @@ async function run(realmId, job) {
   }
 
   job.finishedAt = Date.now();
-         saveJobProgress(job.desk, job).catch(e => console.error('job progress failed:', e.message));
+  persist(job);
 }
 
 export function stopJob(desk) {
@@ -372,6 +379,33 @@ export function stopJob(desk) {
   job.hold = false;
   push(job, 'log', 'Stop requested - finishing the batch in flight...');
   return true;
+}
+
+// End process is the other end of Stop. Stop finishes the batch in flight and
+// leaves the run sitting on the server, so Carry on still works and a deploy
+// picks it up again. End means the run is over: whatever has not been sent is
+// dropped, the job leaves the server's memory and its row is deleted, so
+// nothing brings it back. Only the invoices already in QuickBooks remain -
+// this does not undo them.
+export async function endJob(desk) {
+  const job = jobs.get(desk);
+
+  if (job) {
+    job.ended = true;          // stops the loop writing the row back
+    job.stop = true;
+    job.hold = false;
+    job.state = 'ended';
+    job.finishedAt = Date.now();
+    jobs.delete(desk);
+  }
+
+  // the row is deleted whether or not anything was still in memory - a run
+  // left behind by an earlier server is exactly what this has to clean up
+  try { await clearJobRow(desk); } catch (e) {
+    console.error('job row delete failed:', e.message);
+  }
+
+  return !!job;
 }
 
 // Pause holds the run where it is. Resume picks up from the same place, so

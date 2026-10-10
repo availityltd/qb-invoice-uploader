@@ -57,7 +57,7 @@ import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages,
          readCell, writeCell, stampRows } from './sheets.js';
 import { clean as cprClean } from './cpr.js';
 import {
-  startJob, stopJob, pauseJob, resumeJob, clearJob,
+  startJob, stopJob, pauseJob, resumeJob, clearJob, endJob,
     retryFailed, snapshot, remainingInvoices, resumeUnfinished
 } from './jobs.js';
 import { startVoidJob, stopVoidJob, clearVoidJob, resumeVoidJob, voidSnapshot, initVoidStore, resumeVoidRuns } from './voidjobs.js';
@@ -7465,6 +7465,18 @@ app.post('/api/upload/resume', async (req, res) => {
     res.status(409).json({ error: e.message });
   }
 });
+// End process: the run is over. Whatever has not been sent is dropped and the
+// job is gone from the server, so no deploy or restart brings it back. The
+// invoices already in QuickBooks stay where they are.
+app.post('/api/upload/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const had = await endJob(req.desk);
+  handovers.delete(req.desk);        // and the list Convert was holding for it
+  res.json({ ok: true, had });
+});
+
 app.post('/api/upload/clear', async (req, res) => {
   const realmId = await requireCompany(req, res);
   if (!realmId) return;

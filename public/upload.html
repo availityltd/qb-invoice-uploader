@@ -84,6 +84,7 @@
               <button class="run" id="btnResume" data-need="upload" style="display:none">Carry on from here</button>
               <button class="side" id="btnPause" style="display:none">Pause</button>
               <button class="side" id="btnStop" style="display:none;border-color:var(--neg);color:var(--neg)">Stop</button>
+              <button class="side" id="btnEnd" style="display:none;border-color:var(--neg);background:var(--neg);color:#fff">End process</button>
             </div>
 
             <div class="prog"><i id="bar"></i></div>
@@ -110,6 +111,7 @@
         <footer>
           <p><b>It runs on the server:</b> once you press Start the work carries on by itself. You can open another page, or close this one, and come back — the log and the progress will still be here.</p>
           <p><b>Pause holds your place.</b> Press Pause to hold the run where it is, then Carry on when you are ready — nothing already in QuickBooks is sent a second time. Stop ends the run, and Carry on still works afterwards.</p>
+          <p><b>End process clears the server.</b> Stop leaves the run waiting so you can carry on later. End process finishes it for good — whatever has not been sent is dropped, the job is removed from the server, and a deploy or a restart will not bring it back. Invoices already in QuickBooks are not touched.</p>
           <p><b>Failures are retried:</b> anything that fails is tried again automatically, up to four more rounds, with a growing pause between them.</p>
         </footer>
       </div>
@@ -403,6 +405,9 @@
     $('btnStart').style.display  = (!job || (!live && !held && !halted)) ? 'block' : 'none';
     $('btnPause').style.display  = live ? 'block' : 'none';
     $('btnStop').style.display   = (live || held) ? 'block' : 'none';
+    // End is offered for as long as there is a run on the server at all,
+    // finished or not - it is what takes it off the server for good
+    $('btnEnd').style.display    = job ? 'block' : 'none';
     // the log can be cleared once the run is over, never while it is going
     $('btnClear').style.display  = (live || held) ? 'none' : '';
     $('btnResume').style.display = (held || halted) ? 'block' : 'none';
@@ -411,6 +416,8 @@
     $('btnPause').textContent = 'Pause';
     $('btnStop').disabled = false;
     $('btnStop').textContent = 'Stop';
+    $('btnEnd').disabled = false;
+    $('btnEnd').textContent = 'End process';
     $('btnResume').textContent = held ? 'Carry on' : 'Carry on from here';
 
     if(!job){
@@ -525,6 +532,46 @@
     $('btnStop').disabled = true;
     $('btnStop').textContent = 'Stopping…';
     post('/api/upload/stop').catch(function(){});
+  });
+
+  // Stop leaves the run on the server so Carry on still works. End is the
+  // other thing: the run is over, the server lets it go, and the page starts
+  // again from nothing. What is already in QuickBooks is not touched.
+  var NL = String.fromCharCode(10);
+
+  $('btnEnd').addEventListener('click', function(){
+    var left = job ? Math.max(0, job.total - job.doneCount - job.failedCount) : 0;
+    if(!confirm(
+      'End this upload for good?' + NL + NL +
+      (left ? nf(left) + ' invoice' + (left === 1 ? '' : 's') + ' not yet sent will be dropped.' + NL : '') +
+      'The job leaves the server, so Carry on and Retry will no longer be there. ' +
+      'Invoices already in QuickBooks stay as they are.'
+    )) return;
+
+    $('btnEnd').disabled = true;
+    $('btnEnd').textContent = 'Ending…';
+
+    post('/api/upload/end').then(function(){
+      stopPolling();
+      job = null;
+      lastEventId = 0;
+      invoices = [];
+      keepInvoices();
+      itemCounts = {};
+      $('log').innerHTML = '';
+      logLines.length = 0;
+      $('resultSec').classList.add('hide');
+      $('runSec').classList.add('hide');
+      $('srcAside').textContent = '';
+      $('fromConvert').classList.add('hide');
+      setStat($('statFile'), '', '');
+      paint();
+      log('Process ended. Nothing of this run is left on the server.', 'warn');
+    }).catch(function(e){
+      $('btnEnd').disabled = false;
+      $('btnEnd').textContent = 'End process';
+      log(e.message, 'err');
+    });
   });
 
   $('btnRetry').addEventListener('click', function(){
