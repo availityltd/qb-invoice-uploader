@@ -243,6 +243,7 @@
           <div id="traceBox"></div>
           <div class="tally" id="tally"></div>
           <div class="lists" id="lists"></div>
+          <div id="shipBox"></div>
         </div>
 
         <div class="step hide" id="stepPay">
@@ -1023,6 +1024,8 @@
       return '<tr><td>' + esc(r.invoice) + '</td><td class="num">' + money(r.qbTotal) + '</td></tr>';
     });
 
+    drawShipping(d);
+
     // nothing left to pay, and nothing to duplicate either
     if(!t.matched && !(d.paidElsewhere || []).length){
       $('stepPay').classList.add('hide');
@@ -1036,6 +1039,135 @@
       return;
     }
     showPay(d);
+  }
+
+  /* ---------- the shipping charged once ---------- */
+
+  // Two orders that travelled in one parcel are written in one cell, and the
+  // courier charged shipping once - but both invoices carry a shipping line,
+  // so QuickBooks comes to more than the sheet collected and the row sits in
+  // "Amount differs" with nobody able to receive it. Merge payments has done
+  // this arithmetic for years: the difference is some number of shipping
+  // charges, and taking them off makes the invoices agree with the sheet.
+  // Here it is on the CPR, for the rows already in front of you. Nothing goes
+  // to QuickBooks until the list has been read and the button pressed.
+  var shipRows = [];
+
+  function drawShipping(d){
+    var box = $('shipBox');
+    shipRows = [];
+    box.innerHTML = '';
+
+    var off = d.amountOff || [];
+    if(!off.length) return;
+
+    box.innerHTML =
+      '<div class="box"><h4>Shipping charged once (' + nf(off.length) + ' row' +
+        (off.length === 1 ? '' : 's') + ')</h4>' +
+      '<div class="inner" style="padding:10px">' +
+        '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">' +
+          'Where the sheet collected less than QuickBooks asks, the difference is ' +
+          'usually the shipping charged once on a parcel that held more than one ' +
+          'order. This works out which shipping lines would have to come off.' +
+        '</div>' +
+        '<button class="mini" id="btnShipPlan">Work out the shipping</button>' +
+        '<div id="shipOut"></div>' +
+      '</div></div>';
+
+    $('btnShipPlan').addEventListener('click', function(){
+      var btn = $('btnShipPlan');
+      btn.disabled = true;
+      $('shipOut').innerHTML = '<div class="result">Reading these invoices in QuickBooks...</div>';
+
+      post('/api/cpr/ship-plan', {
+        rows: off.map(function(r){
+          return {
+            sheetRow: r.sheetRow,
+            invoice: r.invoice,
+            sheetAmount: r.sheetAmount,
+            numbers: (r.parts || []).map(function(p){ return p.number; })
+          };
+        })
+      }).then(function(res){
+        btn.disabled = false;
+        shipRows = res.rows || [];
+        drawShipPlan();
+      }).catch(function(e){
+        btn.disabled = false;
+        $('shipOut').innerHTML = '<div class="result bad">' + esc(e.message) + '</div>';
+      });
+    });
+  }
+
+  function drawShipPlan(){
+    var fixable = shipRows.filter(function(r){ return r.state === 'fix'; });
+
+    var html = shipRows.map(function(r, i){
+      var head = '<b>' + esc(r.invoice) + '</b> · sheet ' + money(r.sheetAmount) +
+                 (r.owed !== undefined ? ' · QuickBooks ' + money(r.owed) : '') +
+                 (r.diff ? ' · <span style="color:var(--warn)">' + money(r.diff) +
+                           ' more</span>' : '');
+
+      if(r.state !== 'fix'){
+        return '<div class="result ' + (r.state === 'agrees' ? 'good' : 'bad') + '">' +
+               head + '<br>' + esc(r.note || '') + '</div>';
+      }
+
+      var lines = (r.strip || []).map(function(l){
+        return esc(l.doc || l.order) + ' — ' + esc(l.item || 'shipping') +
+               ' ' + money(l.amount);
+      }).join('<br>');
+
+      return '<div class="result good">' + head + '<br>' + esc(r.note || '') +
+             '<div style="font-size:12px;color:var(--muted);margin:4px 0">' + lines + '</div>' +
+             '<button class="mini" data-ship="' + i + '">Take it off this row</button></div>';
+    }).join('');
+
+    if(fixable.length > 1){
+      html += '<div style="margin-top:8px"><button class="mini solid" id="btnShipAll">' +
+              'Take the shipping off all ' + nf(fixable.length) + ' rows</button></div>';
+    }
+
+    $('shipOut').innerHTML = html || '<div class="result">Nothing to work out here.</div>';
+
+    Array.prototype.forEach.call($('shipOut').querySelectorAll('[data-ship]'), function(b){
+      b.addEventListener('click', function(){
+        applyShip([shipRows[Number(b.getAttribute('data-ship'))]]);
+      });
+    });
+    var all = $('btnShipAll');
+    if(all) all.addEventListener('click', function(){ applyShip(fixable); });
+  }
+
+  function applyShip(rows){
+    var strip = [];
+    rows.forEach(function(r){ (r.strip || []).forEach(function(l){ strip.push(l); }); });
+    if(!strip.length) return;
+
+    var total = strip.reduce(function(s, l){ return s + Number(l.amount || 0); }, 0);
+    if(!confirm('Take ' + strip.length + ' shipping line' + (strip.length === 1 ? '' : 's') +
+                ', ' + money(total) + ' in all, off these invoices in QuickBooks?')) return;
+
+    $('shipOut').insertAdjacentHTML('beforeend',
+      '<div class="result">Changing the invoices in QuickBooks...</div>');
+
+    post('/api/cpr/ship-apply', { strip: strip }).then(function(d){
+      var out = '<div class="result good">Shipping taken off ' + nf((d.done || []).length) +
+                ' invoice' + ((d.done || []).length === 1 ? '' : 's') + '.</div>';
+      (d.failed || []).forEach(function(f){
+        out += '<div class="result bad">' + esc(f.doc || f.invoiceId) + ' - ' + esc(f.msg) + '</div>';
+      });
+      out += '<div class="result">Reading the CPR again, so these rows move to ' +
+             '"Ready to pay"...</div>';
+      $('shipOut').innerHTML = out;
+
+      // the row has changed in QuickBooks, so the page says what it now is -
+      // and from there it is received like any other row
+      if(S.currentKey) readCpr(S.currentKey, '');
+    }).catch(function(e){
+      $('shipOut').insertAdjacentHTML('beforeend',
+        '<div class="result bad">' + esc(e.message) + '</div>');
+    });
   }
 
   /* ---------- parcels replaced and settled twice ---------- */

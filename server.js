@@ -103,7 +103,7 @@ import {
   openFile as openMergeFile, buildOrders, groupOrders, parsePasted, placeGroups
 } from './merges.js';
 import {
-  invoicesWithLines, planGroup, remarkFor, stripShipping
+  invoicesWithLines, planGroup, remarkFor, stripShipping, planStrip, round as money2
 } from './mergeqb.js';
 import {
   parseNumbers as parseShipNumbers, buildPlan as buildShipPlan
@@ -3122,6 +3122,140 @@ app.post('/api/cpr/stray-remove', async (req, res) => {
     }
 
     res.json({ ok: true, removed, left });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// The shipping charged once, on a row that holds more than one order.
+//
+// Two orders that went in one parcel are written in one cell, and the courier
+// charged shipping once - but both invoices carry a shipping line, so
+// QuickBooks comes to more than the sheet collected and the row sits in
+// "Amount differs" with nobody able to receive it. Merge payments has worked
+// this out for years: the difference is some number of shipping charges, and
+// taking them off makes the invoices agree with the sheet. This is the same
+// arithmetic, on the CPR page, for the rows that are already in front of you.
+//
+// Nothing is changed here. This only says what would have to come off.
+app.post('/api/cpr/ship-plan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'Nothing to work out' });
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    // every order number on every row, read once
+    const wanted = [];
+    rows.forEach(r => (r.numbers || []).forEach(n => wanted.push(n)));
+    const found = await invoicesWithLines(realmId, token, wanted);
+
+    const out = rows.map(r => {
+      const parts = (r.numbers || []).map(n => ({ number: n, inv: found.get(cprDigits(n)) || null }));
+      const missing = parts.filter(p => !p.inv).map(p => p.number);
+      const here = parts.filter(p => p.inv);
+
+      const base = {
+        sheetRow: r.sheetRow,
+        invoice: r.invoice,
+        sheetAmount: money2(r.sheetAmount),
+        numbers: r.numbers || []
+      };
+
+      if (missing.length) {
+        return Object.assign(base, {
+          state: 'missing',
+          note: missing.join(', ') + ' is not in QuickBooks'
+        });
+      }
+
+      const open = here.filter(p => p.inv.balance > 0.005);
+      if (!open.length) {
+        return Object.assign(base, { state: 'paid', note: 'These invoices are already paid' });
+      }
+
+      const owed = money2(open.reduce((s, p) => s + p.inv.balance, 0));
+      const diff = money2(owed - money2(r.sheetAmount));
+
+      const shipping = [];
+      open.forEach(p => (p.inv.shipping || []).forEach(l => shipping.push({
+        invoiceId: p.inv.id, doc: p.inv.doc, order: p.number,
+        lineId: l.id, item: l.item, amount: money2(l.amount)
+      })));
+
+      const plan = planStrip(diff, shipping);
+      const common = Object.assign(base, {
+        owed, diff,
+        invoices: open.map(p => ({ order: p.number, doc: p.inv.doc, qbId: p.inv.id, balance: p.inv.balance })),
+        shippingLines: shipping.length
+      });
+
+      if (!plan) {
+        return Object.assign(common, {
+          state: 'stuck',
+          note: diff < 0
+            ? 'The sheet collected ' + Math.abs(diff) + ' more than the invoices come to'
+            : 'No number of shipping charges adds up to ' + diff +
+              (shipping.length ? '' : ' - there is no shipping line on these invoices')
+        });
+      }
+      if (!plan.need) {
+        return Object.assign(common, {
+          state: 'agrees',
+          strip: [],
+          note: 'These already agree with the sheet'
+        });
+      }
+
+      return Object.assign(common, {
+        state: 'fix',
+        strip: plan.strip,
+        stripTotal: money2(plan.strip.reduce((s, l) => s + l.amount, 0)),
+        note: 'Taking the shipping off ' + plan.need + ' of ' + open.length +
+              ' invoices clears ' + diff
+      });
+    });
+
+    res.json({ rows: out });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Take those lines off. The invoice is read again inside stripShipping, so a
+// line somebody removed in the meantime is reported, not removed twice.
+app.post('/api/cpr/ship-apply', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const strip = Array.isArray(req.body.strip) ? req.body.strip : [];
+  if (!strip.length) return res.status(400).json({ error: 'Nothing to take off' });
+
+  try {
+    const token = await getAccessToken(realmId);
+
+    // one call per invoice, however many of its lines are going
+    const byInvoice = new Map();
+    strip.forEach(l => {
+      const id = String(l.invoiceId || '');
+      if (!id || !l.lineId) return;
+      if (!byInvoice.has(id)) byInvoice.set(id, { doc: l.doc || '', lineIds: [] });
+      byInvoice.get(id).lineIds.push(String(l.lineId));
+    });
+
+    const done = [], failed = [];
+    for (const [id, x] of byInvoice) {
+      try {
+        const r = await stripShipping(realmId, token, id, x.lineIds);
+        done.push({ invoiceId: id, doc: x.doc, total: r && r.total !== undefined ? r.total : null });
+      } catch (e) {
+        failed.push({ invoiceId: id, doc: x.doc, msg: e.message });
+      }
+    }
+
+    res.json({ ok: true, done, failed });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -22,13 +22,63 @@ export function digitsOf(v) {
 // One parcel can carry several orders - the courier writes them in one cell,
 // "91302583 , 91302588", and the COD is the two added up. Every number in the
 // cell is pulled out so all of them can be settled together.
+// A second order in the same cell is written short.
+//
+// "#91393425,3427" is two orders: #91393425 and #91393427. Whoever fills the
+// sheet writes the first number in full and then only as much of the next as
+// tells them apart - "#91394842,4845,847,848" is four orders. Read as written,
+// "3427" is not an order number at all, so the row came back as "missing:
+// 3427" and the money behind it could not be received.
+//
+// So a short number is finished off from the one before it: its digits take
+// the place of the last digits of the number in full. Where that could land on
+// either side of a round number - 91399998 followed by 0002 - the nearest
+// answer wins, which is the next number up, not ten thousand back.
+export function completeNumber(base, tail) {
+  const b = digitsOf(base);
+  const t = digitsOf(tail);
+  if (!b || !t || t.length >= b.length) return t;
+
+  const head = b.slice(0, b.length - t.length);
+  const step = Math.pow(10, t.length);
+
+  const near = Number(b);
+  let best = null;
+  [-1, 0, 1].forEach(k => {
+    const n = (Number(head) + k) * step + Number(t);
+    if (n <= 0) return;
+    const got = String(n).padStart(b.length, '0');
+    if (best === null || Math.abs(n - near) < Math.abs(Number(best) - near)) best = got;
+  });
+  return best || t;
+}
+
 export function splitInvoices(cell) {
   const s = clean(cell);
   if (!s) return [];
-  return s
-    .split(/[\s,;/|]+/)
-    .map(x => clean(x))
-    .filter(x => digitsOf(x).length >= 4);
+
+  const parts = s.split(/[\s,;/|]+/).map(x => clean(x)).filter(Boolean);
+  const hash = s.charAt(0) === '#';
+  const out = [];
+  let base = '';
+
+  parts.forEach(p => {
+    const d = digitsOf(p);
+    if (!d) return;
+
+    // written in full - it says what the short ones after it mean
+    if (!base || d.length >= base.length) {
+      base = d;
+      out.push(p);
+      return;
+    }
+
+    const full = completeNumber(base, d);
+    base = full;
+    out.push(hash ? '#' + full : full);
+  });
+
+  return out.filter(x => digitsOf(x).length >= 4);
 }
 
 const MONTHS = {
