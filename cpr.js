@@ -321,6 +321,223 @@ export async function liveBalances(realmId, token, ids) {
   return out;
 }
 
+/* ==================== one CPR, matched against QuickBooks ==================== */
+
+export const QB_STATUS_HEADER = 'QB Status';
+
+export function statusColumnOf(header) {
+  const low = (header || []).map(h => clean(h).toLowerCase());
+  const i = low.indexOf(QB_STATUS_HEADER.toLowerCase());
+  return i >= 0 ? i : (header || []).length;
+}
+
+// Reads one CPR out of the sheet and says what QuickBooks makes of every row:
+// ready to pay, the amount differs, paid under another CPR, already received,
+// or not in QuickBooks at all.
+//
+// This used to live in the page's own request and nowhere else, which meant
+// only somebody sitting on the page could work out what a row was. The run on
+// the server has to know the same thing - that is how it colours the sheet
+// when the payments are done - so it lives here, and the page and the run read
+// from the one answer.
+export async function matchCpr(realmId, token, opts) {
+  const { sheetId, tab, courier, cpr, excel = false } = opts || {};
+
+  const saved = courier ? await getSetting(realmId, `cpr:cols:${courier}`, null) : null;
+  const data = await loadSheet(sheetId, tab, excel, saved);
+  const hasStatus = data.cols.status >= 0;
+
+  let rows = data.rows;
+  if (cpr) rows = rows.filter(r => (r.cprNumber || '(no CPR number)') === cpr);
+  if (!rows.length) {
+    const e = new Error('No rows for that CPR');
+    e.soft = true;
+    throw e;
+  }
+
+  const delivered = rows.filter(r => isDelivered(r, hasStatus));
+  const skipped = rows.length - delivered.length;
+
+  // a merged parcel carries several orders in one cell, so every number in
+  // every row goes to QuickBooks
+  const wanted = [];
+  delivered.forEach(r => (r.invoices || [r.invoice]).forEach(n => wanted.push(n)));
+
+  const found = await findInvoices(realmId, token, wanted);
+
+  // which CPR each payment already on these invoices was posted under
+  const payIds = [];
+  found.forEach(inv => (inv.paymentIds || []).forEach(id => payIds.push(id)));
+  const pays = await paymentsByIds(realmId, token, [...new Set(payIds)]);
+  const refById = {};
+  pays.forEach(p => { refById[String(p.id)] = p.ref; });
+
+  const sheetCpr = rows[0].cprNumber || '';
+  const underThisCpr = inv => (inv.paymentIds || []).some(id => {
+    const ref = refById[String(id)];
+    return ref !== undefined && clean(ref) === clean(sheetCpr);
+  });
+
+  const matched = [], amountOff = [], notInQb = [],
+        alreadyPaid = [], paidElsewhere = [];
+
+  delivered.forEach(r => {
+    const numbers = r.invoices || [r.invoice];
+    // the number as written first - that is what tells a "-D" copy apart
+    const parts = numbers.map(n => {
+      const asIs = String(n).trim().replace(/^#/, '');
+      return { number: n, inv: found.get(asIs) || found.get(digitsOf(n)) || null };
+    });
+    const missing = parts.filter(p => !p.inv);
+
+    // one number in a merged row missing means the whole row has to wait
+    if (missing.length) {
+      notInQb.push({
+        sheetRow: r.sheetRow,
+        invoice: r.invoice,
+        amount: r.amount,
+        merged: !!r.merged,
+        missing: missing.map(p => p.number)
+      });
+      return;
+    }
+
+    const open = parts.filter(p => p.inv.balance > 0.005);
+    const settled = parts.filter(p => p.inv.balance <= 0.005);
+
+    const base = {
+      sheetRow: r.sheetRow,
+      invoice: r.invoice,
+      sheetAmount: r.amount,
+      merged: !!r.merged,
+      parts: parts.map(p => ({
+        number: p.number, qbDoc: p.inv.doc, qbId: p.inv.id,
+        qbTotal: p.inv.total, qbBalance: p.inv.balance
+      }))
+    };
+
+    // nothing open - either this CPR paid it, or somebody else did
+    if (!open.length) {
+      const elsewhere = parts.filter(p => !underThisCpr(p.inv));
+      const entry = Object.assign({}, base, {
+        qbDoc: parts.map(p => p.inv.doc).join(', '),
+        qbId: parts[0].inv.id,
+        qbTotal: parts.reduce((s, p) => s + p.inv.total, 0),
+        qbBalance: 0,
+        customerId: parts[0].inv.customerId,
+        customerName: parts[0].inv.customerName,
+        date: parts[0].inv.date
+      });
+
+      if (elsewhere.length) {
+        entry.elsewhere = elsewhere.map(p => ({
+          number: p.number, qbDoc: p.inv.doc, qbId: p.inv.id,
+          qbTotal: p.inv.total,
+          cprs: [...new Set((p.inv.paymentIds || [])
+            .map(id => refById[String(id)]).filter(Boolean))]
+        }));
+        paidElsewhere.push(entry);
+      } else {
+        alreadyPaid.push(entry);
+      }
+      return;
+    }
+
+    // what the row is worth to us: the open balances added up
+    const owed = open.reduce((s, p) => s + p.inv.balance, 0);
+    const entry = Object.assign({}, base, {
+      qbDoc: open.map(p => p.inv.doc).join(', '),
+      qbId: open[0].inv.id,
+      qbTotal: parts.reduce((s, p) => s + p.inv.total, 0),
+      qbBalance: Math.round(owed * 100) / 100,
+      customerId: open[0].inv.customerId,
+      customerName: open[0].inv.customerName,
+      date: open[0].inv.date,
+      settledParts: settled.length,
+      lines: open.map(p => ({
+        qbId: p.inv.id, qbDoc: p.inv.doc,
+        amount: Math.round(p.inv.balance * 100) / 100
+      }))
+    });
+
+    // a difference of 10 either way is not worth chasing
+    if (r.amount > 0 && Math.abs(r.amount - owed) > 10) { amountOff.push(entry); return; }
+    matched.push(entry);
+  });
+
+  // one payment per customer - QB will not mix two customers in one
+  const byCustomer = new Map();
+  matched.forEach(m => {
+    const k = m.customerId || 'none';
+    if (!byCustomer.has(k)) {
+      byCustomer.set(k, { customerId: m.customerId, customerName: m.customerName, lines: [], amount: 0 });
+    }
+    const g = byCustomer.get(k);
+    g.lines.push(m);
+    g.amount += m.qbBalance;
+  });
+
+  const first = rows[0] || {};
+  const mergedRows = delivered.filter(r => r.merged).length;
+
+  return {
+    cprNumber: first.cprNumber || '',
+    cprDate: first.cprDate || null,
+    totals: {
+      sheetRows: rows.length,
+      skipped,
+      mergedRows,
+      matched: matched.length,
+      amountOff: amountOff.length,
+      notInQb: notInQb.length,
+      alreadyPaid: alreadyPaid.length,
+      paidElsewhere: paidElsewhere.length,
+      amount: Math.round(matched.reduce((s, m) => s + m.qbBalance, 0) * 100) / 100
+    },
+    payments: Array.from(byCustomer.values()).map(g => ({
+      customerId: g.customerId,
+      customerName: g.customerName,
+      count: g.lines.length,
+      amount: Math.round(g.amount * 100) / 100
+    })),
+    matched, amountOff, notInQb, alreadyPaid, paidElsewhere,
+    width: data.width,
+    headerRow: data.headerRow,
+    statusCol: statusColumnOf(data.header)
+  };
+}
+
+// green received, yellow amount differs, orange paid under another CPR, red
+// not in QuickBooks. Rows still waiting are left as they are.
+export function colourPlan(m) {
+  const plan = [];
+  const add = (rows, colour) => (rows || []).forEach(r => {
+    if (r.sheetRow) plan.push({ row: r.sheetRow, colour });
+  });
+  add(m.alreadyPaid, 'green');
+  add(m.paidElsewhere, 'orange');
+  add(m.amountOff, 'yellow');
+  add(m.notInQb, 'red');
+  return plan;
+}
+
+// Puts the colours in. Only a Google Sheet can be coloured - an Excel workbook
+// sitting in Drive has no formatting the API can reach.
+export async function colourCpr(sheetId, tab, plan) {
+  if (!Array.isArray(plan) || !plan.length) return { painted: 0, tally: {} };
+
+  // the tab's own id, which is what the formatting call wants
+  const tabs = await listTabs(sheetId, false);
+  const hit = tabs.find(t => t.title === tab);
+  if (!hit) throw new Error('That tab is not in the sheet any more');
+
+  await paintRows(sheetId, hit.id, plan);
+
+  const tally = {};
+  plan.forEach(p => { tally[p.colour] = (tally[p.colour] || 0) + 1; });
+  return { painted: plan.length, tally };
+}
+
 export async function listAccounts(realmId, token) {
   const q = await qbQuery(realmId, token,
     `SELECT Id, Name, AccountType, AccountSubType FROM Account ` +

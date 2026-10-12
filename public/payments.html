@@ -292,7 +292,8 @@
     openTrouble: {},
     bank: null, options: null,
     match: null, trace: null, lastPaid: [],
-    payJob: null, payPoller: null, lastEventId: 0
+    payJob: null, payPoller: null, lastEventId: 0,
+    seenFinish: null
   };
 
   function money(n){
@@ -304,19 +305,6 @@
   function esc(s){
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  // The run log is the server's, but the colouring happens here after the run
-  // is over. It is part of the same piece of work, so it is written into the
-  // same log rather than left to a quiet note beside a button.
-  function payLine(msg, cls){
-    var box = $('paylog');
-    if(!box) return;
-    var line = document.createElement('div');
-    if(cls) line.className = cls;
-    line.textContent = msg;
-    box.appendChild(line);
-    box.scrollTop = box.scrollHeight;
   }
 
   function say(cls, html){
@@ -937,7 +925,9 @@
              '&cpr=' + encodeURIComponent(cprKey === 'All rows' ? '(no CPR number)' : cprKey) +
              (S.excel ? '&excel=1' : '');
 
-    Promise.all([
+    // handed back, so a caller can wait for the fresh answer before acting on
+    // it - without the return, whatever came next ran against the old one
+    return Promise.all([
       get('/api/cpr/match?' + qs),
       get('/api/cpr/trace?' + qs).catch(function(){ return null; })
     ]).then(function(both){
@@ -952,6 +942,7 @@
       return S.match;
     }).catch(function(e){
       say('bad', '<b>' + esc(e.message) + '</b>');
+      return null;
     });
   }
 
@@ -1247,10 +1238,11 @@
     $('payOut').innerHTML = '';
     S.lastEventId = 0;
     S.payJob = null;
-    S.colouredFor = null;   // a fresh run colours the sheet again
+    S.seenFinish = null;    // a fresh run is a fresh finish to show
 
     post('/api/cpr/receive', {
       courier: S.courier,
+      cprKey: S.currentKey,
       cprNumber: S.match.cprNumber,
       cprDate: S.match.cprDate,
       accountId: acctSel.value,
@@ -1373,57 +1365,30 @@
     S.lastPaid = j.paidInvoices || [];
     if(S.lastPaid.length) drawPaidList();
 
-    // The run is over on the server, but the work is not: the sheet still has
-    // to be coloured. That used to happen in silence, with the log sitting on
-    // "payments recorded" while the page was still busy - which read as a run
-    // that had finished and a sheet that never changed. It says so now, step by
-    // step, and only the once: a poll that lands again on the same finished run
-    // must not colour the sheet a second time.
-    // Carry on after a Stop keeps the same run, so the run's id alone would say
-    // "already coloured" and skip the sheet the second time round. What marks
-    // one finish from the next is when it finished.
+    // The colouring is the run's own work now, done on the server and said in
+    // the log above - so the page no longer does it. What is left for the page
+    // is to show the CPR as it now stands, once per finish, so the cards and
+    // lists agree with the sheet somebody is looking at.
+    // Carry on after a Stop keeps the same run, so the run's id alone would
+    // read as "already seen" the second time round. What marks one finish from
+    // the next is when it finished.
     var finishKey = String(j.id) + '|' + String(j.finishedAt || '');
-    if(j.posted > 0 && !S.afterPay && S.colouredFor !== finishKey){
-      S.colouredFor = finishKey;
-      S.afterPay = true;
+    if(j.posted > 0 && S.seenFinish !== finishKey){
+      S.seenFinish = finishKey;
       $('stepPay').classList.add('done');
 
-      var key = S.currentKey;
-
-      // Colours are put in by the Google Sheets API, which has no hold over a
-      // workbook that is merely sitting in Drive as an Excel file. Saying so is
-      // better than leaving somebody waiting for colours that cannot come.
-      if(S.excel){
-        payLine('The sheet is an Excel workbook, so it cannot be coloured - ' +
-                'only a Google Sheet can. "Received" has still been written into it.');
-        payLine('--- Process complete ---', 'ok');
-        S.afterPay = false;
-      } else {
-        // only the CPR just received is read again - the rest of the sheet was
-        // not touched - and the sheet is coloured from what that read says, so
-        // the rows that have just been paid go green without anybody asking
-        payLine('Reading this CPR again, so the colours match what it now says...');
-
-        Promise.resolve(key ? readCpr(key, '') : null)
-          .then(function(){
-            payLine('Colouring the sheet...');
-            return colourNow(true);
-          })
-          .then(function(d){
-            if(d && d.painted){
-              payLine('Coloured ' + nf(d.painted) + ' rows' + (d.text ? ' - ' + d.text : ''), 'ok');
-            } else {
-              payLine('No row needed a colour.');
-            }
-            payLine('--- Process complete ---', 'ok');
-            S.afterPay = false;
-          })
-          .catch(function(e){
-            payLine('The sheet could not be coloured: ' + e.message, 'fail');
-            payLine('--- The payments are recorded; only the colouring did not finish ---', 'fail');
-            S.afterPay = false;
-          });
+      if(j.coloured && j.coloured.painted){
+        var t = j.coloured.tally || {};
+        var bits = [];
+        if(t.green)  bits.push(nf(t.green) + ' received');
+        if(t.yellow) bits.push(nf(t.yellow) + ' amount differs');
+        if(t.orange) bits.push(nf(t.orange) + ' under another CPR');
+        if(t.red)    bits.push(nf(t.red) + ' not in QuickBooks');
+        $('colourNote').textContent =
+          'Coloured ' + nf(j.coloured.painted) + ' rows — ' + bits.join(', ');
       }
+
+      if(S.currentKey) readCpr(S.currentKey, '');
     }
 
   }
@@ -1442,7 +1407,7 @@
   $('btnClearRun').addEventListener('click', function(){
     post('/api/cpr/receive-clear').then(function(){
       S.lastEventId = 0;
-      S.colouredFor = null;
+      S.seenFinish = null;
       $('paylog').innerHTML = '';
       $('payOut').innerHTML = '';
       $('runBox').classList.add('hide');

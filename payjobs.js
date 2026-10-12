@@ -1,5 +1,5 @@
 import { getAccessToken } from './qb.js';
-import { postPayment, liveBalances } from './cpr.js';
+import { postPayment, liveBalances, matchCpr, colourPlan, colourCpr } from './cpr.js';
 import { writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
 import { realmOf } from './desk.js';
@@ -68,7 +68,7 @@ async function run(realmId, job, only) {
   const {
     courier, cprNumber, cprDate, accountId, accountName, methodId,
     matched: allMatched, sheetId, tab, excel = false,
-    headerRow, statusCol, writeStatus = true
+    headerRow, statusCol, writeStatus = true, cprKey
   } = job.body;
 
   const matched = only || allMatched;
@@ -290,6 +290,67 @@ async function run(realmId, job, only) {
     }
   }
 
+  // which CPR to read again: the one the page was on. Without it there is no
+  // telling this CPR's rows from the rest of the tab, and a whole tab is not
+  // ours to colour.
+  const colourKey = cprKey === 'All rows' ? '(no CPR number)' : (cprKey || cprNumber || '');
+
+  // Colouring the sheet is part of the run, and it happens here - on the
+  // server, where the run lives.
+  //
+  // It used to be the page's job: when the run finished, the browser read the
+  // CPR again and then coloured. Which meant it only happened if somebody was
+  // still sitting on that page, with that CPR open - and the log said
+  // "Colouring the sheet... Process complete" either way, so a sheet that was
+  // never touched read as a sheet that had been. Anyone who left the page
+  // while the payments went through, as the page invites them to, came back to
+  // a finished run and an uncoloured sheet.
+  //
+  // Now the run reads the CPR again itself and puts the colours in. It happens
+  // once, before the run is called done, so the log tells the truth and every
+  // computer watching sees the same thing.
+  if (job.posted > 0 && sheetId && tab && !colourKey) {
+    push(job, 'log', 'This run does not say which CPR it was, so the sheet is left as it is.');
+  } else if (job.posted > 0 && sheetId && tab) {
+    if (excel) {
+      // only a Google Sheet has colours the API can reach
+      push(job, 'log', 'The sheet is an Excel workbook, so it cannot be coloured - ' +
+                       'only a Google Sheet can.');
+    } else {
+      try {
+        push(job, 'log', 'Reading this CPR again, so the colours match what it now says...');
+
+        // the run can be long, and the sign-in behind it only lasts the hour
+        const fresh = await matchCpr(realmId, await getAccessToken(realmId), {
+          sheetId, tab, courier, excel: false,
+          cpr: colourKey
+        });
+
+        const plan = colourPlan(fresh);
+        if (!plan.length) {
+          push(job, 'log', 'No row needed a colour.');
+        } else {
+          push(job, 'log', 'Colouring the sheet...');
+          const done = await colourCpr(sheetId, tab, plan);
+          const t = done.tally || {};
+          const bits = [];
+          if (t.green)  bits.push(`${t.green} received`);
+          if (t.yellow) bits.push(`${t.yellow} amount differs`);
+          if (t.orange) bits.push(`${t.orange} under another CPR`);
+          if (t.red)    bits.push(`${t.red} not in QuickBooks`);
+          job.coloured = { painted: done.painted, tally: t };
+          push(job, 'ok', `Coloured ${done.painted} rows` + (bits.length ? ' - ' + bits.join(', ') : ''));
+        }
+      } catch (e) {
+        job.results.push({
+          ok: false,
+          msg: 'The payments are recorded; only the colouring did not finish: ' + e.message
+        });
+        push(job, 'fail', 'The sheet could not be coloured: ' + e.message);
+      }
+    }
+  }
+
   try {
     await recordRun(realmId, {
       courier, cprNumber, cprDate, sheetId,
@@ -311,6 +372,7 @@ async function run(realmId, job, only) {
     job.state = 'stopped';
   } else {
     push(job, 'log', `--- ${job.posted} payment${job.posted === 1 ? '' : 's'} recorded ---`);
+    push(job, 'ok', '--- Process complete ---');
     job.state = 'done';
   }
   job.finishedAt = Date.now();
@@ -389,6 +451,7 @@ export function paySnapshot(desk, since, full) {
     posted: job.posted,
     amount: Math.round(job.totalAmount * 100) / 100,
     stamped: job.stamped,
+    coloured: job.coloured || null,
     cprNumber: job.body.cprNumber || '',
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,

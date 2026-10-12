@@ -1356,6 +1356,7 @@
 
       return post('/api/cpr/receive', {
         courier: S.courier,
+        cprKey: S.cpr,
         cprNumber: m.cprNumber,
         cprDate: m.cprDate,
         accountId: $('acct').value,
