@@ -11,6 +11,28 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+/* the product search box, and the list it opens - the list hangs off the body so
+   the table it sits in cannot clip it */
+.pickinp{width:100%;padding:8px 10px;font:inherit;font-size:13px;background:#fff;
+  border:1px solid var(--line-2);border-radius:6px;color:var(--muted)}
+.pickinp.set{color:var(--text)}
+.pickinp:focus{outline:2px solid var(--qbo);outline-offset:1px}
+.pickbox{position:fixed;z-index:60;background:#fff;border:1px solid var(--line-2);
+  border-radius:6px;box-shadow:0 10px 30px rgba(15,46,36,.16);overflow:hidden}
+.pickbox.hide{display:none}
+.pickhead{padding:6px 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);background:var(--panel-2);border-bottom:1px solid var(--line)}
+.picklist{overflow:auto}
+.pickrow{display:flex;gap:10px;justify-content:space-between;align-items:center;
+  padding:7px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid #EFF1F3}
+.pickrow span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pickrow em{font-style:normal;font-size:11px;color:var(--warn)}
+.pickrow b{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}
+.pickrow.skip{color:var(--muted)}
+.pickrow.on{background:var(--qbo);color:#fff}
+.pickrow.on b,.pickrow.on em{color:rgba(255,255,255,.75)}
+</style>
 </head>
 <body>
 
@@ -159,7 +181,7 @@
         <div class="sec">
           <h2><span class="no">04</span> Products that need a decision
             <span class="aside" id="mapAside"></span></h2>
-          <p class="hint" style="margin:0 0 14px">These Shopify products did not match. Pick the QuickBooks product each should become, or skip it. Choices are saved and reused next time.<br>
+          <p class="hint" style="margin:0 0 14px">These Shopify products did not match. Pick the QuickBooks product each should become, or skip it &mdash; type any part of a name or a SKU to find it. Choices are saved and reused next time.<br>
             Tick <b>Hold</b> on a product that is not in QuickBooks yet: every order carrying it is kept out of the upload and listed in the report.</p>
           <div class="acts">
             <button class="mini" id="mapSave">Save choices</button>
@@ -810,6 +832,188 @@
     $('mapSheet').scrollIntoView({behavior:'smooth',block:'start'});
   });
 
+  /* ---------- choosing a QuickBooks product: a search box, not a list ---------- */
+
+  // A company with a few thousand items turns the old dropdown into a mile of
+  // names to scroll through, and the only way to find one was to know where it
+  // sat. This is the same choice, searched: type any part of the name or the
+  // SKU and only what matches is in front of you. Nothing is chosen until a
+  // line is picked, so a half-typed word never becomes an answer.
+  var PICK = (function () {
+    var box = null, list = null, head = null, inp = null, row = null, hits = [], at = -1;
+
+    function build() {
+      if (box) return;
+      box = document.createElement('div');
+      box.className = 'pickbox hide';
+      box.innerHTML = '<div class="pickhead"></div><div class="picklist"></div>';
+      document.body.appendChild(box);
+      head = box.firstChild;
+      list = box.lastChild;
+
+      // mousedown would take the focus off the input before the click lands
+      list.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      list.addEventListener('click', function (e) {
+        var t = e.target;
+        while (t && t !== list && !(t.getAttribute && t.getAttribute('data-i') !== null)) t = t.parentNode;
+        if (t && t !== list) take(Number(t.getAttribute('data-i')));
+      });
+
+      document.addEventListener('mousedown', function (e) {
+        if (!inp) return;
+        if (e.target === inp || box.contains(e.target)) return;
+        close(true);
+      });
+      window.addEventListener('resize', place);
+      window.addEventListener('scroll', place, true);
+    }
+
+    function label(v) {
+      if (v === '__skip__') return 'Skip this product entirely';
+      return v || '';
+    }
+
+    function place() {
+      if (!inp || box.classList.contains('hide')) return;
+      var r = inp.getBoundingClientRect();
+      var below = window.innerHeight - r.bottom, above = r.top;
+      var h = Math.min(300, Math.max(below, above) - 12);
+      box.style.width = Math.max(r.width, 260) + 'px';
+      box.style.left = Math.min(r.left, window.innerWidth - Math.max(r.width, 260) - 8) + 'px';
+      list.style.maxHeight = (h - 26) + 'px';
+      if (below >= above) { box.style.top = (r.bottom + 2) + 'px'; }
+      else { box.style.top = (r.top - h - 2) + 'px'; }
+    }
+
+    // every part of what was typed has to be somewhere in the name or the SKU,
+    // so "lip 7301" finds the one lipstick with that code
+    function search(q) {
+      var terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+      var out = [];
+      if (!terms.length) {
+        for (var i = 0; i < qbProducts.length && out.length < 200; i++) out.push(qbProducts[i]);
+        return { rows: out, total: qbProducts.length };
+      }
+      var scored = [], total = 0;
+      for (var j = 0; j < qbProducts.length; j++) {
+        var p = qbProducts[j];
+        var nm = String(p.name || '').toLowerCase(), sk = String(p.sku || '').toLowerCase();
+        var hay = nm + ' ' + sk, ok = true;
+        for (var t = 0; t < terms.length; t++) if (hay.indexOf(terms[t]) < 0) { ok = false; break; }
+        if (!ok) continue;
+        total++;
+        if (scored.length < 200) {
+          var rank = nm.indexOf(terms[0]) === 0 ? 0 : (nm.indexOf(terms[0]) > -1 ? 1 : 2);
+          scored.push({ p: p, rank: rank });
+        }
+      }
+      scored.sort(function (a, b) { return a.rank - b.rank || a.p.name.length - b.p.name.length; });
+      return { rows: scored.map(function (x) { return x.p; }), total: total };
+    }
+
+    function draw(q) {
+      var r = search(q);
+      hits = [{ v: '__skip__', n: 'Skip this product entirely', s: '', skip: true }]
+        .concat(r.rows.map(function (p) {
+          return { v: p.name, n: p.name, s: p.sku || '', off: !p.active };
+        }));
+      at = r.rows.length ? 1 : 0;
+
+      head.textContent = q
+        ? (r.total ? nf(r.total) + ' product' + (r.total === 1 ? '' : 's') +
+            (r.total > r.rows.length ? ' — showing the first ' + nf(r.rows.length) : '')
+          : 'Nothing with that in its name or SKU')
+        : nf(qbProducts.length) + ' products — type any part of a name or SKU';
+
+      var html = '';
+      for (var i = 0; i < hits.length; i++) {
+        var h = hits[i];
+        html += '<div class="pickrow' + (i === at ? ' on' : '') + (h.skip ? ' skip' : '') +
+                '" data-i="' + i + '"><span>' + escHtml(h.n) +
+                (h.off ? ' <em>inactive</em>' : '') + '</span>' +
+                (h.s ? '<b>' + escHtml(h.s) + '</b>' : '') + '</div>';
+      }
+      list.innerHTML = html;
+      place();
+    }
+
+    function move(d) {
+      if (!hits.length) return;
+      at = Math.max(0, Math.min(hits.length - 1, at + d));
+      var kids = list.children, i;
+      for (i = 0; i < kids.length; i++) kids[i].className =
+        kids[i].className.replace(' on', '') + (i === at ? ' on' : '');
+      if (kids[at]) {
+        var k = kids[at], top = k.offsetTop, bot = top + k.offsetHeight;
+        if (top < list.scrollTop) list.scrollTop = top;
+        else if (bot > list.scrollTop + list.clientHeight) list.scrollTop = bot - list.clientHeight;
+      }
+    }
+
+    function take(i) {
+      var h = hits[i];
+      if (!h || !inp) return;
+      row.choice = h.v;
+      inp.value = label(h.v);
+      inp.classList.toggle('set', !!h.v);
+      close(false);
+    }
+
+    function close(revert) {
+      if (!inp) return;
+      if (revert) {
+        inp.value = label(row.choice);
+        inp.classList.toggle('set', !!row.choice);
+      }
+      box.classList.add('hide');
+      inp = null; row = null; hits = []; at = -1;
+    }
+
+    function open(el, p) {
+      build();
+      inp = el; row = p;
+      box.classList.remove('hide');
+      draw(el.value === label(p.choice) ? '' : el.value);
+      place();
+    }
+
+    // one search box, wired to one product that needs a decision
+    function field(p) {
+      build();
+      var el = document.createElement('input');
+      el.type = 'text';
+      el.className = 'pickinp' + (p.choice ? ' set' : '');
+      el.placeholder = 'Search ' + nf(qbProducts.length) + ' QuickBooks products…';
+      el.value = label(p.choice);
+      el.autocomplete = 'off';
+      el.spellcheck = false;
+
+      el.addEventListener('focus', function () { el.select(); open(el, p); });
+      el.addEventListener('input', function () { if (inp !== el) open(el, p); draw(el.value); });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); if (inp !== el) open(el, p); else move(1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (inp === el) take(at); }
+        else if (e.key === 'Escape') { if (inp === el) { e.preventDefault(); close(true); el.blur(); } }
+      });
+      el.addEventListener('blur', function () {
+        // a click inside the list keeps the focus; anything else puts the
+        // chosen name back, so what is on screen is always what is chosen
+        setTimeout(function () { if (inp === el) close(true); else {
+          el.value = label(p.choice); el.classList.toggle('set', !!p.choice);
+        } }, 0);
+      });
+      return el;
+    }
+
+    return { field: field };
+  })();
+
+  function escHtml(v) {
+    return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   function buildMapTable(){
     $('mapAside').textContent=pending.length+" product"+(pending.length===1?"":"s");
     var body=$('mapBody'); body.innerHTML='';
@@ -828,17 +1032,9 @@
       var td2=document.createElement('td'); td2.textContent=p.name;
       var td3=document.createElement('td'); td3.className='num'; td3.textContent=p.count;
       var td4=document.createElement('td');
-      var sel=document.createElement('select'); sel.style.fontSize='13px';
-      var o0=document.createElement('option'); o0.value=''; o0.textContent='— choose a QuickBooks product —'; sel.appendChild(o0);
-      var oS=document.createElement('option'); oS.value='__skip__'; oS.textContent='Skip this product entirely'; sel.appendChild(oS);
-      qbProducts.forEach(function(q){
-        var o=document.createElement('option'); o.value=q.name; o.textContent=q.name; sel.appendChild(o);
-      });
       var ex=mappings[p.key];
-      if(ex){ if(ex.skip) sel.value='__skip__'; else if(ex.qbItem) sel.value=ex.qbItem; }
-      sel.addEventListener('change',function(){ p.choice=this.value; });
-      p.choice=sel.value;
-      td4.appendChild(sel);
+      p.choice = ex ? (ex.skip?'__skip__':(ex.qbItem||'')) : '';
+      td4.appendChild(PICK.field(p));
       tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4);
       frag.appendChild(tr);
     });
