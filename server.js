@@ -733,6 +733,9 @@ const USER_MAY_POST = new Set([
   '/api/check/find-start', '/api/check/find-stop', '/api/check/find-resume',
   '/api/check/find-clear', '/api/check/find-ready',
   '/api/shipfix/plan', '/api/shipfix/clear', '/api/shipfix/clear-log',
+  // the CPR's own two questions: which shipping would have to come off, and
+  // which payments are sitting there applying to nothing. Both only look.
+  '/api/cpr/ship-plan', '/api/cpr/stray',
   // reading the books, and narrowing what was read
   '/api/products/scan', '/api/products/paste',
   '/api/products/clear', '/api/products/clear-log',
@@ -762,6 +765,7 @@ const RIGHT_GROUPS = [
             '/api/cpr/bank', '/api/cpr/settled', '/api/cpr/colour',
             '/api/cpr/duplicate', '/api/cpr/fix-payment', '/api/cpr/columns',
             '/api/cpr/root', '/api/sheets/paint',
+            '/api/cpr/ship-apply', '/api/cpr/stray-remove',
             '/api/check/fix', '/api/check/fix-resume', '/api/check/fix-clear',
             '/api/receipts/receive', '/api/receipts/mark', '/api/receipts/bank',
             '/api/receipts/duplicate'] },
@@ -857,8 +861,10 @@ RIGHT_GROUPS.forEach(g => g.paths.forEach(p => RIGHT_OF_PATH.set(p, g.key)));
 
 // Stopping is always allowed, whoever started it. A run belongs to the company and
 // is watched from every computer, so anyone seeing one go wrong must be able to end
-// it - that is the safe direction.
-const isStop = p => /-stop$/.test(p) || p.endsWith("/stop") || p.endsWith("/pause");
+// it - that is the safe direction. Ending is the same door: it only puts a finished
+// run away, and a desk left holding one it may not close is a desk nobody can use.
+const isStop = p => /-(stop|end)$/.test(p) ||
+  p.endsWith("/stop") || p.endsWith("/end") || p.endsWith("/pause");
 
 app.use(async (req, res, next) => {
   if (req.method !== 'POST') return next();
