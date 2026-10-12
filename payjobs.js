@@ -12,6 +12,11 @@ import { claimIds, releaseIds } from './paylock.js';
 const jobs = new Map();
 const MAX_EVENTS = 2000;
 
+// Which build of the app this run came out of. When a page is left open from
+// before a deploy, its own old code can write a log that reads almost like the
+// server's - so the run says, in its first line, whose words these are.
+const BUILD = String(process.env.RENDER_GIT_COMMIT || 'local').slice(0, 7);
+
 // Up to this many go across as one payment; beyond it the run is halved.
 const SPLIT_ABOVE = 2000;
 
@@ -74,7 +79,8 @@ async function run(realmId, job, only) {
   } = job.body;
 
   const matched = only || allMatched;
-  push(job, 'log', (only ? 'Carrying on: ' + matched.length + ' left. ' : '') + 'Connecting to QuickBooks...');
+  push(job, 'log', (only ? 'Carrying on: ' + matched.length + ' left. ' : '') +
+                   `Connecting to QuickBooks... (server build ${BUILD})`);
   const token = await getAccessToken(realmId);
 
   // one payment per customer - QB will not mix two customers in one
@@ -364,11 +370,15 @@ async function run(realmId, job, only) {
   // from what QuickBooks says now. A CPR that was already received has every
   // right to a green sheet - and before, a run that posted nothing coloured
   // nothing, so the only way to get the colours was to receive it again.
-  if (!job.stop && sheetId && tab && !colourKey) {
+  if (job.stop || !sheetId || !tab) {
+    job.coloured = { skipped: job.stop ? 'the run was stopped' : 'this run has no sheet behind it' };
+  } else if (!colourKey) {
+    job.coloured = { skipped: 'the run does not say which CPR it was' };
     push(job, 'log', 'This run does not say which CPR it was, so the sheet is left as it is.');
-  } else if (!job.stop && sheetId && tab) {
+  } else {
     if (excel) {
       // only a Google Sheet has colours the API can reach
+      job.coloured = { skipped: 'an Excel workbook has no colours the API can reach' };
       push(job, 'log', 'The sheet is an Excel workbook, so it cannot be coloured - ' +
                        'only a Google Sheet can.');
     } else {
@@ -384,6 +394,7 @@ async function run(realmId, job, only) {
 
         const plan = colourPlan(fresh);
         if (!plan.length) {
+          job.coloured = { painted: 0, tally: {} };
           push(job, 'log', 'Nothing in this CPR needed a colour - no row is ' +
                            'received, off, under another CPR, or missing from QuickBooks.');
         } else {
@@ -399,6 +410,7 @@ async function run(realmId, job, only) {
           push(job, 'ok', `Coloured ${done.painted} rows` + (bits.length ? ' - ' + bits.join(', ') : ''));
         }
       } catch (e) {
+        job.coloured = { error: e.message };
         job.results.push({
           ok: false,
           msg: 'The payments are recorded; only the colouring did not finish: ' + e.message

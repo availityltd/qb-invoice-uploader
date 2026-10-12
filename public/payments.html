@@ -1370,30 +1370,55 @@
     S.lastPaid = j.paidInvoices || [];
     if(S.lastPaid.length) drawPaidList();
 
-    // The colouring is the run's own work now, done on the server and said in
-    // the log above - so the page no longer does it. What is left for the page
-    // is to show the CPR as it now stands, once per finish, so the cards and
-    // lists agree with the sheet somebody is looking at.
+    // The colouring is the run's own work now: it happens on the server, where
+    // the run lives, so it happens whether or not anybody is still on this page.
+    // What is left for the page is to say plainly what the run did to the sheet
+    // - and, if the run did not manage it, to do it from here. The button
+    // beside the CPR has always worked; there is no reason for someone to have
+    // to press it to find out.
     // Carry on after a Stop keeps the same run, so the run's id alone would
     // read as "already seen" the second time round. What marks one finish from
     // the next is when it finished.
     var finishKey = String(j.id) + '|' + String(j.finishedAt || '');
-    if(j.posted > 0 && S.seenFinish !== finishKey){
+    if(S.seenFinish !== finishKey){
       S.seenFinish = finishKey;
-      $('stepPay').classList.add('done');
+      if(j.posted > 0) $('stepPay').classList.add('done');
 
-      if(j.coloured && j.coloured.painted){
-        var t = j.coloured.tally || {};
+      var c = j.coloured || null;
+      var note = function(txt, bad){
+        $('colourNote').textContent = txt;
+        $('payOut').insertAdjacentHTML('beforeend',
+          '<div class="result ' + (bad ? 'bad' : 'good') + '">Sheet: ' + esc(txt) + '</div>');
+      };
+
+      if(c && c.painted){
+        var t = c.tally || {};
         var bits = [];
         if(t.green)  bits.push(nf(t.green) + ' received');
         if(t.yellow) bits.push(nf(t.yellow) + ' amount differs');
         if(t.orange) bits.push(nf(t.orange) + ' under another CPR');
         if(t.red)    bits.push(nf(t.red) + ' not in QuickBooks');
-        $('colourNote').textContent =
-          'Coloured ' + nf(j.coloured.painted) + ' rows — ' + bits.join(', ');
+        note('coloured ' + nf(c.painted) + ' rows' + (bits.length ? ' — ' + bits.join(', ') : ''));
       }
 
-      if(S.currentKey) readCpr(S.currentKey, '');
+      // the lists on screen are read again either way, so what is shown and
+      // what is in the sheet are the same thing
+      if(S.currentKey){
+        readCpr(S.currentKey, '').then(function(m){
+          if(!m) return;
+          if(c && (c.painted || c.skipped)) return;      // the run settled it
+
+          // the run could not colour it - say why, and put the colours in from
+          // here, now that this page has the fresh answer in its hands
+          if(c && c.error) note('the run could not colour it (' + c.error + ') - colouring from here...', true);
+          return colourNow(true).then(function(d){
+            if(d && d.painted) note('coloured ' + nf(d.painted) + ' rows from this page' +
+                                    (d.text ? ' — ' + d.text : ''));
+          }).catch(function(e){
+            note('could not be coloured: ' + e.message, true);
+          });
+        });
+      }
     }
 
   }
