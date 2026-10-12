@@ -43,10 +43,10 @@
           <div class="two">
             <div>
               <div class="zone" id="zoneShop" tabindex="0" role="button">
-                <span><b>Shopify orders</b><span>Orders → Export → CSV</span></span>
+                <span><b>Shopify orders</b><span>Orders → Export → CSV · one file or several</span></span>
                 <span class="pick">Browse</span>
               </div>
-              <input type="file" id="fileShop" accept=".csv,text/csv">
+              <input type="file" id="fileShop" accept=".csv,text/csv" multiple>
               <div class="stat" id="statShop"></div>
             </div>
             <div>
@@ -151,7 +151,7 @@
 
         <div class="sec">
           <button class="run" id="btnScan" disabled>Check products</button>
-          <p class="runhint" id="runHint">Add both files to begin</p>
+          <p class="runhint" id="runHint">Add the Shopify export - or as many exports as you have - to begin</p>
         </div>
       </div>
 
@@ -448,49 +448,211 @@
     return map;
   }
 
-  function wireZone(zoneId,inputId,handler){
+  // many: the zone hands over every file at once, instead of only the first
+  function wireZone(zoneId,inputId,handler,many){
     var z=$(zoneId), inp=$(inputId);
     if(!z||!inp) return;
+    function give(files){
+      if(!files||!files.length) return;
+      if(many) handler(files); else handler(files[0]);
+    }
     z.addEventListener("click",function(){ inp.click(); });
     z.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();inp.click();} });
     ["dragenter","dragover"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.add("hot");}); });
     ["dragleave","drop"].forEach(function(ev){ z.addEventListener(ev,function(e){e.preventDefault();z.classList.remove("hot");}); });
-    z.addEventListener("drop",function(e){ if(e.dataTransfer.files[0]) handler(e.dataTransfer.files[0]); });
-    inp.addEventListener("change",function(){ if(inp.files[0]) handler(inp.files[0]); });
+    z.addEventListener("drop",function(e){ give(e.dataTransfer.files); });
+    inp.addEventListener("change",function(){ give(inp.files); inp.value=""; });
   }
-  wireZone("zoneShop","fileShop",readShop);
+  wireZone("zoneShop","fileShop",addShopFiles,true);
   wireZone("zoneCat","fileCat",readCat);
   wireZone("zoneQbFile","fileQb",readQbFile);
 
-  function readShop(file){
-    var s=$('statShop');
-    if(/\.xlsx?$/i.test(file.name)){
-      setStat(s,"bad","Excel workbooks are not supported. Use File → Save As → CSV.");
-      shop=null; ready(); return;
-    }
-    setStat(s,"busy","Reading "+file.name+" ("+mb(file.size)+")…");
-    var r=new FileReader();
-    r.onerror=function(){ setStat(s,"bad","The file could not be read."); shop=null; ready(); };
-    r.onload=function(){
-      paint(function(){
-        var d=decodeBytes(r.result);
-        var rows=parseCSV(d.text);
-        if(rows.length<2){ setStat(s,"bad","No data rows found."); shop=null; ready(); return; }
-        var headers=rows[0].map(function(h){return String(h).trim();});
-        var map=detect(headers);
-        var need=["order","date","item","qty","rate"].filter(function(k){ return map[k]<0; });
-        if(need.length){
-          setStat(s,"bad","Not a Shopify orders export. Missing: "+need.join(", "));
-          shop=null; ready(); return;
-        }
-        shop={name:file.name,headers:rows[0],rows:rows.slice(1),map:map};
-        setStat(s,d.text.indexOf("\uFFFD")>-1?"bad":"ok",
-          "<b>"+file.name+"</b><i>"+nf(shop.rows.length)+" rows · "+d.enc+
-          (map.sku<0?" · no SKU column":"")+(map.fulfil<0?" · no fulfillment column":"")+"</i>");
-        ready();
+  /* ---------- the Shopify exports: one file, or a stack of them ---------- */
+
+  // Shopify will not hand over a long stretch of orders in one export, and a
+  // month that has to be checked against QuickBooks arrives as several files.
+  // Doing them one at a time means the same products are answered for again and
+  // again, and the gap check is run again and again, with no way to see the
+  // whole month at once. So the page takes as many files as are handed to it
+  // and works on them as one export.
+  //
+  // Each file is read on its own - its own columns, its own check that it is a
+  // Shopify export - and the files are then laid on one shared set of columns,
+  // matched by column name, not by position: a shop that added a column last
+  // week has it in the newer file and not the older one, and both still read
+  // correctly. An order that two files both carry is taken from the first one
+  // only; taking it twice would put every line on the invoice twice.
+  var shopFiles = [];
+
+  function addShopFiles(files) {
+    var list = Array.prototype.slice.call(files || []);
+    if (!list.length) return;
+
+    setStat($('statShop'), 'busy',
+      'Reading ' + list.length + ' file' + (list.length === 1 ? '' : 's') + '…');
+
+    (function step(i) {
+      if (i >= list.length) { rebuildShop(); return; }
+      readOneShop(list[i]).then(function (f) {
+        if (f) shopFiles.push(f);
+        step(i + 1);
       });
+    })(0);
+  }
+
+  function readOneShop(file) {
+    return new Promise(function (done) {
+      if (/\.xlsx?$/i.test(file.name)) {
+        done({ name: file.name, bad: 'an Excel workbook — use File → Save As → CSV' });
+        return;
+      }
+      var already = shopFiles.some(function (f) {
+        return !f.bad && f.name === file.name && f.size === file.size;
+      });
+      if (already) { done({ name: file.name, size: file.size, bad: 'already added' }); return; }
+
+      var r = new FileReader();
+      r.onerror = function () { done({ name: file.name, bad: 'could not be read' }); };
+      r.onload = function () {
+        paint(function () {
+          var d = decodeBytes(r.result);
+          var rows = parseCSV(d.text);
+          if (rows.length < 2) { done({ name: file.name, bad: 'no data rows in it' }); return; }
+          var headers = rows[0].map(function (h) { return String(h).trim(); });
+          var map = detect(headers);
+          var need = ['order', 'date', 'item', 'qty', 'rate'].filter(function (k) { return map[k] < 0; });
+          if (need.length) {
+            done({ name: file.name, bad: 'not a Shopify orders export — missing ' + need.join(', ') });
+            return;
+          }
+          done({
+            name: file.name, size: file.size, headers: headers, rows: rows.slice(1),
+            map: map, enc: d.enc, lost: d.text.indexOf('�') > -1
+          });
+        });
+      };
+      r.readAsArrayBuffer(file);
+    });
+  }
+
+  // Everything that is loaded, as one export.
+  function rebuildShop() {
+    var good = shopFiles.filter(function (f) { return !f.bad; });
+    if (!good.length) { shop = null; drawShopFiles(); ready(); return; }
+
+    // one set of columns for all of them, by name
+    var headers = [], at = {};
+    good.forEach(function (f) {
+      var used = {};
+      f.col = f.headers.map(function (h, j) {
+        var n = (used[h] = (used[h] || 0) + 1), k = h + '\u0000' + n;
+        if (at[k] === undefined) { at[k] = headers.length; headers.push(h); }
+        return at[k];
+      });
+    });
+
+    var width = headers.length, rows = [], seen = {};
+
+    // The column a file calls Lineitem price and the column the shared set ended
+    // up using for the price can be two different slots, if one export spells a
+    // heading differently from another. Names put the rows in the right place;
+    // this puts the columns the page actually reads - the order number, the date,
+    // the item, the quantity, the price and the rest - in the one slot each,
+    // whatever any file called it.
+    var umap = detect(headers), roles = NEED.map(function (f) { return f.k; });
+
+    good.forEach(function (f) {
+      var mine = {}, last = '', drop = false;
+      f.dupRows = 0; f.dupOrders = 0; f.kept = 0;
+
+      f.rows.forEach(function (r) {
+        // the order number is written on the first row of an order and the rows
+        // under it belong to the same order, so a blank one carries on
+        var iO = f.map.order;
+        var k = (iO >= 0 && iO < r.length && r[iO] != null) ? String(r[iO]).trim() : '';
+        if (k) {
+          last = k;
+          drop = (seen[k] === 1 && mine[k] !== 1);
+          if (drop) f.dupOrders++;
+        } else {
+          k = last;
+        }
+        if (!k) return;
+        if (drop) { f.dupRows++; return; }
+        mine[k] = 1;
+
+        var out = new Array(width), j;
+        for (j = 0; j < width; j++) out[j] = '';
+        for (j = 0; j < r.length && j < f.col.length; j++) out[f.col[j]] = r[j];
+        roles.forEach(function (role) {
+          var from = f.map[role], to = umap[role];
+          if (from < 0 || to < 0) return;
+          out[to] = (from < r.length && r[from] != null) ? r[from] : '';
+        });
+        rows.push(out);
+        f.kept++;
+      });
+
+      for (var k2 in mine) seen[k2] = 1;
+    });
+
+    shop = {
+      map: umap,
+      name: good.length === 1 ? good[0].name : good.length + ' files',
+      files: good.length,
+      headers: headers,
+      rows: rows
     };
-    r.readAsArrayBuffer(file);
+    drawShopFiles();
+    ready();
+  }
+
+  function removeShopFile(i) {
+    shopFiles.splice(i, 1);
+    if (!shopFiles.length) { shop = null; setStat($('statShop'), '', ''); ready(); return; }
+    rebuildShop();
+  }
+
+  function drawShopFiles() {
+    var s = $('statShop');
+    if (!shopFiles.length) { setStat(s, '', ''); return; }
+
+    var good = shopFiles.filter(function (f) { return !f.bad; });
+    var bad = shopFiles.some(function (f) { return f.bad; });
+    var dup = good.reduce(function (n, f) { return n + f.dupOrders; }, 0);
+    var lost = good.some(function (f) { return f.lost; });
+
+    var head = shop
+      ? '<b>' + (good.length === 1 ? good[0].name
+                 : nf(good.length) + ' files · ' + nf(shop.rows.length) + ' rows') + '</b>'
+      : '<b>nothing readable yet</b>';
+
+    var lines = shopFiles.map(function (f, i) {
+      var txt = f.bad
+        ? f.name + ' — ' + f.bad
+        : f.name + ' — ' + nf(f.kept) + ' rows · ' + f.enc +
+          (f.dupOrders ? ' · ' + nf(f.dupOrders) + ' orders skipped, an earlier file has them' : '') +
+          (f.lost ? ' · some characters did not survive the export' : '');
+      return '<i style="display:flex;gap:8px;justify-content:space-between">' +
+             '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap' +
+             (f.bad ? ';color:var(--neg)' : '') + '">' + txt + '</span>' +
+             '<a href="#" data-rm="' + i + '" style="color:var(--muted);text-decoration:none">remove</a></i>';
+    }).join('');
+
+    var foot = (good.length > 1 && shop)
+      ? '<i>' + (dup ? nf(dup) + ' order' + (dup === 1 ? '' : 's') +
+                       ' appeared in more than one file and were taken once. ' : '') +
+        'The product check and the gap check run over all ' + nf(good.length) + ' files together.</i>'
+      : '';
+
+    setStat(s, shop ? (bad || lost ? 'bad' : 'ok') : 'bad', head + lines + foot);
+
+    Array.prototype.forEach.call(s.querySelectorAll('[data-rm]'), function (a) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        removeShopFile(Number(a.getAttribute('data-rm')));
+      });
+    });
   }
 
   function readCat(file){

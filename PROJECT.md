@@ -34,7 +34,7 @@ understand what is happening underneath.
 
 | Page | File | What it does |
 |---|---|---|
-| Convert | `convert.html` | Shopify CSV → QB invoice rows, SKU matched against QB items directly (product-list CSV optional), gap check; a product not in QB can be held, which keeps every order carrying it out of the upload and in the not-uploaded report |
+| Convert | `convert.html` | Shopify CSV → QB invoice rows (several exports at once: laid on one set of columns by name, an order two files share taken once), SKU matched against QB items directly (product-list CSV optional), gap check; a product not in QB can be held, which keeps every order carrying it out of the upload and in the not-uploaded report |
 | Upload | `upload.html`, `jobs.js`, `jobstore.js` | Creates the invoices in QuickBooks |
 | Receive payments | `payments.html`, `cpr.js` | Matches a courier CPR sheet against QB, records payment |
 | Merge payments | `merge.html`, `merges.js`, `mergeqb.js` | Groups one customer's orders against a CPR and takes the extra shipping off |
