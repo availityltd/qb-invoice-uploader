@@ -1295,6 +1295,7 @@
 
   function finish(j){
     var html = '';
+    var SK = j.skipped || [];
     (j.results || []).forEach(function(r){
       html += '<div class="result ' + (r.ok ? 'good' : 'bad') + '">' +
         (r.ok
@@ -1303,6 +1304,11 @@
           : '\u2717 ' + (r.customer ? esc(r.customer) + ' - ' : '') + esc(r.msg)) +
         '</div>';
     });
+    if(SK.length){
+      html += '<div class="result bad">' + nf(SK.length) + ' invoice' + (SK.length===1?'':'s') +
+        ' were left alone - already settled in QuickBooks, or being received at another desk ' +
+        'this moment. Nothing was paid twice. They are listed above.</div>';
+    }
     $('payOut').innerHTML = html;
     $('afterActs').style.display = 'flex';
     if(j.posted > 0) $('stepPay').classList.add('done');

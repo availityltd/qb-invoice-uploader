@@ -292,6 +292,35 @@ export async function findInvoices(realmId, token, numbers) {
   return found;
 }
 
+// What each invoice still owes, this second.
+//
+// A match was made when the sheet was searched, and the balance it carries is
+// the balance of that moment. By the time the money is received - minutes
+// later, or while someone else at another desk is receiving their own CPR -
+// the invoice may already be part paid or settled. Handing QuickBooks the old
+// figure is what leaves money sitting unapplied, or as a credit on the
+// customer, on an invoice that reads as received. So the balances are asked
+// for again, immediately before the payment goes across.
+export async function liveBalances(realmId, token, ids) {
+  const out = new Map();                               // id -> balance owed
+  const list = [...new Set((ids || []).map(x => String(x || '').replace(/[^0-9]/g, '')).filter(Boolean))];
+  const size = 40;
+
+  for (let i = 0; i < list.length; i += size) {
+    const chunk = list.slice(i, i + size);
+    const q = await qbQuery(realmId, token,
+      `SELECT Id, DocNumber, TotalAmt, Balance FROM Invoice ` +
+      `WHERE Id IN (${chunk.map(id => `'${id}'`).join(',')}) MAXRESULTS 1000`);
+
+    (q.Invoice || []).forEach(inv => {
+      const bal = Number(inv.Balance === undefined ? inv.TotalAmt : inv.Balance);
+      out.set(String(inv.Id), Math.round((isFinite(bal) ? bal : 0) * 100) / 100);
+    });
+  }
+
+  return out;
+}
+
 export async function listAccounts(realmId, token) {
   const q = await qbQuery(realmId, token,
     `SELECT Id, Name, AccountType, AccountSubType FROM Account ` +

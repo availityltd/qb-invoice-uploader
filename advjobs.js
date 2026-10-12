@@ -1,8 +1,9 @@
 import { getAccessToken } from './qb.js';
-import { postPayment } from './cpr.js';
+import { postPayment, liveBalances } from './cpr.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
 import { stampRows } from './sheets.js';
 import { realmOf } from './desk.js';
+import { claimIds, releaseIds } from './paylock.js';
 
 // one advance run per desk - the company and the person signed in, together -
 // kept on the server, so leaving the page or moving to another computer is
@@ -45,6 +46,7 @@ export function startAdvJob(desk, body) {
 
   const job = {
     id: Date.now(),
+    desk,
     state: 'running',
     stop: false,
     body,
@@ -54,6 +56,7 @@ export function startAdvJob(desk, body) {
     totalAmount: 0,
     results: [],
     paid: [],
+    skipped: [],
     toStamp: [],
     stampAt: new Map(),
     stamped: 0,
@@ -96,6 +99,69 @@ async function run(realmId, job, only) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   });
+
+  // the invoices this desk is holding while it pays them
+  const holding = [];
+
+  function noteSkip(m, why) {
+    job.skipped.push({
+      invoice: m.invoice, qbDoc: m.qbDoc, customer: m.customerName || '', why
+    });
+    job.doneCount++;
+    job.results.push({
+      ok: false, customer: m.customerName || '', count: 1, msg: `${m.invoice} - ${why}`
+    });
+  }
+
+  // What the invoice owes is read again here, a moment before the money goes
+  // across, and the advance is cut down to it. The balance a row carries is the
+  // balance of when the sheet was read; if the invoice has been part paid or
+  // settled since - by a CPR, or by the person at the next desk - the older
+  // figure would hand QuickBooks more than is owed, and the difference would
+  // sit unapplied or as a credit on the customer.
+  async function prepare(lines) {
+    const { mine, taken } = claimIds(realmId, job.desk, lines.map(m => m.qbId));
+    holding.push(...mine);
+    const busy = new Set(taken);
+
+    push(job, 'log', 'Checking what these invoices still owe...');
+    const token = await tokenFor(realmId, job);
+    const live = await liveBalances(realmId, token, mine);
+
+    const ready = [];
+    for (const m of lines) {
+      const id = String(m.qbId || '');
+      if (!id) { noteSkip(m, 'there is no QuickBooks invoice behind it'); continue; }
+
+      if (busy.has(id)) {
+        noteSkip(m, 'somebody else is receiving it at this moment - left for them');
+        push(job, 'fail', `LEFT  ${m.invoice} - somebody else is receiving it right now`);
+        continue;
+      }
+
+      const owed = live.has(id) ? live.get(id) : 0;
+      if (!(owed > 0.005)) {
+        noteSkip(m, 'already settled in QuickBooks - not received a second time');
+        push(job, 'fail', `SKIPPED  ${m.invoice} - already settled in QuickBooks`);
+        continue;
+      }
+
+      const want = Math.round(Number(m.willPay || 0) * 100) / 100;
+      const pay = Math.round(Math.min(want, owed) * 100) / 100;
+      if (!(pay > 0.005)) {
+        noteSkip(m, 'nothing left to receive against it');
+        continue;
+      }
+      if (Math.round((want - pay) * 100) / 100 > 0.005) {
+        push(job, 'log',
+          `${m.invoice} owes only ${pay.toFixed(2)} now - receiving that, not ${want.toFixed(2)}.`);
+      }
+
+      ready.push(Object.assign({}, m, { willPay: pay }));
+    }
+
+    return ready;
+  }
 
   async function sendPart(lines, part, parts) {
     if (job.stop) return;
@@ -189,15 +255,23 @@ async function run(realmId, job, only) {
       continue;
     }
 
-    if (lines.length < SPLIT_ABOVE) {
-      await sendPart(lines, 1, 1);
-      continue;
-    }
+    try {
+      const ready = await prepare(lines);
+      if (!ready.length) continue;
 
-    const parts = Math.ceil(lines.length / CHUNK);
-    push(job, 'log', `${lines.length} invoices for this customer - sending as ${parts} payments.`);
-    for (let i = 0; i < parts && !job.stop; i++) {
-      await sendPart(lines.slice(i * CHUNK, (i + 1) * CHUNK), i + 1, parts);
+      if (ready.length < SPLIT_ABOVE) {
+        await sendPart(ready, 1, 1);
+        continue;
+      }
+
+      const parts = Math.ceil(ready.length / CHUNK);
+      push(job, 'log', `${ready.length} invoices for this customer - sending as ${parts} payments.`);
+      for (let i = 0; i < parts && !job.stop; i++) {
+        await sendPart(ready.slice(i * CHUNK, (i + 1) * CHUNK), i + 1, parts);
+      }
+    } finally {
+      // the hold lasts as long as the payment does, and no longer
+      releaseIds(realmId, job.desk, holding.splice(0, holding.length));
     }
   }
 
@@ -255,12 +329,15 @@ export function resumeAdvJob(desk) {
   if (job.state === 'running') throw new Error('The run is still going');
 
   const key = x => String(x.invoice) + '|' + String(x.qbDoc);
-  const paidKeys = new Set(job.paid.map(key));
-  const left = job.body.rows.filter(r => !paidKeys.has(key(r)));
+  const done = new Set(job.paid.map(key));
+  // a row already settled in QuickBooks, or being paid by another desk, was
+  // put aside on purpose - carrying on does not go back for it
+  (job.skipped || []).forEach(x => done.add(key(x)));
+  const left = job.body.rows.filter(r => !done.has(key(r)));
   if (!left.length) throw new Error('Nothing is left to receive');
 
   job.results = job.results.filter(r => r.ok);
-  job.doneCount = job.paid.length;
+  job.doneCount = job.paid.length + (job.skipped || []).length;
   job.toStamp = [];
   job.stampAt = new Map();
   job.stop = false;
@@ -314,7 +391,7 @@ export function advSnapshot(desk, since, full) {
     state: job.state,
     total: job.total,
     doneCount: job.doneCount,
-    leftCount: Math.max(0, job.total - job.paid.length),
+    leftCount: Math.max(0, job.total - job.paid.length - (job.skipped || []).length),
     posted: job.posted,
     amount: Math.round(job.totalAmount * 100) / 100,
     label: job.body.label || '',
@@ -328,6 +405,7 @@ export function advSnapshot(desk, since, full) {
     out.stamped = job.stamped;
     out.results = job.results;
     out.paid = job.paid;
+    out.skipped = job.skipped || [];
   }
 
   return out;

@@ -1,8 +1,9 @@
 import { getAccessToken } from './qb.js';
-import { postPayment } from './cpr.js';
+import { postPayment, liveBalances } from './cpr.js';
 import { writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
 import { realmOf } from './desk.js';
+import { claimIds, releaseIds } from './paylock.js';
 
 // one payment run per desk - the company and the person signed in, together -
 // kept on the server, so leaving the page or moving to another computer is
@@ -35,6 +36,7 @@ export function startPayJob(desk, body) {
 
   const job = {
     id: Date.now(),
+    desk,
     state: 'running',
     stop: false,
     body,
@@ -44,6 +46,7 @@ export function startPayJob(desk, body) {
     totalAmount: 0,
     results: [],
     paidInvoices: [],
+    skipped: [],
     stamped: 0,
     events: [],
     lastId: 0,
@@ -90,24 +93,106 @@ async function run(realmId, job, only) {
     ? m.lines
     : [{ qbId: m.qbId, qbDoc: m.qbDoc, amount: m.qbBalance }];
 
+  // the invoices this desk is holding while it pays them
+  const held = [];
+
+  // A row that is not paid, and why. It is not a failure of QuickBooks, and it
+  // is not something to try again - it is something to look at.
+  function noteSkip(m, why) {
+    job.skipped.push({
+      invoice: m.invoice, qbDoc: m.qbDoc, customer: m.customerName || '', why
+    });
+    job.doneCount++;
+    job.results.push({
+      ok: false, customer: m.customerName || '', count: 1, msg: `${m.invoice} - ${why}`
+    });
+  }
+
+  // The balances are read again, here, immediately before the money goes
+  // across, and every line is cut down to what its invoice still owes. The
+  // figures a match carries are the figures of the moment the sheet was
+  // searched; by the time Receive is pressed the invoice may already be part
+  // paid or settled - by another CPR, or by the person at the next desk.
+  // Handing QuickBooks the older, larger figure is what leaves money sitting
+  // unapplied, or as a credit on the customer, against an invoice that reads
+  // as received. Nothing more than the invoice owes now is ever sent.
+  async function prepare(custId, lines) {
+    const ids = [];
+    lines.forEach(m => openParts(m).forEach(p => { if (p.qbId) ids.push(String(p.qbId)); }));
+
+    const { mine, taken } = claimIds(realmId, job.desk, ids);
+    held.push(...mine);
+    const busy = new Set(taken);
+
+    push(job, 'log', 'Checking what these invoices still owe...');
+    const live = await liveBalances(realmId, token, mine);
+    const owes = new Map(mine.map(id => [id, live.has(id) ? live.get(id) : 0]));
+
+    const ready = [];
+    for (const m of lines) {
+      const parts = openParts(m).filter(p => p.qbId);
+      if (!parts.length) {
+        noteSkip(m, 'there is no QuickBooks invoice behind it');
+        continue;
+      }
+
+      // half a merged row is no use to anyone: if any part of it is in
+      // somebody else's payment this second, the whole row waits for them
+      if (parts.some(p => busy.has(String(p.qbId)))) {
+        noteSkip(m, 'somebody else is receiving it at this moment - left for them');
+        push(job, 'fail', `LEFT  ${m.invoice} - somebody else is receiving it right now`);
+        continue;
+      }
+
+      const use = [];
+      for (const p of parts) {
+        const id = String(p.qbId);
+        const owed = owes.has(id) ? owes.get(id) : 0;
+        const want = Math.round(Number(p.amount || 0) * 100) / 100;
+        const amount = Math.round(Math.min(want, owed) * 100) / 100;
+        if (!(amount > 0.005)) continue;
+        owes.set(id, Math.round((owed - amount) * 100) / 100);
+        use.push({ qbId: id, qbDoc: p.qbDoc, amount });
+      }
+
+      if (!use.length) {
+        noteSkip(m, 'already settled in QuickBooks - not received a second time');
+        push(job, 'fail', `SKIPPED  ${m.invoice} - already settled in QuickBooks`);
+        continue;
+      }
+
+      const asked = Math.round(parts.reduce(
+        (s, p) => s + Math.round(Number(p.amount || 0) * 100) / 100, 0) * 100) / 100;
+      const amount = Math.round(use.reduce((s, x) => s + x.amount, 0) * 100) / 100;
+      if (Math.round((asked - amount) * 100) / 100 > 0.005) {
+        push(job, 'log',
+          `${m.invoice} was part paid already - receiving ${amount.toFixed(2)} of ${asked.toFixed(2)}.`);
+      }
+
+      ready.push({ m, parts: use, amount });
+    }
+
+    return ready;
+  }
+
   // sends one payment; if QB chokes on the size, halves it and tries again
-  async function sendPart(custId, lines, label, depth) {
+  async function sendPart(custId, entries, label, depth) {
     if (job.stop) return;
 
-    // add up the lines as QuickBooks will see them, so the total agrees to the cent
-    const amount = lines.reduce(
-      (s, m) => s + openParts(m).reduce((t, p) => t + Math.round(p.amount * 100) / 100, 0), 0);
-    const who = lines[0].customerName || custId;
+    // the total is the sum of the lines QuickBooks is being given, to the
+    // cent, so there is nothing left over to sit unapplied
+    const amount = Math.round(entries.reduce((s, e) => s + e.amount, 0) * 100) / 100;
+    const who = entries[0].m.customerName || custId;
     const tag = label ? ` (${label})` : '';
 
-    push(job, 'log', `Sending ${lines.length} invoices for ${who}${tag}...`);
+    push(job, 'log', `Sending ${entries.length} invoices for ${who}${tag}...`);
 
     const payload = {
       CustomerRef: { value: String(custId) },
-      TotalAmt: Math.round(amount * 100) / 100,
+      TotalAmt: amount,
       DepositToAccountRef: { value: String(accountId) },
-      Line: lines.flatMap(m => openParts(m).map(p => ({
-        Amount: Math.round(p.amount * 100) / 100,
+      Line: entries.flatMap(e => e.parts.map(p => ({
+        Amount: p.amount,
         LinkedTxn: [{ TxnId: String(p.qbId), TxnType: 'Invoice' }]
       })))
     };
@@ -120,40 +205,40 @@ async function run(realmId, job, only) {
     if (r.ok) {
       job.posted++;
       job.totalAmount += amount;
-      job.doneCount += lines.length;
+      job.doneCount += entries.length;
 
-      lines.forEach(m => {
-        if (m.sheetRow) paidRows.push(m.sheetRow);
+      entries.forEach(e => {
+        if (e.m.sheetRow) paidRows.push(e.m.sheetRow);
         job.paidInvoices.push({
-          invoice: m.invoice,
-          qbDoc: m.qbDoc,
-          customer: m.customerName || '',
-          amount: Math.round(m.qbBalance * 100) / 100
+          invoice: e.m.invoice,
+          qbDoc: e.m.qbDoc,
+          customer: e.m.customerName || '',
+          amount: e.amount
         });
       });
 
       job.results.push({
         ok: true,
         customer: who + tag,
-        count: lines.length,
-        amount: Math.round(amount * 100) / 100,
+        count: entries.length,
+        amount,
         paymentId: r.id
       });
-      push(job, 'ok', `OK  ${who}${tag} - ${lines.length} invoices`);
+      push(job, 'ok', `OK  ${who}${tag} - ${entries.length} invoices`);
       return;
     }
 
     // too big for QuickBooks - cut it in half and send both halves
-    if (lines.length > 1 && depth < 2) {
-      push(job, 'log', `QuickBooks refused ${lines.length} at once - splitting in two.`);
-      const half = Math.ceil(lines.length / 2);
-      await sendPart(custId, lines.slice(0, half), `${label || 'part'} a`, depth + 1);
-      await sendPart(custId, lines.slice(half), `${label || 'part'} b`, depth + 1);
+    if (entries.length > 1 && depth < 2) {
+      push(job, 'log', `QuickBooks refused ${entries.length} at once - splitting in two.`);
+      const half = Math.ceil(entries.length / 2);
+      await sendPart(custId, entries.slice(0, half), `${label || 'part'} a`, depth + 1);
+      await sendPart(custId, entries.slice(half), `${label || 'part'} b`, depth + 1);
       return;
     }
 
-    job.doneCount += lines.length;
-    job.results.push({ ok: false, customer: who + tag, count: lines.length, msg: r.msg });
+    job.doneCount += entries.length;
+    job.results.push({ ok: false, customer: who + tag, count: entries.length, msg: r.msg });
     push(job, 'fail', `FAILED  ${who}${tag} - ${String(r.msg).slice(0, 200)}`);
   }
 
@@ -166,16 +251,24 @@ async function run(realmId, job, only) {
       continue;
     }
 
-     if (lines.length <= SPLIT_ABOVE) {
-      await sendPart(custId, lines, '', 0);
-      continue;
-    }
+    try {
+      const entries = await prepare(custId, lines);
+      if (!entries.length) continue;
 
-    // over the limit, so it goes in two halves rather than many small ones
-    const half = Math.ceil(lines.length / 2);
-    push(job, 'log', `${lines.length} invoices for this customer - sending as 2 payments.`);
-    await sendPart(custId, lines.slice(0, half), 'part 1 of 2', 0);
-    if (!job.stop) await sendPart(custId, lines.slice(half), 'part 2 of 2', 0);
+      if (entries.length <= SPLIT_ABOVE) {
+        await sendPart(custId, entries, '', 0);
+        continue;
+      }
+
+      // over the limit, so it goes in two halves rather than many small ones
+      const half = Math.ceil(entries.length / 2);
+      push(job, 'log', `${entries.length} invoices for this customer - sending as 2 payments.`);
+      await sendPart(custId, entries.slice(0, half), 'part 1 of 2', 0);
+      if (!job.stop) await sendPart(custId, entries.slice(half), 'part 2 of 2', 0);
+    } finally {
+      // the hold lasts as long as the payment does, and no longer
+      releaseIds(realmId, job.desk, held.splice(0, held.length));
+    }
   }
 
   // stamp the sheet only if the payments actually landed
@@ -232,12 +325,15 @@ export function resumePayJob(desk) {
   if (job.state === 'running') throw new Error('The run is still going');
 
   const key = x => String(x.invoice) + '|' + String(x.qbDoc);
-  const paidKeys = new Set(job.paidInvoices.map(key));
-  const left = job.body.matched.filter(m => !paidKeys.has(key(m)));
+  const done = new Set(job.paidInvoices.map(key));
+  // a row already settled in QuickBooks, or being paid by another desk, was
+  // put aside on purpose - carrying on does not go back for it
+  (job.skipped || []).forEach(x => done.add(key(x)));
+  const left = job.body.matched.filter(m => !done.has(key(m)));
   if (!left.length) throw new Error('Nothing is left to receive');
 
   job.results = job.results.filter(r => r.ok);
-  job.doneCount = job.paidInvoices.length;
+  job.doneCount = job.paidInvoices.length + (job.skipped || []).length;
   job.stop = false;
   job.state = 'running';
   job.finishedAt = null;
@@ -289,7 +385,7 @@ export function paySnapshot(desk, since, full) {
     state: job.state,
     total: job.total,
     doneCount: job.doneCount,
-    leftCount: Math.max(0, job.total - job.paidInvoices.length),
+    leftCount: Math.max(0, job.total - job.paidInvoices.length - (job.skipped || []).length),
     posted: job.posted,
     amount: Math.round(job.totalAmount * 100) / 100,
     stamped: job.stamped,
@@ -303,6 +399,7 @@ export function paySnapshot(desk, since, full) {
   if (full || job.state !== 'running') {
     out.results = job.results;
     out.paidInvoices = job.paidInvoices;
+    out.skipped = job.skipped || [];
   }
 
   return out;

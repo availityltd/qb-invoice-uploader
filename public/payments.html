@@ -1348,6 +1348,10 @@
 
   function finishPay(j){
     var html = '';
+    // An invoice QuickBooks has already settled, or one another desk is paying
+    // at this moment, is not received a second time - that is what used to
+    // leave money unapplied or sitting as a credit. It is said plainly here.
+    var SK = j.skipped || [];
     (j.results || []).forEach(function(r){
       html += '<div class="result ' + (r.ok ? 'good' : 'bad') + '">' +
         (r.ok
@@ -1356,6 +1360,11 @@
           : '\u2717 ' + (r.customer ? esc(r.customer) + ' - ' : '') + esc(r.msg)) +
         '</div>';
     });
+    if(SK.length){
+      html += '<div class="result bad">' + nf(SK.length) + ' invoice' + (SK.length===1?'':'s') +
+        ' were left alone - already settled in QuickBooks, or being received at another desk ' +
+        'this moment. Nothing was paid twice. They are listed above.</div>';
+    }
     if(j.stamped){
       html += '<div class="result">Wrote "Received" against ' + nf(j.stamped) + ' rows in the sheet.</div>';
     }

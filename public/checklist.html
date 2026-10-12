@@ -1405,6 +1405,7 @@
         stopPayPoll();
 
         var html = '';
+        var SK = j.skipped || [];
         (j.results || []).forEach(function(x){
           html += '<div class="result ' + (x.ok ? 'good' : 'bad') + '">' +
             (x.ok
@@ -1413,6 +1414,11 @@
               : '✗ ' + (x.customer ? esc(x.customer) + ' - ' : '') + esc(x.msg)) +
             '</div>';
         });
+        if(SK.length){
+          html += '<div class="result bad">' + nf(SK.length) + ' invoice' + (SK.length===1?'':'s') +
+            ' were left alone - already settled in QuickBooks, or being received at another desk ' +
+            'this moment. Nothing was paid twice. They are listed above.</div>';
+        }
         $('payOut').innerHTML = html;
       }).catch(function(){});
   }

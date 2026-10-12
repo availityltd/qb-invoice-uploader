@@ -1452,7 +1452,11 @@
         var log = $('rLog');
         if(log && s.events){
           s.events.forEach(function(e){
-            if(e.type === 'log') log.textContent += '\n' + e.msg;
+            // what was left alone, and why, is said on a 'fail' line - this log
+            // showed only 'log' lines and swallowed it
+            if(e.type === 'log' || e.type === 'fail' || e.type === 'error') {
+              log.textContent += '\n' + e.msg;
+            }
           });
           log.scrollTop = log.scrollHeight;
         }
@@ -1485,6 +1489,12 @@
         if(log){
           log.textContent += '\n\nFinished. ' + n0(s.posted) + ' payments, ' +
                              full(s.amount) + ' received.';
+          var sk = (s.skipped || []).length;
+          if(sk){
+            log.textContent += '\n' + n0(sk) + ' invoice' + (sk === 1 ? '' : 's') +
+              ' left alone - already settled in QuickBooks, or being received at ' +
+              'another desk. Nothing was paid twice.';
+          }
           log.scrollTop = log.scrollHeight;
         }
 
