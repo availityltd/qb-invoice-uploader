@@ -1,5 +1,5 @@
 import { getAccessToken } from './qb.js';
-import { postPayment, liveBalances } from './cpr.js';
+import { postPayment, liveBalances, paymentLanded } from './cpr.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
 import { stampRows } from './sheets.js';
 import { realmOf } from './desk.js';
@@ -57,6 +57,7 @@ export function startAdvJob(desk, body) {
     results: [],
     paid: [],
     skipped: [],
+    postedIds: [],
     toStamp: [],
     stampAt: new Map(),
     stamped: 0,
@@ -216,6 +217,7 @@ async function run(realmId, job, only) {
         });
       });
 
+      if (r.id) job.postedIds.push(String(r.id));
       job.results.push({
         ok: true,
         customer: who + ' - ' + bankName + tag,
@@ -224,6 +226,61 @@ async function run(realmId, job, only) {
         paymentId: r.id
       });
       push(job, 'ok', `OK  ${who} - ${bankName}${tag} - ${lines.length} invoices, ${amount.toFixed(2)}`);
+      return;
+    }
+
+    // QuickBooks answers with an error for payments it has in fact taken.
+    // Sending the same money again in halves is how one payment becomes three,
+    // the extra two applying to nothing. Nothing goes again until we look.
+    let landed = null;
+    try {
+      landed = await paymentLanded(realmId, token, {
+        ref: '', customerId: custId, amount, since: job.startedAt, skip: job.postedIds
+      });
+    } catch (e) {
+      job.doneCount += lines.length;
+      job.results.push({
+        ok: false, customer: who + tag, count: lines.length,
+        msg: 'QuickBooks refused this and then could not be asked whether it took it ' +
+             'anyway (' + e.message + '). Nothing was sent again - check this customer ' +
+             'in QuickBooks before receiving it once more.'
+      });
+      push(job, 'fail', `UNSURE  ${who}${tag} - refused, and QuickBooks could not be asked again`);
+      return;
+    }
+
+    if (landed) {
+      job.posted++;
+      job.totalAmount += amount;
+      job.doneCount += lines.length;
+      job.postedIds.push(String(landed.id));
+
+      // it is a payment like any other - the rows it covers are marked and
+      // stamped the same way
+      lines.forEach(m => {
+        if (m.sheetRow) {
+          job.toStamp.push(m.sheetRow);
+          const where = (m.sheetId || job.body.sheetId || '') + '|' + (m.tab || job.body.tab || '');
+          if (!job.stampAt.has(where)) job.stampAt.set(where, []);
+          job.stampAt.get(where).push(m.sheetRow);
+        }
+        job.paid.push({
+          invoice: m.invoice,
+          qbDoc: m.qbDoc,
+          customer: m.customerName || '',
+          bank: m.bank || '',
+          amount: Math.round(Number(m.willPay) * 100) / 100,
+          balanceWas: m.qbBalance
+        });
+      });
+
+      job.results.push({
+        ok: true, customer: who + ' - ' + bankName + tag,
+        count: lines.length, amount: Math.round(amount * 100) / 100,
+        paymentId: landed.id
+      });
+      push(job, 'ok', `OK  ${who} - ${bankName}${tag} - ${lines.length} invoices ` +
+                      `(QuickBooks answered with an error, but the payment is there - ${landed.id})`);
       return;
     }
 

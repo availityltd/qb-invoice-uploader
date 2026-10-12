@@ -52,7 +52,8 @@ import {
   listFolders, listSheetsIn, loadSheet, groupByCpr, isDelivered,
   findInvoices, listAccounts, listPaymentMethods, postPayment, digitsOf as cprDigits,
         paymentsByCpr, paymentsByIds, copyInvoice,
-        matchCpr, colourPlan, colourCpr, statusColumnOf
+        matchCpr, colourPlan, colourCpr, statusColumnOf,
+        strayPayments, paymentsWithRef, deletePayment
 } from './cpr.js';
 import { inspectExcel, writeStatusSheet, writeStatusExcel, fileInfo, peekImages,
          readCell, writeCell, stampRows } from './sheets.js';
@@ -3054,6 +3055,73 @@ app.post('/api/cpr/colour', async (req, res) => {
   try {
     const done = await colourCpr(sheetId, tab, plan);
     res.json({ ok: true, painted: done.painted, tally: done.tally });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// Money sitting against nothing.
+//
+// A payment that applies to no invoice at all is not a payment anybody made -
+// it is what was left behind when the same money was sent twice, and it shows
+// on the customer as an unapplied amount. This finds those, under one CPR, so
+// they can be looked at and taken off.
+app.get('/api/cpr/stray', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const cpr = String(req.query.cpr || '').trim();
+  if (!cpr) return res.status(400).json({ error: 'Which CPR?' });
+
+  try {
+    const token = await getAccessToken(realmId);
+    const all = await paymentsWithRef(realmId, token, cpr);
+    const stray = all.filter(p => p.total > 0 && Math.abs(p.unapplied - p.total) < 0.015);
+
+    res.json({
+      cpr,
+      payments: all.length,
+      amount: Math.round(all.reduce((s, p) => s + p.total, 0) * 100) / 100,
+      stray: stray.map(p => ({
+        id: p.id, date: p.date, amount: p.total,
+        customer: p.customerName, account: p.accountName, createdAt: p.createdAt
+      })),
+      strayAmount: Math.round(stray.reduce((s, p) => s + p.total, 0) * 100) / 100
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Take those off the books. Each one is read again first and only removed if
+// it still applies to nothing - a payment that has found its invoice in the
+// meantime is left where it is.
+app.post('/api/cpr/stray-remove', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const { cpr, ids } = req.body;
+  if (!cpr || !Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'Which payments?' });
+  }
+
+  try {
+    const token = await getAccessToken(realmId);
+    const live = await paymentsWithRef(realmId, token, cpr);
+    const want = new Set(ids.map(String));
+
+    const removed = [], left = [];
+    for (const p of live) {
+      if (!want.has(p.id)) continue;
+      if (!(p.total > 0 && Math.abs(p.unapplied - p.total) < 0.015)) {
+        left.push({ id: p.id, why: 'it applies to an invoice now' });
+        continue;
+      }
+      const r = await deletePayment(realmId, token, p.id, p.syncToken);
+      if (r.ok) removed.push({ id: p.id, amount: p.total });
+      else left.push({ id: p.id, why: r.msg });
+    }
+
+    res.json({ ok: true, removed, left });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -1,5 +1,6 @@
 import { getAccessToken } from './qb.js';
-import { postPayment, liveBalances, matchCpr, colourPlan, colourCpr } from './cpr.js';
+import { postPayment, liveBalances, matchCpr, colourPlan, colourCpr,
+         paymentLanded } from './cpr.js';
 import { writeStatusSheet, writeStatusExcel } from './sheets.js';
 import { recordRun, getSetting, setSetting } from './settings.js';
 import { realmOf } from './desk.js';
@@ -47,6 +48,7 @@ export function startPayJob(desk, body) {
     results: [],
     paidInvoices: [],
     skipped: [],
+    postedIds: [],
     stamped: 0,
     events: [],
     lastId: 0,
@@ -217,6 +219,7 @@ async function run(realmId, job, only) {
         });
       });
 
+      if (r.id) job.postedIds.push(String(r.id));
       job.results.push({
         ok: true,
         customer: who + tag,
@@ -228,7 +231,55 @@ async function run(realmId, job, only) {
       return;
     }
 
-    // too big for QuickBooks - cut it in half and send both halves
+    // QuickBooks does not always tell the truth about a payment it refused.
+    // It answers with an error for a payment it has in fact taken, and the old
+    // code believed it: it cut the payment in half and sent the halves, which
+    // then applied to invoices the first one had just settled - money sitting
+    // on the customer against nothing. So nothing is ever sent again until we
+    // have looked.
+    let landed = null;
+    try {
+      landed = await paymentLanded(realmId, token, {
+        ref, customerId: custId, amount, since: job.startedAt, skip: job.postedIds
+      });
+    } catch (e) {
+      // we could not ask. A payment we cannot account for is not one to send
+      // twice - it is left exactly as it is, and said so.
+      job.doneCount += entries.length;
+      job.results.push({
+        ok: false, customer: who + tag, count: entries.length,
+        msg: 'QuickBooks refused this and then could not be asked whether it ' +
+             'took it anyway (' + e.message + '). Nothing was sent again - ' +
+             'check this customer in QuickBooks before receiving it once more.'
+      });
+      push(job, 'fail', `UNSURE  ${who}${tag} - refused, and QuickBooks could not be asked again`);
+      return;
+    }
+
+    if (landed) {
+      job.posted++;
+      job.totalAmount += amount;
+      job.doneCount += entries.length;
+      job.postedIds.push(String(landed.id));
+
+      entries.forEach(e => {
+        if (e.m.sheetRow) paidRows.push(e.m.sheetRow);
+        job.paidInvoices.push({
+          invoice: e.m.invoice, qbDoc: e.m.qbDoc,
+          customer: e.m.customerName || '', amount: e.amount
+        });
+      });
+
+      job.results.push({
+        ok: true, customer: who + tag, count: entries.length,
+        amount, paymentId: landed.id
+      });
+      push(job, 'ok', `OK  ${who}${tag} - ${entries.length} invoices ` +
+                      `(QuickBooks answered with an error, but the payment is there - ${landed.id})`);
+      return;
+    }
+
+    // it truly did not land - too big, most likely, so cut it in half
     if (entries.length > 1 && depth < 2) {
       push(job, 'log', `QuickBooks refused ${entries.length} at once - splitting in two.`);
       const half = Math.ceil(entries.length / 2);
@@ -309,16 +360,21 @@ async function run(realmId, job, only) {
   // Now the run reads the CPR again itself and puts the colours in. It happens
   // once, before the run is called done, so the log tells the truth and every
   // computer watching sees the same thing.
-  if (job.posted > 0 && sheetId && tab && !colourKey) {
+  // Whether or not this run had anything left to pay, the sheet is coloured
+  // from what QuickBooks says now. A CPR that was already received has every
+  // right to a green sheet - and before, a run that posted nothing coloured
+  // nothing, so the only way to get the colours was to receive it again.
+  if (!job.stop && sheetId && tab && !colourKey) {
     push(job, 'log', 'This run does not say which CPR it was, so the sheet is left as it is.');
-  } else if (job.posted > 0 && sheetId && tab) {
+  } else if (!job.stop && sheetId && tab) {
     if (excel) {
       // only a Google Sheet has colours the API can reach
       push(job, 'log', 'The sheet is an Excel workbook, so it cannot be coloured - ' +
                        'only a Google Sheet can.');
     } else {
       try {
-        push(job, 'log', 'Reading this CPR again, so the colours match what it now says...');
+        push(job, 'log', `Reading CPR ${colourKey} again from the sheet, `
+                       + `so the colours match what QuickBooks says now...`);
 
         // the run can be long, and the sign-in behind it only lasts the hour
         const fresh = await matchCpr(realmId, await getAccessToken(realmId), {
@@ -328,9 +384,10 @@ async function run(realmId, job, only) {
 
         const plan = colourPlan(fresh);
         if (!plan.length) {
-          push(job, 'log', 'No row needed a colour.');
+          push(job, 'log', 'Nothing in this CPR needed a colour - no row is ' +
+                           'received, off, under another CPR, or missing from QuickBooks.');
         } else {
-          push(job, 'log', 'Colouring the sheet...');
+          push(job, 'log', `Colouring ${plan.length} rows in "${tab}"...`);
           const done = await colourCpr(sheetId, tab, plan);
           const t = done.tally || {};
           const bits = [];

@@ -580,6 +580,110 @@ export async function postPayment(realmId, token, payload) {
   return { ok: true, id: body.Payment ? body.Payment.Id : null, tid };
 }
 
+/* ============ did the payment land, whatever QuickBooks answered? ============ */
+
+// QuickBooks sometimes answers a payment with an error after it has already
+// taken it. The old code believed the answer: it cut the payment in half and
+// sent both halves, and those halves applied to invoices the first payment had
+// just settled - so they sat on the customer as money applied to nothing. One
+// payment became three, two of them junk. This is how we look instead of
+// believing.
+
+// Everything posted under one CPR number, with enough of each payment to tell
+// whether it is the one we were trying to send.
+export async function paymentsWithRef(realmId, token, ref) {
+  const r = clean(ref).replace(/'/g, "\\'");
+  if (!r) return [];
+  const q = await qbQuery(realmId, token,
+    `SELECT * FROM Payment WHERE PaymentRefNum = '${r}' MAXRESULTS 1000`);
+  return (q.Payment || []).map(shapePayment);
+}
+
+// The same, for a run with no CPR number on it: this customer's payments made
+// since the run began.
+export async function paymentsSince(realmId, token, customerId, since) {
+  const id = String(customerId || '').replace(/[^0-9]/g, '');
+  if (!id) return [];
+  const from = new Date(Number(since) || Date.now() - 3600000).toISOString();
+  const q = await qbQuery(realmId, token,
+    `SELECT * FROM Payment WHERE CustomerRef = '${id}' ` +
+    `AND MetaData.CreateTime > '${from}' MAXRESULTS 1000`);
+  return (q.Payment || []).map(shapePayment);
+}
+
+function shapePayment(p) {
+  return {
+    id: String(p.Id),
+    syncToken: String(p.SyncToken == null ? '' : p.SyncToken),
+    date: p.TxnDate || '',
+    ref: clean(p.PaymentRefNum),
+    total: Math.round(Number(p.TotalAmt || 0) * 100) / 100,
+    unapplied: Math.round(Number(p.UnappliedAmt || 0) * 100) / 100,
+    customerId: p.CustomerRef ? String(p.CustomerRef.value) : '',
+    customerName: p.CustomerRef ? (p.CustomerRef.name || '') : '',
+    createdAt: p.MetaData ? (p.MetaData.CreateTime || '') : '',
+    accountId: p.DepositToAccountRef ? String(p.DepositToAccountRef.value) : '',
+    accountName: p.DepositToAccountRef ? (p.DepositToAccountRef.name || '') : '',
+    invoiceIds: (p.Line || []).flatMap(l => (l.LinkedTxn || [])
+      .filter(t => t.TxnType === 'Invoice').map(t => String(t.TxnId)))
+  };
+}
+
+// Is the payment we just tried to send already in QuickBooks? Same customer,
+// same money, under this CPR, and not one this run has already counted.
+// Throws if QuickBooks cannot be asked - the caller must not send again on a
+// question it could not get an answer to.
+export async function paymentLanded(realmId, token, opts) {
+  const { ref, customerId, amount, since, skip } = opts || {};
+  const seen = new Set((skip || []).map(String));
+
+  const list = clean(ref)
+    ? await paymentsWithRef(realmId, token, ref)
+    : await paymentsSince(realmId, token, customerId, since);
+
+  const want = Math.round(Number(amount || 0) * 100) / 100;
+  const floor = (Number(since) || 0) - 120000;          // two minutes of slack
+
+  return list.find(p => {
+    if (seen.has(p.id)) return false;
+    if (customerId && p.customerId !== String(customerId)) return false;
+    if (Math.abs(p.total - want) > 0.015) return false;
+    if (floor > 0 && p.createdAt && new Date(p.createdAt).getTime() < floor) return false;
+    return true;
+  }) || null;
+}
+
+// Payments under this CPR that applied to nothing at all - every rupee of them
+// sitting unapplied. These are what a resent payment leaves behind.
+export async function strayPayments(realmId, token, ref) {
+  return (await paymentsWithRef(realmId, token, ref))
+    .filter(p => p.total > 0 && Math.abs(p.unapplied - p.total) < 0.015);
+}
+
+// Take one off the books. Only ever used on a payment that applied to nothing,
+// so no invoice changes hands when it goes.
+export async function deletePayment(realmId, token, id, syncToken) {
+  const r = await fetch(`${API}/v3/company/${realmId}/payment?operation=delete&minorversion=70`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify({ Id: String(id), SyncToken: String(syncToken) })
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    let msg = text.slice(0, 300);
+    try {
+      const f = JSON.parse(text).Fault;
+      if (f && f.Error && f.Error.length) msg = `${f.Error[0].Message} | ${f.Error[0].Detail || ''}`;
+    } catch (e) {}
+    return { ok: false, msg };
+  }
+  return { ok: true };
+}
+
 // A parcel that was replaced comes back under a second CPR, so the same order
 // has to be settled twice. QuickBooks will not take the number twice, so a
 // copy is made under "-D" and that is what the second CPR pays.

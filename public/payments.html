@@ -267,6 +267,11 @@
             <div class="paylog" id="paylog"></div>
           </div>
           <div id="payOut"></div>
+          <div id="strayBox" style="margin-top:14px">
+            <button class="mini" id="btnStray" data-need="payments">Check for payments that applied to nothing</button>
+            <span id="strayNote" style="font-size:12px;color:var(--muted);margin-left:10px"></span>
+            <div id="strayList"></div>
+          </div>
           <div class="acts"><button class="mini" id="btnResume" data-need="payments" style="display:none">Carry on</button> <button class="mini" id="btnClearRun" data-need="payments" style="display:none">Clear log</button></div>
         </div>
 
@@ -1532,6 +1537,87 @@
 
   var colourBtn = $('btnColour');
   if(colourBtn) colourBtn.addEventListener('click', function(){ colourNow(false); });
+
+  /* ---------- money sitting against nothing ---------- */
+
+  // A payment that applies to no invoice at all was never a payment anybody
+  // made: it is what the same money sent twice leaves behind, and it shows on
+  // the customer as an unapplied amount. The run no longer makes them - but
+  // the ones already in the books have to be findable, and removable, by the
+  // person looking at this CPR.
+  var strayFound = [];
+
+  function drawStray(d){
+    strayFound = d.stray || [];
+    $('strayNote').textContent =
+      nf(d.payments) + ' payment' + (d.payments === 1 ? '' : 's') + ' under CPR ' + d.cpr +
+      ', ' + money(d.amount) + ' in all.';
+
+    if(!strayFound.length){
+      $('strayList').innerHTML =
+        '<div class="result good">Every one of them is applied to invoices. Nothing to clean up.</div>';
+      return;
+    }
+
+    $('strayList').innerHTML =
+      '<div class="result bad">' + nf(strayFound.length) + ' payment' +
+        (strayFound.length === 1 ? '' : 's') + ' totalling ' + money(d.strayAmount) +
+        ' applied to nothing at all.</div>' +
+      strayFound.map(function(p){
+        return '<div class="result bad">QB payment ' + esc(p.id) + ' · ' +
+               esc(p.customer || '') + ' · ' + money(p.amount) +
+               (p.date ? ' · dated ' + esc(p.date) : '') + '</div>';
+      }).join('') +
+      '<div style="margin-top:8px"><button class="mini" id="btnStrayGo" ' +
+        'data-need="payments" style="background:var(--neg);color:#fff">Remove these ' +
+        nf(strayFound.length) + ' from QuickBooks</button></div>';
+
+    var go = $('btnStrayGo');
+    if(go) go.addEventListener('click', removeStray);
+  }
+
+  function removeStray(){
+    if(!strayFound.length) return;
+    if(!confirm('Remove ' + strayFound.length + ' payment' +
+                (strayFound.length === 1 ? '' : 's') +
+                ' from QuickBooks?\n\nOnly payments that apply to no invoice are removed. ' +
+                'This cannot be undone.')) return;
+
+    var btn = $('btnStrayGo');
+    if(btn){ btn.disabled = true; btn.textContent = 'Removing...'; }
+
+    post('/api/cpr/stray-remove', {
+      cpr: S.currentKey,
+      ids: strayFound.map(function(p){ return p.id; })
+    }).then(function(d){
+      var html = '<div class="result good">Removed ' + nf((d.removed || []).length) +
+                 '.</div>';
+      (d.left || []).forEach(function(x){
+        html += '<div class="result bad">' + esc(x.id) + ' left alone - ' + esc(x.why) + '</div>';
+      });
+      $('strayList').innerHTML = html;
+      strayFound = [];
+    }).catch(function(e){
+      if(btn){ btn.disabled = false; btn.textContent = 'Remove these'; }
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  var strayBtn = $('btnStray');
+  if(strayBtn) strayBtn.addEventListener('click', function(){
+    if(!S.currentKey) return say('bad', '<b>Open a CPR first.</b>');
+    strayBtn.disabled = true;
+    $('strayNote').textContent = 'Looking...';
+    $('strayList').innerHTML = '';
+    get('/api/cpr/stray?cpr=' + encodeURIComponent(S.currentKey)).then(function(d){
+      strayBtn.disabled = false;
+      drawStray(d);
+    }).catch(function(e){
+      strayBtn.disabled = false;
+      $('strayNote').textContent = '';
+      say('bad', '<b>' + esc(e.message) + '</b>');
+    });
+  });
 })();
 </script>
 </body>
