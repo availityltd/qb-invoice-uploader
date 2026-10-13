@@ -540,7 +540,7 @@
 
   /* ---------- making one ---------- */
 
-  function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:'', lost:false }; }
+  function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:'', lost:false, fromPaper:false }; }
 
   function drawLines(){
     if(!S.lines.length) S.lines.push(blank());
@@ -583,10 +583,14 @@
         var i = Number(el.getAttribute('data-i'));
         S.lines[i][el.getAttribute('data-f')] = el.value;
         if(el.getAttribute('data-f') === 'itemId'){
-          // the product's own name is what the line says unless something else
-          // was typed there
+          // The product's own wording is what the line says. Every product in
+          // QuickBooks already carries a description, so there is nothing to
+          // type here - and what was read off a photograph is not it.
           var p = S.products.filter(function(x){ return x.id === el.value; })[0];
-          if(p && !S.lines[i].desc) S.lines[i].desc = p.name;
+          if(p && (!S.lines[i].desc || S.lines[i].fromPaper)){
+            S.lines[i].desc = p.desc || p.name;
+            S.lines[i].fromPaper = false;
+          }
         }
         drawLines();
       });
@@ -721,7 +725,12 @@
       var said = [l.sku, l.name, l.variant].filter(Boolean).join(' · ');
       kept.push({
         itemId: l.itemId || '',
-        desc: [l.name, l.variant].filter(Boolean).join(' — '),
+        // the product's own description where a product was found; what the
+        // photo said only where one was not, so the line is not left blank
+        desc: l.desc || (l.itemId ? l.itemName : [l.name, l.variant].filter(Boolean).join(' — ')),
+        // marks a description that came off the photograph, so picking the
+        // product afterwards replaces it rather than leaving the photo's words
+        fromPaper: !l.desc,
         qty: l.qty ? String(l.qty) : '',
         // the paper's own rate; where it wrote only an amount, the rate that
         // works out to - and a line with neither is left for a person
@@ -777,6 +786,15 @@
     if(d.sure < 70){
       out += 'The photo was not very clear (<span class="off">' + d.sure +
              '% sure of the letters</span>) \u2014 check the rates and quantities one by one<br>';
+    }
+    // When lines did not find a product, say what there was to find them in.
+    // "Nothing matched" reads the same whether the codes were misread or the
+    // products carry no codes at all, and those are not the same problem.
+    if(lost){
+      out += 'Looked through <span class="em">' + nf(d.items) + '</span> products, ' +
+             (d.coded ? '<span class="em">' + nf(d.coded) + '</span> of them with a code on'
+                      : '<span class="off">none of them with a code on</span> — ' +
+                        'a line can only find its product by the code') + '<br>';
     }
     if((d.unsure || []).length){
       out += 'Read but not understood: ' + d.unsure.slice(0, 6).map(esc).join('; ') + '<br>';

@@ -1500,7 +1500,10 @@ app.get('/api/qb-products', async (req, res) => {
         `SELECT * FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
       const arr = q.Item || [];
       arr.forEach(it => {
-        products.push({ id: it.Id, name: it.Name, sku: it.Sku || '', active: it.Active !== false, type: it.Type || '' });
+        products.push({ id: it.Id, name: it.Name, sku: it.Sku || '', active: it.Active !== false, type: it.Type || '',
+          // the wording QuickBooks keeps for this product, so a line picked by
+          // hand says what a line matched by its code says
+          desc: it.PurchaseDesc || it.Description || '' });
       });
       if (arr.length < 1000) break;
       start += 1000;
@@ -9108,11 +9111,19 @@ app.post('/api/purchases/read', upload.array('files', 10), async (req, res) => {
     const items = [];
     let start = 1;
     while (true) {
+      // SELECT * - naming the fields instead hands Sku back empty, and the code
+      // is the whole of how a line finds its product
       const q = await qbQuery(realmId, token,
-        `SELECT Id, Name, Sku, Active FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
+        `SELECT * FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
       const arr = q.Item || [];
       arr.forEach(it => items.push({
-        id: String(it.Id), name: it.Name || '', sku: it.Sku || '', active: it.Active !== false
+        id: String(it.Id),
+        name: it.FullyQualifiedName || it.Name || '',
+        sku: it.Sku || '',
+        active: it.Active !== false,
+        // what the line should say: the wording QuickBooks itself keeps for a
+        // purchase of this product, falling back to the selling one
+        desc: it.PurchaseDesc || it.Description || ''
       }));
       if (arr.length < 1000) break;
       start += 1000;
@@ -9124,8 +9135,13 @@ app.post('/api/purchases/read', upload.array('files', 10), async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json(Object.assign(out, {
       read: got.read, skipped: got.skipped, sure: got.sure,
-      // what the reader actually saw, so a line it got wrong can be checked
-      // against the picture without squinting at the picture
+      // how many products there were to match against, and how many of them
+      // carry a code at all - without this, "nothing matched" reads the same
+      // whether the codes are missing or the reading was wrong
+      items: items.length,
+      coded: items.filter(it => it.sku).length,
+      // what the reader actually saw, so a line that came out wrong can be
+      // checked without squinting at the picture
       saw: got.text
     }));
   } catch (e) {

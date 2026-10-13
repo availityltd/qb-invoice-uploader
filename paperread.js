@@ -304,34 +304,46 @@ function shadeFits(itemName, variant) {
     : name.includes(b));
 }
 
-function matchLine(line, items, bySku) {
-  const cands = bySku.get(flat(line.sku)) || [];
+const hit = (it, how) => ({ itemId: it.id, itemName: it.name, desc: it.desc || '', how: how, choices: [] });
+const miss = (choices) => ({ itemId: '', itemName: '', desc: '', how: '', choices: choices || [] });
 
-  if (cands.length === 1) {
-    return { itemId: cands[0].id, itemName: cands[0].name, how: 'code', choices: [] };
-  }
+// One code, several products under it: the shade is what tells them apart.
+function narrow(cands, line, how) {
+  if (cands.length === 1) return hit(cands[0], how);
 
-  if (cands.length > 1) {
-    const fit = line.variant ? cands.filter(c => shadeFits(c.name, line.variant)) : [];
-    if (fit.length === 1) {
-      return { itemId: fit[0].id, itemName: fit[0].name, how: 'code and shade', choices: [] };
-    }
-    return { itemId: '', itemName: '', how: '', choices: cands.slice(0, 12) };
+  const fit = line.variant ? cands.filter(c => shadeFits(c.name, line.variant)) : [];
+  if (fit.length === 1) return hit(fit[0], how + ' and shade');
+
+  return miss((fit.length ? fit : cands).slice(0, 12));
+}
+
+function matchLine(line, items, bySku, byStart) {
+  const code = flat(line.sku);
+
+  if (code) {
+    const exact = bySku.get(code) || [];
+    if (exact.length) return narrow(exact, line, 'code');
+
+    // The paper carries the code of the product group, and QuickBooks hangs the
+    // shade off the end of it - 7101-014 on the message, 7101-014-03 in the
+    // list. That is the same code with more said about it, not another one.
+    const longer = byStart.filter(it => it.flatSku.indexOf(code) === 0);
+    if (longer.length) return narrow(longer, line, 'code');
   }
 
   // no code on the line, or a code this company does not use - the written name
   // is all that is left, and it has to land on exactly one product to be used
   const want = flat(line.name + line.variant);
   if (want.length >= 4) {
-    const hit = items.filter(it => flat(it.name) === want);
-    if (hit.length === 1) return { itemId: hit[0].id, itemName: hit[0].name, how: 'name', choices: [] };
+    const same = items.filter(it => flat(it.name) === want);
+    if (same.length === 1) return hit(same[0], 'name');
 
     const near = items.filter(it => flat(it.name).includes(want));
-    if (near.length === 1) return { itemId: near[0].id, itemName: near[0].name, how: 'name', choices: [] };
-    if (near.length > 1) return { itemId: '', itemName: '', how: '', choices: near.slice(0, 12) };
+    if (near.length === 1) return hit(near[0], 'name');
+    if (near.length > 1) return miss(near.slice(0, 12));
   }
 
-  return { itemId: '', itemName: '', how: '', choices: [] };
+  return miss([]);
 }
 
 // `items` is this company's own QuickBooks item list - the only list that may
@@ -340,17 +352,23 @@ export function matchToItems(sheet, items) {
   const live = (items || []).filter(it => it.active !== false);
 
   const bySku = new Map();
+  const byStart = [];
   live.forEach(it => {
     const k = flat(it.sku);
     if (!k) return;
     if (!bySku.has(k)) bySku.set(k, []);
     bySku.get(k).push(it);
+    byStart.push(Object.assign({ flatSku: k }, it));
   });
 
   const lines = sheet.lines.map(l => {
-    const m = matchLine(l, live, bySku);
+    const m = matchLine(l, live, bySku, byStart);
     return Object.assign({}, l, {
       itemId: m.itemId, itemName: m.itemName, how: m.how,
+      // QuickBooks' own wording for this product. Nothing about the description
+      // should come off the photograph: the product already carries one, and
+      // that is the one the bill ought to say.
+      desc: m.desc || '',
       choices: m.choices.map(c => ({ id: c.id, name: c.name, sku: c.sku }))
     });
   });
