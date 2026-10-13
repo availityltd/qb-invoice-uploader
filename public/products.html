@@ -25,6 +25,46 @@
     border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
   .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 
+  /* making products: the fields, and the two ways in */
+  .fld{margin-bottom:12px}
+  .fld label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);display:block;margin-bottom:4px}
+  .fld input,.fld select{width:100%;font-size:13.5px;padding:8px 10px;font-family:var(--sans);
+    border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
+  .fld input.num{text-align:right;font-family:var(--mono)}
+  .g2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media (max-width:860px){ .g2,.g3{grid-template-columns:1fr} }
+
+  /* a line across the sheet that says what the next few fields are for */
+  .band{margin:22px 0 12px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .band:first-of-type{margin-top:0;padding-top:0;border-top:0}
+
+  .maptab{width:100%;border-collapse:collapse;margin:6px 0 0}
+  .maptab th{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+    text-align:left;padding:0 10px 6px 0;font-weight:500}
+  .maptab td{padding:0 10px 10px 0;vertical-align:top;font-size:12.5px}
+  .maptab select{width:100%;font-size:13px;padding:6px 8px;border:1px solid var(--line-2);
+    border-radius:6px;background:#fff}
+  .maptab .eg{font-family:var(--mono);font-size:11px;color:var(--muted);
+    display:block;margin-top:4px;white-space:normal;line-height:1.5}
+
+  .plan{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-top:10px}
+  .plan table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .plan th{position:sticky;top:0;background:var(--panel-2);text-align:left;font-weight:500;
+    font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+    padding:8px 10px;border-bottom:1px solid var(--line)}
+  .plan td{padding:7px 10px;border-bottom:1px solid #F1F3F2;white-space:nowrap}
+  .plan td.w{white-space:normal;color:#8A5711}
+  .plan tr.skip td{color:var(--muted);background:#FDFBF6}
+  .plan td.mono{font-family:var(--mono)}
+  .plan td.num{text-align:right;font-family:var(--mono)}
+
+  .runlog{max-height:260px;overflow:auto;margin-top:10px;font-family:var(--mono);font-size:11.5px;
+    line-height:1.7;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#FAFBFA}
+  .runlog div.bad{color:var(--neg)}
+
   .cards{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 6px}
   .cards button{flex:1;min-width:170px;border:1px solid var(--line);border-radius:8px;
     padding:13px 15px;background:#fff;text-align:left;font:inherit;cursor:pointer}
@@ -147,13 +187,111 @@
           </div>
         </div>
 
+        <!-- ============ making products ============ -->
+        <!-- This does not wait on the books being read: a product has to be in
+             QuickBooks before anything can be bought or sold against it, and
+             that is often the first thing somebody comes here to do. -->
+        <div class="sheet" id="addSheet">
+          <div class="sec">
+            <h2><span class="no">02</span> Add products to QuickBooks
+              <span class="aside" id="addAside">one, or a list</span></h2>
+            <p class="hint" style="margin:0 0 4px">A product that is not in QuickBooks
+              cannot be bought, sold or costed. These are made here &mdash; and nothing is
+              written until what will happen is on the screen.</p>
+
+            <div class="band">What kind they are, and where they sit</div>
+            <div class="g3">
+              <div class="fld">
+                <label for="aType">What they are</label>
+                <select id="aType"></select>
+              </div>
+              <div class="fld">
+                <label for="aIncome">Sold to</label>
+                <select id="aIncome"><option value="">— pick an account —</option></select>
+              </div>
+              <div class="fld" id="aCogsWrap">
+                <label for="aCogs">Cost of sales goes to</label>
+                <select id="aCogs"><option value="">— pick an account —</option></select>
+              </div>
+            </div>
+            <div class="g2" id="aStockWrap">
+              <div class="fld">
+                <label for="aAsset">Stock is held in</label>
+                <select id="aAsset"><option value="">— pick an account —</option></select>
+              </div>
+              <div class="fld">
+                <label for="aStart">Stock starts from</label>
+                <input type="date" id="aStart">
+              </div>
+            </div>
+            <p class="hint" id="aWhere" style="margin:0"></p>
+
+            <div class="band">One product</div>
+            <div class="g3">
+              <div class="fld"><label for="aName">Name</label>
+                <input type="text" id="aName" placeholder="Miss Rose Waterproof Lip Liners 07"></div>
+              <div class="fld"><label for="aSku">Code &mdash; optional</label>
+                <input type="text" id="aSku" placeholder="7101-014/7"></div>
+              <div class="fld"><label for="aDesc">Description &mdash; optional</label>
+                <input type="text" id="aDesc" placeholder="What a bill and an invoice will say"></div>
+            </div>
+            <div class="g3">
+              <div class="fld"><label for="aPrice">Sells for</label>
+                <input type="text" class="num" id="aPrice" inputmode="decimal" placeholder="0.00"></div>
+              <div class="fld"><label for="aCost">Costs</label>
+                <input type="text" class="num" id="aCost" inputmode="decimal" placeholder="0.00"></div>
+              <div class="fld" id="aQtyWrap"><label for="aQty">Stock to start with</label>
+                <input type="text" class="num" id="aQty" inputmode="decimal" placeholder="0"></div>
+            </div>
+            <div class="acts">
+              <button class="solid" id="btnAddOne" data-need="newitems">Add this product</button>
+            </div>
+            <div class="stat" id="oneBox"></div>
+
+            <div class="band">Or a list of them</div>
+            <p class="hint" style="margin:0 0 12px">An Excel sheet or a CSV, one product to a
+              row. The columns are read off the header and can be changed below &mdash; nothing
+              is matched to QuickBooks until you ask for it.</p>
+            <div class="zone" id="aZone" tabindex="0" role="button">
+              <span><b>Drop the list here</b><span>Excel or CSV</span></span>
+              <span class="pick">Browse</span>
+            </div>
+            <input type="file" id="aFile" accept=".xlsx,.xls,.csv">
+            <div class="stat" id="listBox"></div>
+
+            <div class="hide" id="mapWrap">
+              <div class="band">Which column is which</div>
+              <table class="maptab"><tbody id="mapRows"></tbody></table>
+              <div class="acts" style="margin-top:10px">
+                <button class="solid" id="btnPlan">Show me what would be made</button>
+              </div>
+            </div>
+
+            <div class="hide" id="planWrap">
+              <div class="band">What would be made</div>
+              <div class="stat" id="planBox"></div>
+              <div class="plan" id="planRows"></div>
+              <div class="acts" style="margin-top:12px">
+                <button class="run" id="btnMake" data-need="newitems">Make them</button>
+                <button class="ghost hide" id="btnMakeStop"
+                  style="border-color:var(--neg);color:var(--neg)">Stop</button>
+                <button class="ghost hide" id="btnMakeOn" data-need="newitems">Carry on from where it stopped</button>
+                <button class="ghost hide" id="btnMakeClear">Clear the log</button>
+                <button class="ghost" id="btnAddEnd">End process</button>
+              </div>
+              <div class="stat" id="makeBox"></div>
+              <div class="runlog hide" id="makeLog"></div>
+            </div>
+          </div>
+        </div>
+
         <div id="work" class="hide">
           <div class="tabs" id="tabs"></div>
 
           <!-- ============ overview ============ -->
           <div class="sheet tabpage" id="tabOverview">
             <div class="sec">
-              <h2><span class="no">02</span> What is wrong
+              <h2><span class="no">03</span> What is wrong
                 <span class="aside" id="ovAside"></span></h2>
               <div class="cards" id="ovCards"></div>
               <p class="hint">Every one of these opens the list behind it.</p>
@@ -163,7 +301,7 @@
           <!-- ============ one list, whatever is being looked at ============ -->
           <div class="sheet tabpage hide" id="tabList">
             <div class="sec">
-              <h2><span class="no">02</span> <span id="listTitle">The items</span>
+              <h2><span class="no">03</span> <span id="listTitle">The items</span>
                 <span class="aside" id="listAside"></span></h2>
               <p class="hint" id="listHint" style="margin:0 0 12px"></p>
               <div class="subways hide" id="subways"></div>
@@ -412,6 +550,286 @@
   }
 
   /* ---------- the tabs ---------- */
+
+  /* ================= making products ================= */
+
+  // Nothing here is written to QuickBooks until the screen has said what will
+  // be written. The list is read, the columns are shown, the rows are lined up
+  // against what QuickBooks already holds - and only then is there a button
+  // that makes anything.
+  var A = { accounts:null, types:[], list:null, map:null, plan:null, poll:null, file:null };
+
+  var FIELDS = [
+    { key:'name',  label:'Name',              need:true,
+      why:'What the product is called in QuickBooks. It has to be one no other product has.' },
+    { key:'sku',   label:'Code (SKU)',
+      why:'How a bill, an order or a photograph finds this product later.' },
+    { key:'desc',  label:'Description',
+      why:'What a bill and an invoice will say. Written to both.' },
+    { key:'price', label:'Sells for' },
+    { key:'cost',  label:'Costs' },
+    { key:'qty',   label:'Stock to start with',
+      why:'Only for products that carry stock, and only as at the date above.' }
+  ];
+
+  function tell(id, cls, html){
+    var b = $(id);
+    b.className = 'stat' + (cls ? ' ' + cls : '');
+    b.innerHTML = html;
+  }
+
+  function kindNow(){ return $('aType').value || 'Inventory'; }
+  function stocked(){ return kindNow() === 'Inventory'; }
+
+  function drawKind(){
+    var inv = stocked();
+    $('aStockWrap').classList.toggle('hide', !inv);
+    $('aQtyWrap').classList.toggle('hide', !inv);
+    $('aWhere').textContent = inv
+      ? 'A product that carries stock sits on three accounts, and QuickBooks will not make one without all three. The date is the day its opening stock counts from — a date inside a month already closed moves that month.'
+      : 'Nothing is counted or costed for this kind, so it needs only the account it is sold to.';
+    drawMap();
+  }
+
+  function fillAccounts(){
+    var a = A.accounts;
+    if(!a) return;
+    [['aIncome', a.income], ['aCogs', a.cogs], ['aAsset', a.asset]].forEach(function(pair){
+      var el = $(pair[0]), set = pair[1];
+      el.innerHTML = '<option value="">— pick an account —</option>' +
+        set.list.map(function(x){
+          return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>';
+        }).join('');
+      if(set.usual) el.value = set.usual;
+    });
+  }
+
+  function loadAddAccounts(){
+    return get('/api/items/accounts').then(function(d){
+      A.accounts = d.accounts;
+      A.types = d.types || [];
+      $('aType').innerHTML = A.types.map(function(t){
+        return '<option value="' + esc(t.key) + '">' + esc(t.label) + '</option>';
+      }).join('');
+      fillAccounts();
+      drawKind();
+    }).catch(function(e){
+      tell('oneBox', 'bad', '<b>' + esc(e.message) + '</b>');
+    });
+  }
+
+  // everything the server needs before it may write anything
+  function addOpts(){
+    return {
+      type: kindNow(),
+      incomeId: $('aIncome').value,
+      cogsId: $('aCogs').value,
+      assetId: $('aAsset').value,
+      startDate: $('aStart').value
+    };
+  }
+
+  /* ---------- one at a time ---------- */
+
+  function addOne(){
+    var body = addOpts();
+    body.name = $('aName').value.trim();
+    body.sku = $('aSku').value.trim();
+    body.desc = $('aDesc').value.trim();
+    body.price = parseFloat($('aPrice').value) || 0;
+    body.cost = parseFloat($('aCost').value) || 0;
+    body.qty = stocked() ? (parseFloat($('aQty').value) || 0) : 0;
+
+    if(!body.name){ tell('oneBox', 'bad', '<b>A product needs a name</b>'); return; }
+
+    $('btnAddOne').disabled = true;
+    tell('oneBox', 'busy', 'Making it in QuickBooks…');
+
+    post('/api/items/one', body).then(function(d){
+      var m = d.made;
+      tell('oneBox', 'ok', '<b>' + esc(m.name) + ' made</b>' +
+        (m.sku ? '<i>' + esc(m.sku) + '</i>' : '') +
+        'It is in QuickBooks now and can be bought, sold and costed.');
+      ['aName', 'aSku', 'aDesc', 'aPrice', 'aCost', 'aQty'].forEach(function(id){ $(id).value = ''; });
+      $('aName').focus();
+    }).catch(function(e){
+      tell('oneBox', 'bad', '<b>' + esc(e.message) + '</b>');
+    }).then(function(){ $('btnAddOne').disabled = false; });
+  }
+
+  /* ---------- a list of them ---------- */
+
+  function sendList(file){
+    if(!file) return;
+    A.file = file.name;
+    tell('listBox', 'busy', 'Reading ' + esc(file.name) + '…');
+    $('mapWrap').classList.add('hide');
+    $('planWrap').classList.add('hide');
+
+    var fd = new FormData();
+    fd.append('file', file, file.name);
+
+    fetch('/api/items/read', { method:'POST', credentials:'same-origin', body: fd })
+      .then(function(r){ return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      }); })
+      .then(function(d){
+        A.list = d;
+        A.map = d.map;
+        tell('listBox', 'ok', '<b>' + nf(d.total) + ' row' + (d.total === 1 ? '' : 's') +
+          ' in ' + esc(d.file) + '</b><i>sheet: ' + esc(d.sheet) + '</i>' +
+          'Check the columns below. Nothing has been matched to QuickBooks yet.');
+        $('mapWrap').classList.remove('hide');
+        drawMap();
+      })
+      .catch(function(e){ tell('listBox', 'bad', '<b>' + esc(e.message) + '</b>'); });
+  }
+
+  // What each column is, with the first few things in it underneath - a header
+  // called "Code" and a header called "Article" look the same in a dropdown,
+  // and what is actually written in them does not.
+  function drawMap(){
+    if(!A.list) return;
+    var heads = A.list.headers;
+
+    $('mapRows').innerHTML = FIELDS.filter(function(f){
+      return f.key !== 'qty' || stocked();
+    }).map(function(f){
+      var at = A.map[f.key];
+      var eg = at >= 0 ? A.list.rows.slice(0, 3).map(function(r){ return r[at]; })
+                 .filter(Boolean).join('  ·  ') : '';
+      return '<tr><td style="width:180px"><b>' + esc(f.label) + '</b>' +
+        (f.need ? ' <span style="color:var(--neg)">*</span>' : '') +
+        (f.why ? '<span class="eg" style="font-family:var(--sans);color:var(--faint)">' +
+                 esc(f.why) + '</span>' : '') + '</td>' +
+        '<td><select data-f="' + esc(f.key) + '">' +
+          '<option value="-1">— not in this list —</option>' +
+          heads.map(function(h, i){
+            return '<option value="' + i + '"' + (i === at ? ' selected' : '') + '>' +
+                   esc(h || ('Column ' + (i + 1))) + '</option>';
+          }).join('') +
+        '</select>' +
+        (eg ? '<span class="eg">' + esc(eg) + '</span>' : '') + '</td></tr>';
+    }).join('');
+
+    Array.prototype.forEach.call($('mapRows').querySelectorAll('select[data-f]'), function(sel){
+      sel.addEventListener('change', function(){
+        A.map[sel.getAttribute('data-f')] = Number(sel.value);
+        drawMap();
+      });
+    });
+  }
+
+  function doPlan(){
+    $('btnPlan').disabled = true;
+    tell('listBox', 'busy', 'Reading what QuickBooks already has…');
+
+    post('/api/items/plan', { map: A.map, type: kindNow() }).then(function(d){
+      A.plan = d;
+      tell('listBox', 'ok', '<b>Looked through ' + nf(d.looked) + ' products already in QuickBooks</b>');
+      $('planWrap').classList.remove('hide');
+      drawPlan();
+      $('planWrap').scrollIntoView({ behavior:'smooth', block:'start' });
+    }).catch(function(e){
+      tell('listBox', 'bad', '<b>' + esc(e.message) + '</b>');
+    }).then(function(){ $('btnPlan').disabled = false; });
+  }
+
+  function drawPlan(){
+    var d = A.plan;
+    if(!d) return;
+    var skip = d.total - d.make;
+
+    tell('planBox', skip ? 'warn' : 'ok',
+      '<b>' + nf(d.make) + ' of ' + nf(d.total) + ' would be made' +
+      (skip ? ', ' + nf(skip) + ' left alone' : '') + '</b>' +
+      (skip ? 'Every row left alone says why beside it. Nothing on this screen has been written yet.'
+            : 'Nothing on this screen has been written yet.'));
+
+    var inv = stocked();
+    $('planRows').innerHTML =
+      '<table><thead><tr><th>Row</th><th>Name</th><th>Code</th><th class="num">Sells for</th>' +
+      '<th class="num">Costs</th>' + (inv ? '<th class="num">Stock</th>' : '') +
+      '<th>What happens</th></tr></thead><tbody>' +
+      d.rows.map(function(r){
+        return '<tr' + (r.make ? '' : ' class="skip"') + '>' +
+          '<td class="num">' + r.at + '</td>' +
+          '<td>' + esc(r.name || '—') + '</td>' +
+          '<td class="mono">' + esc(r.sku || '—') + '</td>' +
+          '<td class="num">' + (r.price ? money(r.price) : '—') + '</td>' +
+          '<td class="num">' + (r.cost ? money(r.cost) : '—') + '</td>' +
+          (inv ? '<td class="num">' + (r.qty ? nf(r.qty) : '—') + '</td>' : '') +
+          (r.make ? '<td>Will be made</td>' : '<td class="w">' + esc(r.why) + '</td>') +
+          '</tr>';
+      }).join('') + '</tbody></table>';
+
+    $('btnMake').disabled = !d.make;
+    $('btnMake').textContent = d.make
+      ? 'Make ' + nf(d.make) + ' product' + (d.make === 1 ? '' : 's') + ' in QuickBooks'
+      : 'Nothing on this list left to make';
+  }
+
+  /* ---------- the run ---------- */
+
+  function startMake(carryOn){
+    var body = addOpts();
+    body.carryOn = !!carryOn;
+
+    $('btnMake').disabled = true;
+    $('btnMakeOn').classList.add('hide');
+    tell('makeBox', 'busy', 'Starting…');
+
+    post('/api/items/create', body).then(function(d){
+      tell('makeBox', 'busy', 'Making ' + nf(d.left) + ' of ' + nf(d.total) + '…');
+      watchMake();
+    }).catch(function(e){
+      tell('makeBox', 'bad', '<b>' + esc(e.message) + '</b>');
+      $('btnMake').disabled = false;
+    });
+  }
+
+  function watchMake(){
+    if(A.poll) clearInterval(A.poll);
+    A.poll = setInterval(pollMake, 1200);
+    pollMake();
+  }
+
+  function pollMake(){
+    get('/api/items/status').then(function(s){
+      if(!s.has){ if(A.poll) clearInterval(A.poll); return; }
+
+      $('btnMakeStop').classList.toggle('hide', !s.running);
+      $('btnMakeClear').classList.toggle('hide', s.running);
+      $('btnMakeOn').classList.toggle('hide', !(s.stopped && s.done + s.failed < s.total));
+      $('btnMake').disabled = s.running;
+
+      var line = nf(s.done) + ' of ' + nf(s.total) + ' made' +
+        (s.failed ? ', ' + nf(s.failed) + ' refused' : '');
+
+      if(s.running){
+        tell('makeBox', 'busy', line + '…');
+      } else if(A.poll){
+        clearInterval(A.poll); A.poll = null;
+        if(s.error) tell('makeBox', 'bad', '<b>' + esc(s.error) + '</b>' + line);
+        else if(s.stopped) tell('makeBox', 'warn', '<b>Stopped</b>' + line +
+          '. What was made is in QuickBooks; the rest was not touched.');
+        else tell('makeBox', s.failed ? 'warn' : 'ok', '<b>' + line + '</b>' +
+          (s.failed ? 'What QuickBooks refused is said below, row by row.'
+                    : 'They are in QuickBooks now.'));
+      }
+
+      if(s.log.length){
+        $('makeLog').classList.remove('hide');
+        $('makeLog').innerHTML = s.log.map(function(l){
+          return '<div' + (l.ok ? '' : ' class="bad"') + '>' + l.at + '  ' +
+            esc(l.name) + (l.sku ? '  ' + esc(l.sku) : '') +
+            (l.ok ? '  — made' : '  — ' + esc(l.error)) + '</div>';
+        }).join('');
+        $('makeLog').scrollTop = $('makeLog').scrollHeight;
+      }
+    }).catch(function(){ /* a dropped poll is not an error worth shouting about */ });
+  }
 
   function tabOf(key){
     for(var i = 0; i < TABS.length; i++) if(TABS[i].key === key) return TABS[i];
@@ -1131,6 +1549,56 @@
 
   $('btnConnect').addEventListener('click', function(){ location.href = '/auth/connect'; });
   $('btnScan').addEventListener('click', scan);
+
+  /* ---------- making products ---------- */
+  $('aType').addEventListener('change', drawKind);
+  $('btnAddOne').addEventListener('click', addOne);
+  $('btnPlan').addEventListener('click', doPlan);
+  $('btnMake').addEventListener('click', function(){ startMake(false); });
+  $('btnMakeOn').addEventListener('click', function(){ startMake(true); });
+  $('btnMakeStop').addEventListener('click', function(){
+    post('/api/items/stop', {}).then(function(){
+      tell('makeBox', 'busy', 'Stopping after the one it is on…');
+    });
+  });
+  $('btnMakeClear').addEventListener('click', function(){
+    post('/api/items/clear', {}).then(function(){
+      $('makeLog').classList.add('hide');
+      $('makeLog').innerHTML = '';
+      tell('makeBox', '', '');
+      $('btnMakeClear').classList.add('hide');
+      $('btnMakeOn').classList.add('hide');
+      $('btnMake').disabled = !(A.plan && A.plan.make);
+    }).catch(function(e){ tell('makeBox', 'bad', '<b>' + esc(e.message) + '</b>'); });
+  });
+  $('btnAddEnd').addEventListener('click', function(){
+    post('/api/items/end', {}).then(function(){
+      if(A.poll){ clearInterval(A.poll); A.poll = null; }
+      A.list = null; A.map = null; A.plan = null; A.file = null;
+      $('mapWrap').classList.add('hide');
+      $('planWrap').classList.add('hide');
+      $('makeLog').classList.add('hide');
+      $('aFile').value = '';
+      tell('listBox', '', '');
+      tell('makeBox', '', '');
+      tell('planBox', '', '');
+    });
+  });
+  (function(){
+    var z = $('aZone'), inp = $('aFile');
+    z.addEventListener('click', function(){ inp.click(); });
+    z.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); inp.click(); }
+    });
+    ['dragenter','dragover'].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.add('hot'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      z.addEventListener(ev, function(e){ e.preventDefault(); z.classList.remove('hot'); });
+    });
+    z.addEventListener('drop', function(e){ sendList((e.dataTransfer.files || [])[0]); });
+    inp.addEventListener('change', function(){ sendList(inp.files[0]); inp.value = ''; });
+  })();
   $('btnCsv').addEventListener('click', csv);
   $('btnApply').addEventListener('click', apply);
   $('adjAcct').addEventListener('change', drawApply);
@@ -1220,6 +1688,16 @@
     $('body').classList.remove('hide');
     loadRecord();
     $('adjDate').value = iso(new Date());
+    $('aStart').value = iso(new Date());
+    loadAddAccounts();
+
+    // a run of new products left going in another tab, or before a reload, is
+    // picked back up where it was
+    get('/api/items/status').then(function(d){
+      if(!d || !d.has) return;
+      $('planWrap').classList.remove('hide');
+      watchMake();
+    }).catch(function(){ /* nothing to pick up */ });
     get('/api/products/adjust-accounts').then(function(d){
       S.adjust = d.accounts || [];
       $('adjAcct').innerHTML = '<option value="">— pick an account —</option>' +

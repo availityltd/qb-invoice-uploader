@@ -47,6 +47,10 @@ import {
   attachFile, listAttachments
 } from './purchases.js';
 import { readPictures, parseSheet, matchToItems } from './paperread.js';
+import {
+  TYPES as ITEM_TYPES, listItemAccounts, readExisting,
+  parseList, guessColumns, planRows, createItem
+} from './newitems.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
 import {
@@ -801,6 +805,13 @@ const RIGHT_GROUPS = [
   { key: 'products', area: 'items', label: 'Costs, stock and merges',
     what: 'Costs, stock on hand, merges',
     paths: ['/api/products/apply', '/api/products/record/clear'] },
+
+  // Making a product is not correcting one, and the two are not the same
+  // trust: this is the job that puts something into the books that was not
+  // there before.
+  { key: 'newitems', area: 'items', label: 'Add products',
+    what: 'Create products in QuickBooks',
+    paths: ['/api/items/create', '/api/items/one'] },
 
   { key: 'purchases', area: 'purchases', label: 'Purchase orders and bills',
     what: 'Raise purchase orders and bills',
@@ -8969,6 +8980,7 @@ app.post('/api/products/stop', async (req, res) => {
   if (st && st.job) st.job.stop = true;
   if (st && st.scan && st.scan.running) st.scan.stop = true;
   res.json({ ok: true });
+});
 
 // End process - the run is over. Whatever is left is dropped and nothing of
 // it stays on the server, not even after a deploy. What is already written
@@ -8984,8 +8996,6 @@ app.post('/api/products/end', async (req, res) => {
   }
   prodStore.delete(req.desk);
   res.json({ ok: true, had: !!st });
-});
-
 });
 
 app.get('/api/products/record', async (req, res) => {
@@ -9007,6 +9017,279 @@ app.post('/api/products/record/clear', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ==================== Making products ====================
+//
+// The only work in this app that puts something into the books that was not
+// there before. Everything else here corrects what is already written, and a
+// correction can be looked at again; a product made wrong sells at no cost for
+// months before anybody notices.
+//
+// So: say what will happen, then do it. A list is lined up against what
+// QuickBooks already holds - by name and by code - before a single row is
+// written, and every row that will be left alone says why on the screen rather
+// than halfway through the run.
+
+const newItemStore = new Map();   // desk -> { list, map, opts, plan, job }
+
+function newItemState(desk) {
+  if (!newItemStore.has(desk)) newItemStore.set(desk, { list: null, map: null, opts: null, plan: null, job: null });
+  return newItemStore.get(desk);
+}
+
+// Which accounts a product can sit on, with QuickBooks' own usual choice marked.
+app.get('/api/items/accounts', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  try {
+    const token = await getAccessToken(realmId);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      accounts: await listItemAccounts(realmId, token),
+      types: Object.keys(ITEM_TYPES).map(k => ITEM_TYPES[k])
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// A list off a file: its columns, and this app's guess at what each one is.
+// Nothing is checked against QuickBooks yet and nothing is written.
+app.post('/api/items/read', upload.single('file'), async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    if (!req.file) throw new Error('No file came through');
+
+    const list = parseList(req.file.buffer);
+    if (!list.rows.length) throw new Error('That sheet has a header and nothing under it');
+
+    const st = newItemState(req.desk);
+    st.list = list;
+    st.map = guessColumns(list.headers);
+    st.plan = null;
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      file: req.file.originalname, sheet: list.sheet,
+      headers: list.headers, map: st.map,
+      total: list.rows.length,
+      rows: list.rows.slice(0, 20)
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// What would be made, and what would be left alone and why. This reads
+// QuickBooks but writes nothing to it.
+app.post('/api/items/plan', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = newItemState(req.desk);
+    if (!st.list) throw new Error('Put the list in first');
+    if (st.job && st.job.running) throw new Error('A run is still going');
+
+    const body = req.body || {};
+    const map = body.map && typeof body.map === 'object' ? body.map : st.map;
+    if (!(map.name >= 0)) throw new Error('Say which column holds the name');
+
+    const token = await getAccessToken(realmId);
+    const existing = await readExisting(realmId, token);
+
+    st.map = map;
+    st.opts = { type: String(body.type || 'Inventory') };
+    st.plan = planRows(st.list.rows, map, st.opts, existing);
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      looked: existing.count,
+      total: st.plan.length,
+      make: st.plan.filter(r => r.make).length,
+      rows: st.plan
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// What the run needs before it may write anything, whatever it is making.
+function itemOpts(body) {
+  const type = ITEM_TYPES[String(body.type || '')] ? String(body.type) : 'Inventory';
+  const opts = {
+    type,
+    incomeId: String(body.incomeId || ''),
+    cogsId: String(body.cogsId || ''),
+    assetId: String(body.assetId || ''),
+    startDate: String(body.startDate || '').slice(0, 10)
+  };
+
+  if (!opts.incomeId) throw new Error('Pick the income account these are sold to');
+  if (type === 'Inventory') {
+    if (!opts.cogsId) throw new Error('Pick the cost of goods sold account');
+    if (!opts.assetId) throw new Error('Pick the account the stock is held in');
+    if (!opts.startDate) throw new Error('Say the date the stock starts from');
+  }
+
+  return opts;
+}
+
+async function runNewItems(realmId, st, job) {
+  const token = await getAccessToken(realmId);
+
+  for (const row of job.rows) {
+    if (job.stop) break;
+    if (job.okIds.has(row.at)) continue;
+
+    try {
+      const made = await createItem(realmId, token, row, job.opts);
+      job.okIds.add(row.at);
+      job.done++;
+      job.log.push({ at: row.at, name: row.name, sku: row.sku, ok: true, id: made.id });
+
+      await logProductChange(realmId, {
+        id: made.id, name: made.name, sku: made.sku,
+        field: 'made', was: '', now: made.type + (row.qty ? ' — ' + row.qty + ' in stock' : ''),
+        ok: true
+      }).catch(e => console.error('new item log:', e.message));
+    } catch (e) {
+      job.failed++;
+      job.log.push({ at: row.at, name: row.name, sku: row.sku, ok: false, error: e.message });
+    }
+  }
+
+  job.running = false;
+  job.ended = Date.now();
+}
+
+app.post('/api/items/create', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const st = newItemState(req.desk);
+    if (!st.plan) throw new Error('Look at what would be made first');
+    if (st.job && st.job.running) throw new Error('That is already running');
+
+    const body = req.body || {};
+    // carrying on takes what is left of the run before, the way it was asked
+    const before = body.carryOn && st.job ? st.job : null;
+    const opts = before ? before.opts : itemOpts(body);
+
+    const rows = st.plan.filter(r => r.make);
+    if (!rows.length) throw new Error('There is nothing on that list left to make');
+
+    const job = {
+      running: true, stop: false, opts, rows,
+      total: rows.length, done: 0, failed: 0, log: [],
+      started: Date.now(),
+      okIds: new Set(before ? before.okIds : [])
+    };
+    job.done = job.okIds.size;
+    st.job = job;
+
+    runNewItems(realmId, st, job).catch(e => {
+      job.running = false;
+      job.error = e.message;
+    });
+
+    res.json({ ok: true, total: job.total, left: job.total - job.done });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/items/status', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  const st = newItemStore.get(req.desk);
+  const job = st && st.job;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    has: !!job,
+    running: !!(job && job.running),
+    stopped: !!(job && !job.running && job.stop),
+    total: job ? job.total : 0,
+    done: job ? job.done : 0,
+    failed: job ? job.failed : 0,
+    error: job ? (job.error || '') : '',
+    log: job ? job.log.slice(-400) : []
+  });
+});
+
+// One product, typed in by hand. The same checks the list goes through, because
+// a name QuickBooks already holds is refused the same way either way.
+app.post('/api/items/one', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  try {
+    const body = req.body || {};
+    const opts = itemOpts(body);
+
+    const row = {
+      name: String(body.name || '').trim(),
+      sku: String(body.sku || '').trim(),
+      desc: String(body.desc || '').trim(),
+      price: Number(body.price || 0) || 0,
+      cost: Number(body.cost || 0) || 0,
+      qty: Number(body.qty || 0) || 0
+    };
+    if (!row.name) throw new Error('A product needs a name');
+
+    const token = await getAccessToken(realmId);
+    const existing = await readExisting(realmId, token);
+    const checked = planRows([[row.name, row.sku, row.desc, row.price, row.cost, row.qty]],
+      { name: 0, sku: 1, desc: 2, price: 3, cost: 4, qty: 5 }, opts, existing)[0];
+    if (!checked.make) throw new Error(checked.why);
+
+    const made = await createItem(realmId, token, row, opts);
+
+    await logProductChange(realmId, {
+      id: made.id, name: made.name, sku: made.sku,
+      field: 'made', was: '', now: made.type + (row.qty ? ' — ' + row.qty + ' in stock' : ''),
+      ok: true
+    }).catch(e => console.error('new item log:', e.message));
+
+    res.json({ ok: true, made });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/items/stop', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = newItemStore.get(req.desk);
+  if (st && st.job) st.job.stop = true;
+  res.json({ ok: true });
+});
+
+// Only the log of a finished run goes; the list that was put in stays, so what
+// is left of it can still be looked at.
+app.post('/api/items/clear', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = newItemStore.get(req.desk);
+  if (st && st.job && st.job.running) return res.status(400).json({ error: 'The run is still going' });
+  if (st) st.job = null;
+  res.json({ ok: true });
+});
+
+// End process - the list, the plan and the log are dropped. What is already in
+// QuickBooks stays there; this does not take products back out.
+app.post('/api/items/end', async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+  const st = newItemStore.get(req.desk);
+  if (st && st.job) st.job.stop = true;
+  newItemStore.delete(req.desk);
+  res.json({ ok: true, had: !!st });
 });
 
 // ==================== Purchases ====================
