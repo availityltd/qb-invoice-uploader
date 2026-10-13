@@ -121,6 +121,14 @@ const WHOLE = /^all\s+([\d][\d,]*)\s*(?:p\w*)/i;
 
 const VARWORD = /^variants?\b\s*[:=]?\s*/i;
 
+// "1-12", "01 - 12", "Beige 1 to 4" - a run of shades written as its two ends.
+// The quantity beside it belongs to EACH of them, not to all of them together:
+// when one shade in a run is different it is taken out and written on its own
+// line, which is exactly what the New foundation block does.
+const RUN = /^(.{0,24}?)\s*([0-9]{1,3})\s*(?:[-–—]|to)\s*([0-9]{1,3})\s*$/i;
+
+const MOST_SHADES = 60;
+
 // Reading noise, not content: WhatsApp's own clock, ticks, "Edited".
 const NOISE = /^(?:edited|[\d:apm\s.]{0,12}(?:am|pm)[\s\d:.]*|[^\w\d]{0,4})$/i;
 
@@ -156,10 +164,33 @@ export function parseSheet(text) {
     pendingQty = 0;
   };
 
-  const add = (variant, qty) => {
+  const one = (variant, qty) => {
     if (!open) { unsure.push('A quantity was read before any product: ' + variant + ' ' + qty); return; }
     out.push({ sku: open.sku, name: open.name, variant: tidy(variant), qty: qty, rate: open.rate });
     open.any = true;
+  };
+
+  // "1-12" with 1728 pieces is twelve shades of 1728 each, so it becomes twelve
+  // lines - one per shade, which is what a bill needs, since each shade is its
+  // own product in QuickBooks.
+  const add = (variant, qty) => {
+    const run = tidy(variant).match(RUN);
+    if (!run) return one(variant, qty);
+
+    const lead = tidy(run[1]);
+    const from = Number(run[2]);
+    const to = Number(run[3]);
+    const wide = Math.max(run[2].length, run[3].length);   // "01-12" stays 01, 02...
+
+    // a misread that turns into hundreds of lines is worse than one line nobody
+    // can place, so a run that is not a sane run is left exactly as it was read
+    if (!(to > from) || to - from + 1 > MOST_SHADES) return one(variant, qty);
+
+    for (let n = from; n <= to; n++) {
+      let tag = String(n);
+      while (tag.length < wide) tag = '0' + tag;
+      one(lead ? lead + ' ' + tag : tag, qty);
+    }
   };
 
   for (const raw of lines) {
@@ -257,11 +288,20 @@ const flat = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 // A shade is matched on its parts, not as one string: "Beige 2" in the message
 // is "Beige-2", "Beige 02" or "BEIGE2" in the item list, and a plain substring
 // test fails on all three.
+// A number in a shade is compared as a number, never as text. Shade 1 is item
+// "... 01" and it is NOT item "... 12", but "01" read as text is inside "12" on
+// one side and misses "1" on the other - and that is a whole shade of stock
+// booked against the wrong product.
 function shadeFits(itemName, variant) {
   const bits = String(variant).toLowerCase().match(/[a-z]+|[0-9]+/g) || [];
   if (!bits.length) return false;
+
   const name = flat(itemName);
-  return bits.every(b => name.includes(b));
+  const numbers = (String(itemName).match(/[0-9]+/g) || []).map(Number);
+
+  return bits.every(b => /^[0-9]+$/.test(b)
+    ? numbers.indexOf(Number(b)) >= 0
+    : name.includes(b));
 }
 
 function matchLine(line, items, bySku) {
