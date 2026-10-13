@@ -571,7 +571,19 @@
 
   /* ---------- making one ---------- */
 
-  function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:[], lost:false, fromPaper:false }; }
+  function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:[], lost:false, typed:false }; }
+
+  // Picking a product brings its own description with it. Every product in
+  // QuickBooks carries one, so there is nothing to type here - and what was
+  // read off a photograph, or left over from the product that was on this line
+  // a moment ago, is not it. The one thing never overwritten is wording
+  // somebody typed themselves.
+  function takeProduct(l, id, fallbackName){
+    l.itemId = id;
+    if(l.typed) return;
+    var p = S.products.filter(function(x){ return x.id === id; })[0];
+    l.desc = (p && (p.desc || p.name)) || fallbackName || '';
+  }
 
   /* ---------- choosing a product: a search box, not a list ---------- */
 
@@ -690,14 +702,7 @@
     function take(i){
       var p = hits[i], l = line;
       if(!p || !l) return;
-      l.itemId = p.id;
-      // The product's own wording is what the line says. Every product in
-      // QuickBooks already carries a description, so there is nothing to type
-      // here - and what was read off a photograph is not it.
-      if(!l.desc || l.fromPaper){
-        l.desc = p.desc || p.name;
-        l.fromPaper = false;
-      }
+      takeProduct(l, p.id, p.name);
       close(false);
       drawLines();
     }
@@ -827,8 +832,9 @@
     Array.prototype.forEach.call($('lineRows').querySelectorAll('[data-f]'), function(el){
       el.addEventListener('input', function(){
         S.lines[Number(el.getAttribute('data-i'))][el.getAttribute('data-f')] = el.value;
+        // typed by hand from here on, so picking another product leaves it be
         if(el.getAttribute('data-f') === 'desc'){
-          S.lines[Number(el.getAttribute('data-i'))].fromPaper = false;
+          S.lines[Number(el.getAttribute('data-i'))].typed = true;
         }
         refigure();
       });
@@ -840,12 +846,7 @@
         var at = b.getAttribute('data-among').split(':');
         var l = S.lines[Number(at[0])], c = l.among[Number(at[1])];
         if(!c) return;
-        l.itemId = c.id;
-        var p = S.products.filter(function(x){ return x.id === c.id; })[0];
-        if(!l.desc || l.fromPaper){
-          l.desc = (p && (p.desc || p.name)) || c.name;
-          l.fromPaper = false;
-        }
+        takeProduct(l, c.id, c.name);
         drawLines();
       });
     });
@@ -964,9 +965,9 @@
         // the product's own description where a product was found; what the
         // photo said only where one was not, so the line is not left blank
         desc: l.desc || (l.itemId ? l.itemName : [l.name, l.variant].filter(Boolean).join(' — ')),
-        // marks a description that came off the photograph, so picking the
-        // product afterwards replaces it rather than leaving the photo's words
-        fromPaper: !l.desc,
+        // nothing here was typed by a person, so picking a product afterwards
+        // is free to replace it
+        typed: false,
         qty: l.qty ? String(l.qty) : '',
         // the paper's own rate; where it wrote only an amount, the rate that
         // works out to - and a line with neither is left for a person
