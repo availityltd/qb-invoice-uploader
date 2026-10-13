@@ -25,6 +25,11 @@
     border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--text)}
   .quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 
+  /* a plan with rows nobody can make, or dates that read two ways, is neither
+     good news nor a failure */
+  .stat.warn b{color:#8A5711}
+  .stat .off{font-family:var(--mono);font-weight:500;color:#8A5711}
+
   /* making products: the fields, and the two ways in */
   .fld{margin-bottom:12px}
   .fld label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
@@ -199,7 +204,7 @@
               cannot be bought, sold or costed. These are made here &mdash; and nothing is
               written until what will happen is on the screen.</p>
 
-            <div class="band">What kind they are, and where they sit</div>
+            <div class="band">Where they sit, unless the list says otherwise</div>
             <div class="g3">
               <div class="fld">
                 <label for="aType">What they are</label>
@@ -559,17 +564,31 @@
   // that makes anything.
   var A = { accounts:null, types:[], list:null, map:null, plan:null, poll:null, file:null };
 
+  // Everything the sheet can say, in the order QuickBooks' own Products and
+  // Services sheet says it. A column the list does not have is left at "not in
+  // this list", and what is chosen in the fields above is used instead.
   var FIELDS = [
-    { key:'name',  label:'Name',              need:true,
+    { key:'name',    label:'Name', need:true,
       why:'What the product is called in QuickBooks. It has to be one no other product has.' },
-    { key:'sku',   label:'Code (SKU)',
+    { key:'desc',    label:'Sales description',
+      why:'What an invoice will say. Where there is only one description, it is written to both.' },
+    { key:'sku',     label:'Code (SKU)',
       why:'How a bill, an order or a photograph finds this product later.' },
-    { key:'desc',  label:'Description',
-      why:'What a bill and an invoice will say. Written to both.' },
-    { key:'price', label:'Sells for' },
-    { key:'cost',  label:'Costs' },
-    { key:'qty',   label:'Stock to start with',
-      why:'Only for products that carry stock, and only as at the date above.' }
+    { key:'type',    label:'What it is',
+      why:'Inventory, Non-inventory or Service, row by row. Without this column, the kind chosen above is used for all of them.' },
+    { key:'price',   label:'Sells for' },
+    { key:'income',  label:'Sold to', acct:true,
+      why:'The income account by name, as QuickBooks has it.' },
+    { key:'pdesc',   label:'Purchase description',
+      why:'What a bill will say.' },
+    { key:'cost',    label:'Costs' },
+    { key:'expense', label:'Cost of sales goes to', acct:true },
+    { key:'qty',     label:'Stock to start with',
+      why:'Only for the rows that carry stock, and only as at the date in the last column.' },
+    { key:'reorder', label:'Reorder point' },
+    { key:'asset',   label:'Stock is held in', acct:true },
+    { key:'asOf',    label:'Stock starts from',
+      why:'The day the opening stock counts from. A date inside a month already closed moves that month.' }
   ];
 
   function tell(id, cls, html){
@@ -582,12 +601,13 @@
   function stocked(){ return kindNow() === 'Inventory'; }
 
   function drawKind(){
-    var inv = stocked();
-    $('aStockWrap').classList.toggle('hide', !inv);
-    $('aQtyWrap').classList.toggle('hide', !inv);
-    $('aWhere').textContent = inv
-      ? 'A product that carries stock sits on three accounts, and QuickBooks will not make one without all three. The date is the day its opening stock counts from — a date inside a month already closed moves that month.'
-      : 'Nothing is counted or costed for this kind, so it needs only the account it is sold to.';
+    // Only the single product's own quantity follows this dropdown. The
+    // accounts and the date stay: a list can name a kind of its own on every
+    // row, and these are what such a row falls back to when it names nothing.
+    $('aQtyWrap').classList.toggle('hide', !stocked());
+    $('aWhere').textContent = stocked()
+      ? 'A product that carries stock sits on all three of these and QuickBooks will not make one without them. The date is the day its opening stock counts from — a date inside a month already closed moves that month. A list that names its own accounts, kind and date is obeyed instead of these.'
+      : 'This kind is neither counted nor costed, so only the account it is sold to is used. A list that names its own accounts, kind and date is obeyed instead of these.';
     drawMap();
   }
 
@@ -693,16 +713,20 @@
     if(!A.list) return;
     var heads = A.list.headers;
 
-    $('mapRows').innerHTML = FIELDS.filter(function(f){
-      return f.key !== 'qty' || stocked();
-    }).map(function(f){
+    // every column, whatever kind is chosen above: the sheet may name a kind of
+    // its own on every row, so hiding the stock columns on this dropdown would
+    // hide columns the list is actually using
+    $('mapRows').innerHTML = FIELDS.map(function(f){
       var at = A.map[f.key];
       var eg = at >= 0 ? A.list.rows.slice(0, 3).map(function(r){ return r[at]; })
                  .filter(Boolean).join('  ·  ') : '';
       return '<tr><td style="width:180px"><b>' + esc(f.label) + '</b>' +
         (f.need ? ' <span style="color:var(--neg)">*</span>' : '') +
         (f.why ? '<span class="eg" style="font-family:var(--sans);color:var(--faint)">' +
-                 esc(f.why) + '</span>' : '') + '</td>' +
+                 esc(f.why) + '</span>' : '') +
+        (f.acct && A.map[f.key] < 0
+          ? '<span class="eg" style="font-family:var(--sans);color:var(--faint)">' +
+            'Not in this list, so the account chosen above is used.</span>' : '') + '</td>' +
         '<td><select data-f="' + esc(f.key) + '">' +
           '<option value="-1">— not in this list —</option>' +
           heads.map(function(h, i){
@@ -741,25 +765,57 @@
     if(!d) return;
     var skip = d.total - d.make;
 
-    tell('planBox', skip ? 'warn' : 'ok',
-      '<b>' + nf(d.make) + ' of ' + nf(d.total) + ' would be made' +
-      (skip ? ', ' + nf(skip) + ' left alone' : '') + '</b>' +
-      (skip ? 'Every row left alone says why beside it. Nothing on this screen has been written yet.'
-            : 'Nothing on this screen has been written yet.'));
+    // what the list decided for itself, as against what this screen decided
+    var own = [];
+    if(d.fromSheet){
+      if(d.fromSheet.type) own.push('what each one is');
+      if(d.fromSheet.income || d.fromSheet.expense || d.fromSheet.asset) own.push('its accounts');
+      if(d.fromSheet.asOf) own.push('the date');
+    }
 
-    var inv = stocked();
+    var says = '<b>' + nf(d.make) + ' of ' + nf(d.total) + ' would be made' +
+      (skip ? ', ' + nf(skip) + ' left alone' : '') + '</b>';
+
+    if(own.length) says += 'The list names ' + own.join(', ') +
+      ' on each row, so that is what is used — the fields above only fill in what a row leaves out.<br>';
+
+    var kinds = Object.keys(d.kinds || {});
+    if(kinds.length > 1) says += kinds.map(function(k){
+      return nf(d.kinds[k]) + ' ' + (k === 'NonInventory' ? 'non-inventory' : k.toLowerCase());
+    }).join(', ') + '<br>';
+
+    // a date written 1/1/2026 can be read two ways round, and the wrong one
+    // moves a month that is closed - so it is said once, in words, before
+    // anything is written
+    if(d.unsure) says += '<span class="off">' + nf(d.unsure) + ' row' +
+      (d.unsure === 1 ? ' has a date' : 's have dates') +
+      ' that could be read either way round</span> — the month was taken first. ' +
+      'Check the dates in the last column before making anything.<br>';
+
+    if(skip) says += 'Every row left alone says why beside it. ';
+    says += 'Nothing on this screen has been written yet.';
+
+    tell('planBox', skip || d.unsure ? 'warn' : 'ok', says);
+
+    var anyStock = d.rows.some(function(r){ return r.type === 'Inventory'; });
+
     $('planRows').innerHTML =
-      '<table><thead><tr><th>Row</th><th>Name</th><th>Code</th><th class="num">Sells for</th>' +
-      '<th class="num">Costs</th>' + (inv ? '<th class="num">Stock</th>' : '') +
+      '<table><thead><tr><th>Row</th><th>Name</th><th>Code</th><th>What it is</th>' +
+      '<th class="num">Sells for</th><th class="num">Costs</th>' +
+      (anyStock ? '<th class="num">Stock</th><th>From</th>' : '') +
       '<th>What happens</th></tr></thead><tbody>' +
       d.rows.map(function(r){
+        var stock = r.type === 'Inventory';
         return '<tr' + (r.make ? '' : ' class="skip"') + '>' +
           '<td class="num">' + r.at + '</td>' +
           '<td>' + esc(r.name || '—') + '</td>' +
           '<td class="mono">' + esc(r.sku || '—') + '</td>' +
+          '<td>' + (r.type === 'NonInventory' ? 'Non-inventory' : esc(r.type)) + '</td>' +
           '<td class="num">' + (r.price ? money(r.price) : '—') + '</td>' +
           '<td class="num">' + (r.cost ? money(r.cost) : '—') + '</td>' +
-          (inv ? '<td class="num">' + (r.qty ? nf(r.qty) : '—') + '</td>' : '') +
+          (anyStock ? '<td class="num">' + (stock ? nf(r.qty) : '—') + '</td>' +
+                      '<td' + (stock && !r.dateSure ? ' class="w"' : '') + '>' +
+                      (stock ? esc(r.dateSaid || '—') : '—') + '</td>' : '') +
           (r.make ? '<td>Will be made</td>' : '<td class="w">' + esc(r.why) + '</td>') +
           '</tr>';
       }).join('') + '</tbody></table>';
