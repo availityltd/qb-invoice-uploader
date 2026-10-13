@@ -48,8 +48,8 @@ import {
 } from './purchases.js';
 import { readPictures, parseSheet, matchToItems } from './paperread.js';
 import {
-  TYPES as ITEM_TYPES, listItemAccounts, readExisting,
-  parseList, guessColumns, planRows, createItem
+  TYPES as ITEM_TYPES, readAccounts, itemAccountLists, readExisting,
+  parseList, guessColumns, planRows, createItem, readType
 } from './newitems.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
@@ -9046,7 +9046,7 @@ app.get('/api/items/accounts', async (req, res) => {
     const token = await getAccessToken(realmId);
     res.setHeader('Cache-Control', 'no-store');
     res.json({
-      accounts: await listItemAccounts(realmId, token),
+      accounts: itemAccountLists(await readAccounts(realmId, token)),
       types: Object.keys(ITEM_TYPES).map(k => ITEM_TYPES[k])
     });
   } catch (e) {
@@ -9099,17 +9099,39 @@ app.post('/api/items/plan', async (req, res) => {
     if (!(map.name >= 0)) throw new Error('Say which column holds the name');
 
     const token = await getAccessToken(realmId);
-    const existing = await readExisting(realmId, token);
+    const [existing, accounts] = await Promise.all([
+      readExisting(realmId, token),
+      readAccounts(realmId, token)
+    ]);
 
+    // What the screen chose is the fallback, not the rule: a sheet that names
+    // its own accounts, type and date is obeyed row by row.
     st.map = map;
-    st.opts = { type: String(body.type || 'Inventory') };
-    st.plan = planRows(st.list.rows, map, st.opts, existing);
+    st.opts = {
+      type: readType(body.type, 'Inventory'),
+      incomeId: String(body.incomeId || ''),
+      cogsId: String(body.cogsId || ''),
+      assetId: String(body.assetId || ''),
+      startDate: String(body.startDate || '').slice(0, 10)
+    };
+    st.plan = planRows(st.list.rows, map, st.opts, existing, accounts);
+
+    const kinds = {};
+    st.plan.forEach(r => { kinds[r.type] = (kinds[r.type] || 0) + 1; });
 
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       looked: existing.count,
       total: st.plan.length,
       make: st.plan.filter(r => r.make).length,
+      // a date the sheet wrote both ways round is worth saying out loud once,
+      // rather than once per row
+      unsure: st.plan.filter(r => r.make && r.startDate && !r.dateSure).length,
+      kinds,
+      fromSheet: {
+        type: map.type >= 0, income: map.income >= 0,
+        expense: map.expense >= 0, asset: map.asset >= 0, asOf: map.asOf >= 0
+      },
       rows: st.plan
     });
   } catch (e) {
@@ -9117,25 +9139,15 @@ app.post('/api/items/plan', async (req, res) => {
   }
 });
 
-// What the run needs before it may write anything, whatever it is making.
+// What the screen has chosen, used only where a row leaves something out.
 function itemOpts(body) {
-  const type = ITEM_TYPES[String(body.type || '')] ? String(body.type) : 'Inventory';
-  const opts = {
-    type,
+  return {
+    type: readType(body.type, 'Inventory'),
     incomeId: String(body.incomeId || ''),
     cogsId: String(body.cogsId || ''),
     assetId: String(body.assetId || ''),
     startDate: String(body.startDate || '').slice(0, 10)
   };
-
-  if (!opts.incomeId) throw new Error('Pick the income account these are sold to');
-  if (type === 'Inventory') {
-    if (!opts.cogsId) throw new Error('Pick the cost of goods sold account');
-    if (!opts.assetId) throw new Error('Pick the account the stock is held in');
-    if (!opts.startDate) throw new Error('Say the date the stock starts from');
-  }
-
-  return opts;
 }
 
 async function runNewItems(realmId, st, job) {
@@ -9146,7 +9158,9 @@ async function runNewItems(realmId, st, job) {
     if (job.okIds.has(row.at)) continue;
 
     try {
-      const made = await createItem(realmId, token, row, job.opts);
+      // the row has been through the plan, so its accounts, its type and its
+      // date are already decided - nothing is worked out again here
+      const made = await createItem(realmId, token, row);
       job.okIds.add(row.at);
       job.done++;
       job.log.push({ at: row.at, name: row.name, sku: row.sku, ok: true, id: made.id });
@@ -9231,24 +9245,28 @@ app.post('/api/items/one', async (req, res) => {
   try {
     const body = req.body || {};
     const opts = itemOpts(body);
-
-    const row = {
-      name: String(body.name || '').trim(),
-      sku: String(body.sku || '').trim(),
-      desc: String(body.desc || '').trim(),
-      price: Number(body.price || 0) || 0,
-      cost: Number(body.cost || 0) || 0,
-      qty: Number(body.qty || 0) || 0
-    };
-    if (!row.name) throw new Error('A product needs a name');
+    if (!String(body.name || '').trim()) throw new Error('A product needs a name');
 
     const token = await getAccessToken(realmId);
-    const existing = await readExisting(realmId, token);
-    const checked = planRows([[row.name, row.sku, row.desc, row.price, row.cost, row.qty]],
-      { name: 0, sku: 1, desc: 2, price: 3, cost: 4, qty: 5 }, opts, existing)[0];
+    const [existing, accounts] = await Promise.all([
+      readExisting(realmId, token),
+      readAccounts(realmId, token)
+    ]);
+
+    // the same road as a row off a list, so a name QuickBooks already holds is
+    // refused in the same words either way
+    const one = [
+      String(body.name || '').trim(), String(body.sku || '').trim(),
+      String(body.desc || '').trim(), String(body.price || ''), String(body.cost || ''),
+      String(body.qty || '')
+    ];
+    const checked = planRows([one],
+      { name: 0, sku: 1, desc: 2, price: 3, cost: 4, qty: 5,
+        type: -1, pdesc: -1, income: -1, expense: -1, asset: -1, reorder: -1, asOf: -1 },
+      opts, existing, accounts)[0];
     if (!checked.make) throw new Error(checked.why);
 
-    const made = await createItem(realmId, token, row, opts);
+    const made = await createItem(realmId, token, checked);
 
     await logProductChange(realmId, {
       id: made.id, name: made.name, sku: made.sku,
