@@ -46,7 +46,6 @@ import {
   listVendors, listPayables, readDocs, readOne, createDoc,
   attachFile, listAttachments
 } from './purchases.js';
-import { readPaper, matchToItems, readingIsSetUp } from './billread.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
 import {
@@ -804,7 +803,7 @@ const RIGHT_GROUPS = [
 
   { key: 'purchases', area: 'purchases', label: 'Purchase orders and bills',
     what: 'Raise purchase orders and bills',
-    paths: ['/api/purchases/create', '/api/purchases/attach', '/api/purchases/read'] },
+    paths: ['/api/purchases/create', '/api/purchases/attach'] },
 
   { key: 'delete', area: 'sales', label: 'Delete invoices',
     what: 'Remove invoices for good — no undo',
@@ -9026,7 +9025,7 @@ app.get('/api/purchases/who', async (req, res) => {
       listPayables(realmId, token)
     ]);
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ vendors, payables, reader: readingIsSetUp() });
+    res.json({ vendors, payables });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -9077,48 +9076,6 @@ app.get('/api/purchases/one', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json(one);
   } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
-
-// Reading the supplier's own paper so the lines do not have to be typed.
-//
-// This only fills the form in. Nothing is written to QuickBooks here, and the
-// item each line lands on is decided against this company's own item list - not
-// by whatever read the picture.
-app.post('/api/purchases/read', upload.array('files', 10), async (req, res) => {
-  const realmId = await requireCompany(req, res);
-  if (!realmId) return;
-
-  // Stop is the browser dropping the request: that aborts the reading too, so
-  // nothing carries on running once nobody is waiting for it.
-  const stop = new AbortController();
-  req.on('close', () => { if (!res.writableEnded) stop.abort(); });
-
-  try {
-    if (!(req.files || []).length) throw new Error('No picture came through');
-
-    const sheet = await readPaper(req.files, { signal: stop.signal });
-
-    const token = await getAccessToken(realmId);
-    const items = [];
-    let start = 1;
-    while (true) {
-      const q = await qbQuery(realmId, token,
-        `SELECT Id, Name, Sku, Active FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
-      const arr = q.Item || [];
-      arr.forEach(it => items.push({
-        id: String(it.Id), name: it.Name || '', sku: it.Sku || '', active: it.Active !== false
-      }));
-      if (arr.length < 1000) break;
-      start += 1000;
-      if (start > 9000) break;
-    }
-
-    res.setHeader('Cache-Control', 'no-store');
-    res.json(matchToItems(sheet, items));
-  } catch (e) {
-    if (stop.signal.aborted) return;          // Stop was pressed - nobody is listening
     res.status(400).json({ error: e.message });
   }
 });
