@@ -72,6 +72,29 @@
   .lines .said.lost{color:#8A5A00}
   .lines .said b{font-weight:500;color:var(--muted)}
 
+  /* the product search box, and the list it opens - the list hangs off the body
+     so the table it sits in cannot clip it. Same box as the Convert page: one
+     way of finding a product in this app, not two. */
+  /* scoped to .lines so it beats this page's own `.lines input` rule, which is
+     a class and an element and would otherwise win on specificity */
+  .lines .pickinp{width:100%;padding:7px 9px;font:inherit;font-size:13px;background:#fff;
+    border:1px solid var(--line-2);border-radius:6px;color:var(--faint)}
+  .lines .pickinp.set{color:var(--text)}
+  .lines .pickinp:focus{outline:2px solid var(--qbo);outline-offset:1px}
+  .pickbox{position:fixed;z-index:60;background:#fff;border:1px solid var(--line-2);
+    border-radius:6px;box-shadow:0 10px 30px rgba(15,46,36,.16);overflow:hidden}
+  .pickbox.hide{display:none}
+  .pickhead{padding:6px 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted);background:var(--panel-2);border-bottom:1px solid var(--line)}
+  .picklist{overflow:auto}
+  .pickrow{display:flex;gap:10px;justify-content:space-between;align-items:center;
+    padding:7px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid #EFF1F3}
+  .pickrow span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pickrow em{font-style:normal;font-size:11px;color:var(--warn)}
+  .pickrow b{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap}
+  .pickrow.on{background:var(--qbo);color:#fff}
+  .pickrow.on b,.pickrow.on em{color:rgba(255,255,255,.75)}
+
   /* a reading that came back with lines nobody could place is neither good news
      nor a failure, and it should not be dressed as either */
   .stat.warn b{color:#8A5A00}
@@ -542,69 +565,203 @@
 
   function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:'', lost:false, fromPaper:false }; }
 
-  function drawLines(){
-    if(!S.lines.length) S.lines.push(blank());
+  /* ---------- choosing a product: a search box, not a list ---------- */
 
-    var opts = '<option value="">— pick a product —</option>' +
-      S.products.map(function(p){
-        return '<option value="' + esc(p.id) + '">' + esc(p.name) +
-               (p.sku ? ' · ' + esc(p.sku) : '') + '</option>';
-      }).join('');
+  // A company with a few thousand items turns a dropdown into a mile of names,
+  // and the only way to find one is to know where it sits. This is the same
+  // choice, searched: type any part of the name or the code and only what
+  // matches is in front of you. Nothing is chosen until a line is picked, so a
+  // half-typed word never becomes an answer.
+  //
+  // The same box as the Convert page, on the same keys - one way of finding a
+  // product in this app, not two.
+  var PICK = (function(){
+    var box = null, list = null, head = null, inp = null, line = null, hits = [], at = -1;
 
-    $('lineRows').innerHTML = S.lines.map(function(l, i){
-      var amt = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
-      return '<tr>' +
-        '<td><select data-i="' + i + '" data-f="itemId">' + opts + '</select>' +
-          (l.said ? '<div class="said' + (l.lost && !l.itemId ? ' lost' : '') + '">' +
-                    (l.lost && !l.itemId ? 'Read off the paper, not matched: ' : 'Read off the paper: ') +
-                    '<b>' + esc(l.said) + '</b>' +
-                    // several products carry that code and the shade did not tell
-                    // them apart - naming them beats sending someone down a list
-                    // of thousands to find the three that could be it
-                    (l.among && !l.itemId ? '<br>Could be: ' + esc(l.among) : '') +
-                    '</div>' : '') +
-          '</td>' +
-        '<td><input type="text" data-i="' + i + '" data-f="desc" value="' + esc(l.desc) + '"></td>' +
-        '<td><input type="text" class="num" data-i="' + i + '" data-f="qty" inputmode="decimal" value="' + esc(l.qty) + '"></td>' +
-        '<td><input type="text" class="num" data-i="' + i + '" data-f="rate" inputmode="decimal" value="' + esc(l.rate) + '"></td>' +
-        '<td class="amt">' + money(amt) + '</td>' +
-        '<td class="x"><button type="button" class="x" data-drop="' + i + '" title="Take this line off">&times;</button></td>' +
-        '</tr>';
-    }).join('');
+    function named(id){
+      var p = S.products.filter(function(x){ return x.id === id; })[0];
+      return p ? p.name : '';
+    }
 
-    // a select's value cannot be set by markup alone when the list is this long
-    Array.prototype.forEach.call($('lineRows').querySelectorAll('select[data-f=itemId]'), function(sel){
-      sel.value = S.lines[Number(sel.getAttribute('data-i'))].itemId || '';
-    });
+    function build(){
+      if(box) return;
+      box = document.createElement('div');
+      box.className = 'pickbox hide';
+      box.innerHTML = '<div class="pickhead"></div><div class="picklist"></div>';
+      document.body.appendChild(box);
+      head = box.firstChild;
+      list = box.lastChild;
 
-    Array.prototype.forEach.call($('lineRows').querySelectorAll('[data-f]'), function(el){
-      var ev = el.tagName === 'SELECT' ? 'change' : 'input';
-      el.addEventListener(ev, function(){
-        var i = Number(el.getAttribute('data-i'));
-        S.lines[i][el.getAttribute('data-f')] = el.value;
-        if(el.getAttribute('data-f') === 'itemId'){
-          // The product's own wording is what the line says. Every product in
-          // QuickBooks already carries a description, so there is nothing to
-          // type here - and what was read off a photograph is not it.
-          var p = S.products.filter(function(x){ return x.id === el.value; })[0];
-          if(p && (!S.lines[i].desc || S.lines[i].fromPaper)){
-            S.lines[i].desc = p.desc || p.name;
-            S.lines[i].fromPaper = false;
-          }
+      // mousedown would take the focus off the input before the click lands
+      list.addEventListener('mousedown', function(e){ e.preventDefault(); });
+      list.addEventListener('click', function(e){
+        var t = e.target;
+        while(t && t !== list && !(t.getAttribute && t.getAttribute('data-i') !== null)) t = t.parentNode;
+        if(t && t !== list) take(Number(t.getAttribute('data-i')));
+      });
+
+      document.addEventListener('mousedown', function(e){
+        if(!inp) return;
+        if(e.target === inp || box.contains(e.target)) return;
+        close(true);
+      });
+      window.addEventListener('resize', place);
+      window.addEventListener('scroll', place, true);
+    }
+
+    function place(){
+      if(!inp || box.classList.contains('hide')) return;
+      var r = inp.getBoundingClientRect();
+      var below = window.innerHeight - r.bottom, above = r.top;
+      var h = Math.min(300, Math.max(below, above) - 12);
+      var w = Math.max(r.width, 300);
+      box.style.width = w + 'px';
+      box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+      list.style.maxHeight = (h - 26) + 'px';
+      box.style.top = (below >= above ? r.bottom + 2 : r.top - h - 2) + 'px';
+    }
+
+    // every part of what was typed has to be somewhere in the name or the code,
+    // so "lip 7101" finds the one lip liner with that code
+    function search(q){
+      var terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+      if(!terms.length){
+        return { rows: S.products.slice(0, 200), total: S.products.length };
+      }
+      var scored = [], total = 0;
+      for(var j = 0; j < S.products.length; j++){
+        var p = S.products[j];
+        var nm = String(p.name || '').toLowerCase(), sk = String(p.sku || '').toLowerCase();
+        var hay = nm + ' ' + sk, ok = true;
+        for(var t = 0; t < terms.length; t++) if(hay.indexOf(terms[t]) < 0){ ok = false; break; }
+        if(!ok) continue;
+        total++;
+        if(scored.length < 200){
+          var rank = nm.indexOf(terms[0]) === 0 ? 0 : (nm.indexOf(terms[0]) > -1 ? 1 : 2);
+          scored.push({ p: p, rank: rank });
         }
-        drawLines();
-      });
-    });
-    Array.prototype.forEach.call($('lineRows').querySelectorAll('button[data-drop]'), function(b){
-      b.addEventListener('click', function(){
-        S.lines.splice(Number(b.getAttribute('data-drop')), 1);
-        drawLines();
-      });
-    });
+      }
+      scored.sort(function(a, b){ return a.rank - b.rank || a.p.name.length - b.p.name.length; });
+      return { rows: scored.map(function(x){ return x.p; }), total: total };
+    }
 
-    var total = S.lines.reduce(function(s, l){
-      return s + (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
+    function draw(q){
+      var r = search(q);
+      hits = r.rows;
+      at = hits.length ? 0 : -1;
+
+      head.textContent = q
+        ? (r.total ? nf(r.total) + ' product' + (r.total === 1 ? '' : 's') +
+            (r.total > r.rows.length ? ' — showing the first ' + nf(r.rows.length) : '')
+          : 'Nothing with that in its name or code')
+        : nf(S.products.length) + ' products — type any part of a name or code';
+
+      list.innerHTML = hits.map(function(p, i){
+        return '<div class="pickrow' + (i === at ? ' on' : '') + '" data-i="' + i + '">' +
+               '<span>' + esc(p.name) + (p.active === false ? ' <em>inactive</em>' : '') + '</span>' +
+               (p.sku ? '<b>' + esc(p.sku) + '</b>' : '') + '</div>';
+      }).join('');
+      place();
+    }
+
+    function move(d){
+      if(!hits.length) return;
+      at = Math.max(0, Math.min(hits.length - 1, at + d));
+      var kids = list.children;
+      for(var i = 0; i < kids.length; i++){
+        kids[i].className = kids[i].className.replace(' on', '') + (i === at ? ' on' : '');
+      }
+      var k = kids[at];
+      if(k){
+        var top = k.offsetTop, bot = top + k.offsetHeight;
+        if(top < list.scrollTop) list.scrollTop = top;
+        else if(bot > list.scrollTop + list.clientHeight) list.scrollTop = bot - list.clientHeight;
+      }
+    }
+
+    function take(i){
+      var p = hits[i], l = line;
+      if(!p || !l) return;
+      l.itemId = p.id;
+      // The product's own wording is what the line says. Every product in
+      // QuickBooks already carries a description, so there is nothing to type
+      // here - and what was read off a photograph is not it.
+      if(!l.desc || l.fromPaper){
+        l.desc = p.desc || p.name;
+        l.fromPaper = false;
+      }
+      close(false);
+      drawLines();
+    }
+
+    function close(revert){
+      if(!inp) return;
+      if(revert){
+        inp.value = named(line.itemId);
+        inp.classList.toggle('set', !!line.itemId);
+      }
+      box.classList.add('hide');
+      inp = null; line = null; hits = []; at = -1;
+    }
+
+    function open(el, l){
+      build();
+      inp = el; line = l;
+      box.classList.remove('hide');
+      draw(el.value === named(l.itemId) ? '' : el.value);
+      place();
+    }
+
+    // one search box, wired to one line
+    function field(l){
+      build();
+      var el = document.createElement('input');
+      el.type = 'text';
+      el.className = 'pickinp' + (l.itemId ? ' set' : '');
+      el.placeholder = l.said && !l.itemId
+        ? 'Search by code or name — ' + l.said
+        : 'Search ' + nf(S.products.length) + ' products by name or code…';
+      el.value = named(l.itemId);
+      el.autocomplete = 'off';
+      el.spellcheck = false;
+
+      el.addEventListener('focus', function(){ el.select(); open(el, l); });
+      el.addEventListener('input', function(){ if(inp !== el) open(el, l); draw(el.value); });
+      el.addEventListener('keydown', function(e){
+        if(e.key === 'ArrowDown'){ e.preventDefault(); if(inp !== el) open(el, l); else move(1); }
+        else if(e.key === 'ArrowUp'){ e.preventDefault(); move(-1); }
+        else if(e.key === 'Enter'){ e.preventDefault(); if(inp === el) take(at); }
+        else if(e.key === 'Escape'){ if(inp === el){ e.preventDefault(); close(true); el.blur(); } }
+      });
+      el.addEventListener('blur', function(){
+        // a click inside the list keeps the focus; anything else puts the
+        // chosen name back, so what is on screen is always what is chosen
+        setTimeout(function(){
+          if(inp === el) close(true);
+          else { el.value = named(l.itemId); el.classList.toggle('set', !!l.itemId); }
+        }, 0);
+      });
+      return el;
+    }
+
+    return { field: field };
+  })();
+
+  /* ---------- the lines ---------- */
+
+  // The amounts, the total and the button, worked out again without the table
+  // being rebuilt. A quantity typed into a bill of twenty lines used to throw
+  // the whole table away on every keystroke, which took the cursor with it.
+  function refigure(){
+    var rows = $('lineRows').children;
+
+    var total = S.lines.reduce(function(s, l, i){
+      var amt = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
+      var cell = rows[i] ? rows[i].querySelector('td.amt') : null;
+      if(cell) cell.textContent = money(amt);
+      return s + amt;
     }, 0);
+
     $('newTotal').textContent = money(total);
 
     var ready = S.lines.filter(function(l){
@@ -622,6 +779,56 @@
             ' — this brings the stock in at these rates and is what cost of sales is worked out from'
           : ready + (ready === 1 ? ' line' : ' lines') + ', ' + money(total) +
             ' — an order changes nothing in the ledger until a bill is made from it');
+  }
+
+  function drawLines(){
+    if(!S.lines.length) S.lines.push(blank());
+
+    $('lineRows').innerHTML = S.lines.map(function(l, i){
+      var amt = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
+      return '<tr>' +
+        '<td class="prod">' +
+          (l.said ? '<div class="said' + (l.lost && !l.itemId ? ' lost' : '') + '">' +
+                    (l.lost && !l.itemId ? 'Read off the paper, not matched: ' : 'Read off the paper: ') +
+                    '<b>' + esc(l.said) + '</b>' +
+                    // several products carry that code and the shade did not tell
+                    // them apart - naming them beats sending someone down a list
+                    // of thousands to find the three that could be it
+                    (l.among && !l.itemId ? '<br>Could be: ' + esc(l.among) : '') +
+                    '</div>' : '') +
+          '</td>' +
+        '<td><input type="text" data-i="' + i + '" data-f="desc" value="' + esc(l.desc) + '"></td>' +
+        '<td><input type="text" class="num" data-i="' + i + '" data-f="qty" inputmode="decimal" value="' + esc(l.qty) + '"></td>' +
+        '<td><input type="text" class="num" data-i="' + i + '" data-f="rate" inputmode="decimal" value="' + esc(l.rate) + '"></td>' +
+        '<td class="amt">' + money(amt) + '</td>' +
+        '<td class="x"><button type="button" class="x" data-drop="' + i + '" title="Take this line off">&times;</button></td>' +
+        '</tr>';
+    }).join('');
+
+    // the search box goes in as an element, not as markup: it carries its own
+    // listeners and the line it belongs to
+    Array.prototype.forEach.call($('lineRows').querySelectorAll('td.prod'), function(td, i){
+      td.insertBefore(PICK.field(S.lines[i]), td.firstChild);
+    });
+
+    Array.prototype.forEach.call($('lineRows').querySelectorAll('[data-f]'), function(el){
+      el.addEventListener('input', function(){
+        S.lines[Number(el.getAttribute('data-i'))][el.getAttribute('data-f')] = el.value;
+        if(el.getAttribute('data-f') === 'desc'){
+          S.lines[Number(el.getAttribute('data-i'))].fromPaper = false;
+        }
+        refigure();
+      });
+    });
+
+    Array.prototype.forEach.call($('lineRows').querySelectorAll('button[data-drop]'), function(b){
+      b.addEventListener('click', function(){
+        S.lines.splice(Number(b.getAttribute('data-drop')), 1);
+        drawLines();
+      });
+    });
+
+    refigure();
   }
 
   /* ---------- the paper behind it ---------- */
