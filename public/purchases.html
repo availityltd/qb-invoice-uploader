@@ -65,6 +65,26 @@
   .lines button.x{border:0;background:none;color:var(--faint);font-size:16px;cursor:pointer;
     padding:4px 2px;line-height:1}
   .lines button.x:hover{color:var(--neg)}
+  /* what the paper said, under the product it was matched to - so a line that
+     found nothing says which code it was looking for instead of sitting blank */
+  .lines .said{font-family:var(--mono);font-size:10.5px;color:var(--faint);
+    margin-top:4px;white-space:normal;line-height:1.4}
+  .lines .said.lost{color:#8A5A00}
+  .lines .said b{font-weight:500;color:var(--muted)}
+
+  /* a reading that came back with lines nobody could place is neither good news
+     nor a failure, and it should not be dressed as either */
+  .stat.warn b{color:#8A5A00}
+  .stat .em{font-family:var(--mono);font-weight:500;color:var(--text)}
+  .stat .off{font-family:var(--mono);font-weight:500;color:#8A5A00}
+
+  /* the reading word for word - the only way to tell a line that came out
+     wrong because the photo was blurred from one the rules mishandled */
+  .saw{font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--muted);
+    background:#FAFBFA;border:1px solid var(--line);border-radius:6px;
+    padding:10px 12px;margin:8px 0 0;max-height:280px;overflow:auto;
+    white-space:pre-wrap;word-break:break-word}
+
   .sum{display:flex;justify-content:flex-end;gap:14px;align-items:baseline;
     font-family:var(--mono);font-size:16px;margin-top:6px}
   .sum span{font-family:var(--sans);font-size:11px;letter-spacing:.06em;
@@ -222,6 +242,19 @@
               <input type="file" id="fileIn" multiple
                 accept=".pdf,.png,.jpg,.jpeg,.gif,.xlsx,.xls,.csv,.doc,.docx">
               <div id="fileList"></div>
+
+              <div class="acts" style="margin-top:14px">
+                <button class="mini" id="btnRead" data-need="purchases" disabled>Read what is on them</button>
+                <button class="mini hide" id="btnStopRead">Stop</button>
+                <button class="mini hide" id="btnClearRead">Clear what was read</button>
+              </div>
+              <p class="hint" id="readHint" style="margin:8px 0 0">A photo of the
+                supplier's bill or the message they sent &mdash; it is read here and the
+                lines above are filled in.</p>
+              <div class="stat" id="readBox"></div>
+              <button type="button" class="mini hide" id="btnSaw"
+                style="margin-top:6px">Show what it read</button>
+              <pre class="saw hide" id="sawBox"></pre>
             </div>
           </div>
 
@@ -253,7 +286,10 @@
   ];
 
   var S = { tab:'PurchaseOrder', docs:[], filter:'', open:{},
-            vendors:[], payables:[], products:[], lines:[], made:null, files:[] };
+            vendors:[], payables:[], products:[], lines:[], made:null, files:[],
+            // whether the server can read a picture at all, and the reading
+            // that is going on right now so Stop has something to stop
+            reading:null };
 
   function esc(s){
     return String(s == null ? '' : s)
@@ -504,8 +540,10 @@
 
   /* ---------- making one ---------- */
 
+  function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:'', lost:false }; }
+
   function drawLines(){
-    if(!S.lines.length) S.lines.push({ itemId:'', desc:'', qty:'', rate:'' });
+    if(!S.lines.length) S.lines.push(blank());
 
     var opts = '<option value="">— pick a product —</option>' +
       S.products.map(function(p){
@@ -516,7 +554,16 @@
     $('lineRows').innerHTML = S.lines.map(function(l, i){
       var amt = (parseFloat(l.qty) || 0) * (parseFloat(l.rate) || 0);
       return '<tr>' +
-        '<td><select data-i="' + i + '" data-f="itemId">' + opts + '</select></td>' +
+        '<td><select data-i="' + i + '" data-f="itemId">' + opts + '</select>' +
+          (l.said ? '<div class="said' + (l.lost && !l.itemId ? ' lost' : '') + '">' +
+                    (l.lost && !l.itemId ? 'Read off the paper, not matched: ' : 'Read off the paper: ') +
+                    '<b>' + esc(l.said) + '</b>' +
+                    // several products carry that code and the shade did not tell
+                    // them apart - naming them beats sending someone down a list
+                    // of thousands to find the three that could be it
+                    (l.among && !l.itemId ? '<br>Could be: ' + esc(l.among) : '') +
+                    '</div>' : '') +
+          '</td>' +
         '<td><input type="text" data-i="' + i + '" data-f="desc" value="' + esc(l.desc) + '"></td>' +
         '<td><input type="text" class="num" data-i="' + i + '" data-f="qty" inputmode="decimal" value="' + esc(l.qty) + '"></td>' +
         '<td><input type="text" class="num" data-i="' + i + '" data-f="rate" inputmode="decimal" value="' + esc(l.rate) + '"></td>' +
@@ -612,6 +659,8 @@
         drawFiles();
       });
     });
+
+    drawReadBtn();
   }
 
   // one file per request, in order, each one saying whether it took - a scan that
@@ -634,6 +683,167 @@
           .catch(function(e){ failed.push(f.name + ': ' + e.message); });
       });
     }, Promise.resolve()).then(function(){ return { done: done, failed: failed }; });
+  }
+
+  /* ---------- reading the paper instead of typing it ---------- */
+
+  // Only a photograph can be read. A PDF or a spreadsheet dropped here is still
+  // a perfectly good attachment, there is just nothing in it to look at.
+  var READABLE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+  function readable(){
+    return S.files.filter(function(f){ return READABLE.test(f.name) && f.size <= 12 * 1024 * 1024; });
+  }
+
+  function drawReadBtn(){
+    var n = readable().length, busy = !!S.reading;
+
+    $('btnRead').disabled = busy || !n;
+    $('btnRead').textContent = busy ? 'Reading…'
+      : n > 1 ? 'Read what is on these ' + n : 'Read what is on it';
+    $('btnStopRead').classList.toggle('hide', !busy);
+
+    $('readHint').textContent = busy
+      ? 'Reading. A few seconds for each photo — Stop leaves everything above untouched.'
+      : !S.files.length ? 'Drop the photo the supplier sent above, and it can be read instead of typed.'
+      : !n ? 'None of those is a photograph, so there is nothing to read — they still go onto the transaction.'
+      : 'It is read here on this server and the lines above are filled in. Typed text only: handwriting cannot be read.';
+  }
+
+  // What was read goes onto the end of what is already there, so a second page
+  // of the same bill adds to the first instead of wiping it.
+  function fillFrom(d){
+    var kept = S.lines.filter(function(l){
+      return l.itemId || l.desc || parseFloat(l.qty) || parseFloat(l.rate);
+    });
+
+    (d.lines || []).forEach(function(l){
+      var said = [l.sku, l.name, l.variant].filter(Boolean).join(' · ');
+      kept.push({
+        itemId: l.itemId || '',
+        desc: [l.name, l.variant].filter(Boolean).join(' — '),
+        qty: l.qty ? String(l.qty) : '',
+        // the paper's own rate; where it wrote only an amount, the rate that
+        // works out to - and a line with neither is left for a person
+        rate: l.rate ? String(l.rate)
+            : (l.amount && l.qty ? String(Math.round(l.amount / l.qty * 100) / 100) : ''),
+        said: said,
+        lost: !l.itemId,
+        among: (l.choices || []).slice(0, 6).map(function(c){ return c.name; }).join(' / ')
+      });
+    });
+
+    S.lines = kept.length ? kept : [blank()];
+
+    if(d.doc && !$('docNo').value.trim()) $('docNo').value = d.doc;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(d.date || '')) $('nDate').value = d.date;
+
+    // the supplier only if the name lands on exactly one in the list - a near
+    // miss picked for them is the one mistake nobody checks
+    if(d.vendor && !$('vendor').value){
+      var want = String(d.vendor).toLowerCase().replace(/[^a-z0-9]/g, '');
+      var hit = S.vendors.filter(function(v){
+        var n = v.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return v.active && want.length > 2 && (n === want || n.indexOf(want) === 0 || want.indexOf(n) === 0);
+      });
+      if(hit.length === 1) $('vendor').value = hit[0].id;
+    }
+
+    drawLines();
+  }
+
+  function readSaid(d){
+    var all = (d.lines || []).length, got = d.matched || 0, lost = all - got;
+
+    // `.stat b` is a block in this app, so a bold word in the middle of a
+    // sentence breaks the sentence in two. One bold headline, then plain lines.
+    var head = all + (all === 1 ? ' line' : ' lines') + ' read off ' +
+      d.read.length + (d.read.length === 1 ? ' picture' : ' pictures') +
+      ' — ' + got + ' matched to a product' +
+      (lost ? ', ' + lost + ' still to pick by hand' : '');
+
+    var out = '<b>' + esc(head) + '</b>';
+
+    if(d.doc) out += 'Their number on it: <span class="em">' + esc(d.doc) + '</span><br>';
+
+    var sum = (d.lines || []).reduce(function(t, l){
+      return t + (l.qty || 0) * (l.rate || 0);
+    }, 0);
+    out += 'These lines come to <span class="em">' + money(sum) + '</span><br>';
+
+    // How sure the reader was of its own characters. A clear screenshot reads
+    // in the nineties; a photograph taken at an angle, or of a screen, drops -
+    // and that is exactly when a rate comes out with a digit missing.
+    if(d.sure < 70){
+      out += 'The photo was not very clear (<span class="off">' + d.sure +
+             '% sure of the letters</span>) \u2014 check the rates and quantities one by one<br>';
+    }
+    if((d.unsure || []).length){
+      out += 'Read but not understood: ' + d.unsure.slice(0, 6).map(esc).join('; ') + '<br>';
+    }
+    if((d.skipped || []).length){
+      out += 'Not read: ' + d.skipped.map(esc).join('; ') + '<br>';
+    }
+    out += 'Check every line against the photo before making anything.';
+
+    say('readBox', lost || d.sure < 70 || (d.unsure || []).length ? 'warn' : 'ok', out);
+
+    // the reading itself, kept to hand but out of the way
+    $('sawBox').textContent = d.saw || '';
+    $('btnSaw').classList.toggle('hide', !d.saw);
+    $('btnSaw').textContent = 'Show what it read';
+    $('sawBox').classList.add('hide');
+  }
+
+  function readFiles(){
+    var files = readable();
+    if(!files.length || S.reading) return;
+
+    var stop = new AbortController();
+    S.reading = stop;
+    drawReadBtn();
+    $('btnClearRead').classList.add('hide');
+    say('readBox', 'busy', 'Reading ' + files.length +
+        (files.length === 1 ? ' picture' : ' pictures') + '…');
+
+    var fd = new FormData();
+    files.forEach(function(f){ fd.append('files', f, f.name); });
+
+    fetch('/api/purchases/read', { method:'POST', credentials:'same-origin',
+                                   body: fd, signal: stop.signal })
+      .then(function(r){ return r.json().then(function(d){
+        if(!r.ok || d.error) throw new Error(d.error || ('HTTP ' + r.status));
+        return d;
+      }); })
+      .then(function(d){
+        S.reading = null;
+        fillFrom(d);
+        readSaid(d);
+        $('btnClearRead').classList.remove('hide');
+        drawReadBtn();
+      })
+      .catch(function(e){
+        S.reading = null;
+        if(e.name === 'AbortError'){
+          say('readBox', '', 'Stopped. Nothing above was touched.');
+        } else {
+          say('readBox', 'bad', '<b>' + esc(e.message) + '</b>');
+        }
+        drawReadBtn();
+      });
+  }
+
+  // Takes the read lines back off, so a picture read by mistake does not have to
+  // be undone one row at a time.
+  function clearRead(){
+    S.lines = [blank()];
+    say('readBox', '', '');
+    $('btnClearRead').classList.add('hide');
+    $('btnSaw').classList.add('hide');
+    $('sawBox').classList.add('hide');
+    $('sawBox').textContent = '';
+    drawLines();
+    drawReadBtn();
   }
 
   function make(){
@@ -680,7 +890,7 @@
             sent.failed.map(esc).join('; ') + '</span>';
         }
         say('makeBox', sent && sent.failed.length ? 'bad' : 'ok', what + tail);
-        S.lines = [{ itemId:'', desc:'', qty:'', rate:'' }];
+        S.lines = [blank()];
         S.files = [];
         $('docNo').value = '';
         drawFiles();
@@ -702,10 +912,17 @@
     drawDocs();
   });
   $('btnAddLine').addEventListener('click', function(){
-    S.lines.push({ itemId:'', desc:'', qty:'', rate:'' });
+    S.lines.push(blank());
     drawLines();
   });
   $('btnMake').addEventListener('click', make);
+  $('btnRead').addEventListener('click', readFiles);
+  $('btnStopRead').addEventListener('click', function(){ if(S.reading) S.reading.abort(); });
+  $('btnClearRead').addEventListener('click', clearRead);
+  $('btnSaw').addEventListener('click', function(){
+    var shut = $('sawBox').classList.toggle('hide');
+    $('btnSaw').textContent = shut ? 'Show what it read' : 'Hide what it read';
+  });
   (function(){
     var z = $('zoneFile'), inp = $('fileIn');
     z.addEventListener('click', function(){ inp.click(); });

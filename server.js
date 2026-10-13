@@ -46,6 +46,7 @@ import {
   listVendors, listPayables, readDocs, readOne, createDoc,
   attachFile, listAttachments
 } from './purchases.js';
+import { readPictures, parseSheet, matchToItems } from './paperread.js';
 import { initSettings, getSetting, setSetting, recordRun, listRuns, runsSummary,
          initCache, getCache, setCache } from './settings.js';
 import {
@@ -803,7 +804,7 @@ const RIGHT_GROUPS = [
 
   { key: 'purchases', area: 'purchases', label: 'Purchase orders and bills',
     what: 'Raise purchase orders and bills',
-    paths: ['/api/purchases/create', '/api/purchases/attach'] },
+    paths: ['/api/purchases/create', '/api/purchases/attach', '/api/purchases/read'] },
 
   { key: 'delete', area: 'sales', label: 'Delete invoices',
     what: 'Remove invoices for good — no undo',
@@ -9076,6 +9077,59 @@ app.get('/api/purchases/one', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json(one);
   } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Reading the supplier's own paper so the lines do not have to be typed.
+//
+// All of it happens here: the reading, the rules that turn what was read into
+// lines, and the matching to this company's own items. Nothing is sent
+// anywhere, and nothing about it costs anything to run.
+//
+// This only fills the form in - a person still presses the button that makes
+// the order or the bill.
+app.post('/api/purchases/read', upload.array('files', 10), async (req, res) => {
+  const realmId = await requireCompany(req, res);
+  if (!realmId) return;
+
+  let gone = false;
+  req.on('close', () => { if (!res.writableEnded) gone = true; });
+
+  try {
+    if (!(req.files || []).length) throw new Error('No photo came through');
+
+    const got = await readPictures(req.files);
+    if (gone) return;                         // Stop was pressed while it read
+
+    const sheet = parseSheet(got.text);
+
+    const token = await getAccessToken(realmId);
+    const items = [];
+    let start = 1;
+    while (true) {
+      const q = await qbQuery(realmId, token,
+        `SELECT Id, Name, Sku, Active FROM Item STARTPOSITION ${start} MAXRESULTS 1000`);
+      const arr = q.Item || [];
+      arr.forEach(it => items.push({
+        id: String(it.Id), name: it.Name || '', sku: it.Sku || '', active: it.Active !== false
+      }));
+      if (arr.length < 1000) break;
+      start += 1000;
+      if (start > 9000) break;
+    }
+    if (gone) return;
+
+    const out = matchToItems(sheet, items);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(Object.assign(out, {
+      read: got.read, skipped: got.skipped, sure: got.sure,
+      // what the reader actually saw, so a line it got wrong can be checked
+      // against the picture without squinting at the picture
+      saw: got.text
+    }));
+  } catch (e) {
+    if (gone) return;
     res.status(400).json({ error: e.message });
   }
 });
