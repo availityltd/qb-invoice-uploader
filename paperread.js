@@ -317,16 +317,41 @@ function narrow(cands, line, how) {
   return miss((fit.length ? fit : cands).slice(0, 12));
 }
 
+// The shade as it might have been written onto the end of the code. "01" and
+// "1" are the same shade, so both are tried; "Beige 2" is tried whole and never
+// as its bare 2, because a 2 on the end of a code is not a promise of anything.
+function shadeKeys(variant) {
+  const whole = flat(variant);
+  if (!whole) return [];
+
+  const keys = [whole];
+  const plain = String(variant).trim();
+  if (/^0\d+$/.test(plain)) keys.push(String(Number(plain)));
+  else if (/^\d+$/.test(plain)) keys.push('0' + plain);
+
+  return keys;
+}
+
 function matchLine(line, items, bySku, byStart) {
   const code = flat(line.sku);
 
   if (code) {
+    // The code with the shade on the end of it, as one whole code. This comes
+    // first and it is the one that has to: a list can hold 7101-014/1 and also
+    // 7101-014/1 L-17/1, which is a different product that merely begins the
+    // same way. Asked for 7101-014 shade 1, only the first of those is it.
+    for (const k of shadeKeys(line.variant)) {
+      const joined = bySku.get(code + k) || [];
+      if (joined.length) return narrow(joined, line, 'code and shade');
+    }
+
     const exact = bySku.get(code) || [];
     if (exact.length) return narrow(exact, line, 'code');
 
-    // The paper carries the code of the product group, and QuickBooks hangs the
-    // shade off the end of it - 7101-014 on the message, 7101-014-03 in the
-    // list. That is the same code with more said about it, not another one.
+    // Only now the loose reading: the paper carries the code of the group and
+    // QuickBooks hangs something off the end of it. More than one family can
+    // begin the same way, so whatever comes back still has to be told apart by
+    // its shade before it is taken.
     const longer = byStart.filter(it => it.flatSku.indexOf(code) === 0);
     if (longer.length) return narrow(longer, line, 'code');
   }

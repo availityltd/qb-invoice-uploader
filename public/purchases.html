@@ -70,6 +70,14 @@
   .lines .said{font-family:var(--mono);font-size:10.5px;color:var(--faint);
     margin-top:4px;white-space:normal;line-height:1.4}
   .lines .said.lost{color:#8A5A00}
+  /* the products a line could be, each one a button: a name on its own sends
+     someone off to search for what the page already has in its hand */
+  .lines .among{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+  .lines .among button{font:inherit;font-size:11px;padding:3px 8px;cursor:pointer;
+    border:1px solid var(--line-2);border-radius:999px;background:#fff;color:var(--muted)}
+  .lines .among button:hover{border-color:var(--qbo);color:var(--qbo)}
+  .lines .among button b{font-family:var(--mono);font-weight:400;color:var(--faint);margin-left:5px}
+  .lines .among button:hover b{color:var(--qbo)}
   .lines .said b{font-weight:500;color:var(--muted)}
 
   /* the product search box, and the list it opens - the list hangs off the body
@@ -563,7 +571,7 @@
 
   /* ---------- making one ---------- */
 
-  function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:'', lost:false, fromPaper:false }; }
+  function blank(){ return { itemId:'', desc:'', qty:'', rate:'', said:'', among:[], lost:false, fromPaper:false }; }
 
   /* ---------- choosing a product: a search box, not a list ---------- */
 
@@ -794,8 +802,13 @@
                     // several products carry that code and the shade did not tell
                     // them apart - naming them beats sending someone down a list
                     // of thousands to find the three that could be it
-                    (l.among && !l.itemId ? '<br>Could be: ' + esc(l.among) : '') +
                     '</div>' : '') +
+          (l.among.length && !l.itemId
+            ? '<div class="among">Could be: ' + l.among.map(function(c, j){
+                return '<button type="button" data-among="' + i + ':' + j + '">' +
+                       esc(c.name) + (c.sku ? '<b>' + esc(c.sku) + '</b>' : '') + '</button>';
+              }).join('') + '</div>'
+            : '') +
           '</td>' +
         '<td><input type="text" data-i="' + i + '" data-f="desc" value="' + esc(l.desc) + '"></td>' +
         '<td><input type="text" class="num" data-i="' + i + '" data-f="qty" inputmode="decimal" value="' + esc(l.qty) + '"></td>' +
@@ -818,6 +831,22 @@
           S.lines[Number(el.getAttribute('data-i'))].fromPaper = false;
         }
         refigure();
+      });
+    });
+
+    // one of the products a line could be, taken with one press
+    Array.prototype.forEach.call($('lineRows').querySelectorAll('button[data-among]'), function(b){
+      b.addEventListener('click', function(){
+        var at = b.getAttribute('data-among').split(':');
+        var l = S.lines[Number(at[0])], c = l.among[Number(at[1])];
+        if(!c) return;
+        l.itemId = c.id;
+        var p = S.products.filter(function(x){ return x.id === c.id; })[0];
+        if(!l.desc || l.fromPaper){
+          l.desc = (p && (p.desc || p.name)) || c.name;
+          l.fromPaper = false;
+        }
+        drawLines();
       });
     });
 
@@ -945,7 +974,7 @@
             : (l.amount && l.qty ? String(Math.round(l.amount / l.qty * 100) / 100) : ''),
         said: said,
         lost: !l.itemId,
-        among: (l.choices || []).slice(0, 6).map(function(c){ return c.name; }).join(' / ')
+        among: (l.choices || []).slice(0, 8)
       });
     });
 
