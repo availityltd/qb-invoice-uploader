@@ -3435,7 +3435,11 @@ app.post('/api/check/invoices', async (req, res) => {
     .filter(s => s.replace(/[^0-9]/g, '').length >= 4);
 
   if (!numbers.length) return res.status(400).json({ error: 'No order numbers in that' });
-  if (numbers.length > 500) return res.status(400).json({ error: 'That is more than 500 numbers' });
+  // The read is batched and runs as a job, so a long list is a matter of time,
+  // not of size - the ceiling is only there to catch a pasted file by mistake.
+  if (numbers.length > 20000) {
+    return res.status(400).json({ error: 'That is more than 20,000 numbers - do it in blocks' });
+  }
 
   try {
     const id = startCheck(req.desk, { kind: 'invoices', numbers });

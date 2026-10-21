@@ -409,24 +409,78 @@ async function checkCpr(realmId, job) {
     `${notPaid.length} still unpaid.`);
 }
 
+// A long paste is not a different job, only a longer one: the numbers go to
+// QuickBooks a batch at a time, each batch says where it got to, and Stop is
+// heard between batches - the same way the void page looks thousands up. The
+// hour an access token lasts is shorter than some of these runs, so it is
+// taken again when it is old rather than once at the start.
+const LOOKUP_BATCH = 200;
+const TOKEN_LIFE = 40 * 60 * 1000;
+
+async function tokenFor(realmId, job) {
+  const now = Date.now();
+  if (!job.token || now - (job.tokenAt || 0) > TOKEN_LIFE) {
+    job.token = await getAccessToken(realmId);
+    job.tokenAt = now;
+  }
+  return job.token;
+}
+
 async function checkInvoices(realmId, job) {
   const numbers = (job.body.numbers || []).map(clean).filter(Boolean);
   if (!numbers.length) throw new Error('No order numbers were given');
 
-  push(job, 'log', `Looking up ${numbers.length} order number${numbers.length === 1 ? '' : 's'}...`);
-  const token = await getAccessToken(realmId);
-  const found = await findInvoices(realmId, token, numbers);
-  if (job.stop) return;
+  // kept on the job, so Carry on picks up where Stop left it instead of
+  // asking QuickBooks the whole list over again
+  if (!job.lookup) job.lookup = { cursor: 0, found: new Map() };
+  const L = job.lookup;
+  const found = L.found;
 
+  if (!L.cursor) {
+    push(job, 'log',
+      `Looking up ${numbers.length} order number${numbers.length === 1 ? '' : 's'}, ` +
+      `${LOOKUP_BATCH} at a time.`);
+  }
+
+  while (L.cursor < numbers.length && !job.stop) {
+    const chunk = numbers.slice(L.cursor, L.cursor + LOOKUP_BATCH);
+    const token = await tokenFor(realmId, job);
+    const got = await findInvoices(realmId, token, chunk);
+    got.forEach((inv, k) => found.set(k, inv));
+    L.cursor += chunk.length;
+    push(job, 'log',
+      `${L.cursor} of ${numbers.length} looked up - ${found.size} found so far.`);
+  }
+
+  // what was reached: a Stop half way through still shows its half, and the
+  // numbers never asked about are not called missing
+  const asked = numbers.slice(0, L.cursor);
+  if (job.stop) {
+    push(job, 'log', `Stopped - ${L.cursor} of ${numbers.length} looked up.`);
+  }
+
+  const token = await tokenFor(realmId, job);
   const payIds = [];
-  found.forEach(inv => (inv.paymentIds || []).forEach(id => payIds.push(String(id))));
+  asked.forEach(n => {
+    const inv = found.get(clean(n).replace(/^#/, '')) || found.get(key(n)) || null;
+    if (inv) (inv.paymentIds || []).forEach(id => payIds.push(String(id)));
+  });
+  push(job, 'log', 'Reading the payments sitting on them...');
   const payments = await fullPaymentsByIds(realmId, token, payIds, job);
-  if (job.stop) return;
+  // Stop is heard here too, and a half-read set of payments would make orders
+  // look unreceived that are not. So it is said plainly, and Carry on reads
+  // the rest: the look-up itself does not start again.
+  const partial = job.stop && payIds.length > 0;
+  if (partial) {
+    push(job, 'log',
+      'Stopped before every payment was read - what these orders were paid by is ' +
+      'not complete. Carry on to finish it.');
+  }
 
   const payById = new Map(payments.map(p => [String(p.Id), p]));
   const out = [];
 
-  numbers.forEach(n => {
+  asked.forEach(n => {
     const inv = found.get(clean(n).replace(/^#/, '')) || found.get(key(n)) || null;
     if (!inv) {
       out.push({ number: n, inQb: false, lines: [] });
@@ -469,7 +523,7 @@ async function checkInvoices(realmId, job) {
     });
   });
 
-  job.result = { kind: 'invoices', rows: out };
+  job.result = { kind: 'invoices', rows: out, partial, asked: asked.length, of: numbers.length };
   push(job, 'ok', `${out.filter(r => r.inQb).length} of ${out.length} found in QuickBooks.`);
 }
 

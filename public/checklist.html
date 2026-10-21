@@ -68,6 +68,10 @@
   .box .acts{padding:11px 15px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
     border-top:1px solid var(--line)}
   .box .acts .note{font-size:11.5px;color:var(--muted)}
+  .box .acts button.dl{font-size:11.5px;padding:5px 12px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit;
+    color:var(--text);font-weight:400;margin-left:auto}
+  .box .acts button.dl:hover{border-color:var(--qbo)}
 
   table.t{width:100%;border-collapse:collapse;font-size:12.5px}
   table.t th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;
@@ -123,11 +127,15 @@
   .paylog .fail{color:#FF9C9C}
   .paylog .error{color:#FF9C9C}
 
-  .runacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-  .runacts button{font-size:12px;padding:6px 14px;border-radius:7px;border:1px solid var(--line);
-    background:#fff;cursor:pointer;font-family:inherit}
-  .runacts button:hover{border-color:var(--qbo)}
+  .runacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+  /* the small plain buttons of a run - Stop, Carry on, Clear log. A green
+     button standing among them keeps its own colours: painting it white left
+     white letters on a white face, and the words only showed under the cursor. */
+  .runacts button:not(.solid){font-size:12px;padding:6px 14px;border-radius:7px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
+  .runacts button:not(.solid):hover{border-color:var(--qbo)}
   .runacts button.stop{background:var(--bad);border-color:var(--bad);color:#fff}
+  .runacts button.solid{font-size:13px;padding:8px 16px}
 
   .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:20px}
   .tabs a{padding:12px 20px;font-size:13.5px;color:var(--muted);text-decoration:none;
@@ -212,7 +220,9 @@
           <div class="step">
             <h2>Order numbers</h2>
             <div class="hint">One per line, or separated by commas. Every payment sitting on each
-              order comes back with the CPR it was received under.</div>
+              order comes back with the CPR it was received under. As long a list as you like -
+              they go to QuickBooks 200 at a time, the log says where it has got to, and Stop
+              is heard between batches.</div>
             <textarea id="invText" rows="5" placeholder="91302583&#10;91302588"></textarea>
             <div class="runacts">
               <button class="solid" id="btnInv">Check these orders in QuickBooks</button>
@@ -1039,14 +1049,84 @@
     wireBoxes();
   }
 
+  // Every list that has anything in it can be taken away on its own - the
+  // whole result is rarely what is wanted, one of its lists usually is.
+  function dlButton(name, count){
+    return '<button class="mini dl" data-dl="' + esc(name) + '">Download these ' +
+      nf(count) + '</button>';
+  }
+
   function box(id, cls, title, count, note, inner, acts){
+    var dl = inner ? dlButton(id + '-' + String(title).toLowerCase(), count) : '';
     return '<div class="box ' + cls + '" id="box-' + id + '">' +
       '<h3>' + esc(title) + '<span class="count">' + nf(count) + '</span></h3>' +
       (note ? '<p>' + note + '</p>' : '') +
       (inner ? '<div class="scroll">' + inner + '</div>' : '') +
-      (acts ? '<div class="acts">' + acts + '</div>' : '') +
+      ((acts || dl) ? '<div class="acts">' + (acts || '') + dl + '</div>' : '') +
       '</div>';
   }
+
+  /* ---------- taking a list away as a file ----------
+     The table on the page is the list, so the file is made from the table
+     itself: whatever is shown is what is downloaded, in the same columns and
+     the same order. The tick column is left out, and a corrected amount is
+     taken as it stands in its box, not as it was before it was changed. */
+
+  function csvOfTable(tbl){
+    var out = [], skip = {};
+    var ths = tbl.querySelectorAll('thead th');
+    if(ths.length){
+      var head = [];
+      Array.prototype.forEach.call(ths, function(th, i){
+        var t = th.textContent.replace(/\s+/g, ' ').trim();
+        if(!t || th.querySelector('input')){ skip[i] = 1; return; }
+        head.push(t);
+      });
+      if(head.length) out.push(head);
+    }
+    Array.prototype.forEach.call(tbl.querySelectorAll('tbody tr'), function(tr){
+      var line = [];
+      Array.prototype.forEach.call(tr.children, function(td, i){
+        if(skip[i] || td.className.indexOf('empty') >= 0) return;
+        var amt = td.querySelector('input.amt');
+        if(amt) return line.push(amt.value);
+        if(td.querySelector('input[type=checkbox]')) return;
+        line.push(td.textContent.replace(/\s+/g, ' ').trim());
+      });
+      if(line.length) out.push(line);
+    });
+    return out;
+  }
+
+  function download(name, rows){
+    var csv = rows.map(function(r){
+      return r.map(function(c){
+        var t = String(c == null ? '' : c);
+        return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+      }).join(',');
+    }).join('\r\n');
+    var b = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = name;
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  }
+
+  // one handler for every download button on the page, wherever it was added:
+  // the list beside the button is the nearest table above it
+  document.addEventListener('click', function(e){
+    var b = e.target && e.target.closest ? e.target.closest('button[data-dl]') : null;
+    if(!b) return;
+    var holder = b.closest('.box');
+    var tbl = holder ? holder.querySelector('table') : null;
+    if(!tbl) return say('bad', '<b>There is no list here to download.</b>');
+    var rows = csvOfTable(tbl);
+    if(!rows.length) return say('bad', '<b>Nothing to download here.</b>');
+    var name = String(b.getAttribute('data-dl') || 'list')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70);
+    download((name || 'list') + '.csv', rows);
+  });
 
   function table(head, rows){
     return '<table class="t"><thead><tr>' +
@@ -1468,8 +1548,15 @@
     var over = found.filter(function(x){ return x.over > 0.005; });
     var unpaid = found.filter(function(x){ return x.balance > 0.005; });
 
-    $('outHint').textContent = nf(found.length) + ' of ' + nf(r.rows.length) +
-      ' found · every payment sitting on them is listed with the CPR it went in under.';
+    $('outHint').innerHTML = nf(found.length) + ' of ' + nf(r.rows.length) +
+      ' found · every payment sitting on them is listed with the CPR it went in under.' +
+      (r.of && r.of > r.rows.length
+        ? ' · <b>stopped after ' + nf(r.rows.length) + ' of ' + nf(r.of) +
+          ' numbers</b> - Carry on reads the rest.'
+        : '') +
+      (r.partial
+        ? ' · <b>the payments were not all read</b> - Carry on to finish them.'
+        : '');
 
     tallyBox([
       { n: nf(found.length), l: 'found', cls: 'ok' },
@@ -1844,6 +1931,7 @@
         '<div class="acts">' +
           '<button data-ready="' + i + '">Look these up in QuickBooks</button>' +
           '<span class="note" id="fgNote' + i + '"></span>' +
+          dlButton('cpr-' + g.cpr + '-orders', g.rows.length) +
         '</div>' +
         '<div id="fgOut' + i + '"></div>';
       box.appendChild(el);
@@ -1855,10 +1943,13 @@
       left.innerHTML =
         '<h3><span>Not written on any sheet read</span>' +
         '<span class="count">' + nf(result.missing.length) + '</span></h3>' +
-        '<div class="scroll"><table class="t"><tbody>' +
+        '<div class="scroll"><table class="t">' +
+        '<thead><tr><th>Order</th></tr></thead><tbody>' +
         result.missing.map(function(n){
           return '<tr><td class="mono">' + esc(n) + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
+        }).join('') + '</tbody></table></div>' +
+        '<div class="acts">' +
+          dlButton('not-on-any-sheet', result.missing.length) + '</div>';
       box.appendChild(left);
     }
 
@@ -1900,12 +1991,16 @@
     var t = d.totals;
     var out = $('fgOut' + i);
 
-    function list(title, rows, cls, render){
+    function list(title, head, rows, cls, render){
       if(!rows.length) return '';
       return '<div class="box ' + cls + '" style="margin:0 15px 12px">' +
         '<h3><span>' + title + '</span><span class="count">' + nf(rows.length) + '</span></h3>' +
-        '<div class="scroll"><table class="t"><tbody>' +
-        rows.map(render).join('') + '</tbody></table></div></div>';
+        '<div class="scroll"><table class="t"><thead><tr>' +
+        head.map(function(h){ return '<th>' + esc(h) + '</th>'; }).join('') +
+        '</tr></thead><tbody>' +
+        rows.map(render).join('') + '</tbody></table></div>' +
+        '<div class="acts">' +
+        dlButton('cpr-' + g.cpr + '-' + title, rows.length) + '</div></div>';
     }
 
     var bankNote = d.bank && d.bank.accountId
@@ -1927,17 +2022,20 @@
             '<div class="l">Not in QuickBooks</div></div>' +
         '</div>' +
 
-        list('Already paid', d.alreadyPaid, '', function(r){
+        list('Already paid', ['Order', 'Customer', 'In QuickBooks'],
+          d.alreadyPaid, '', function(r){
           return '<tr><td class="mono">' + esc(r.invoice) + '</td>' +
                  '<td>' + esc(r.customerName || '') + '</td>' +
                  '<td class="num">' + money(r.qbTotal) + '</td></tr>';
         }) +
-        list('The sheet and QuickBooks disagree - left alone', d.amountOff, 'warn', function(r){
+        list('The sheet and QuickBooks disagree - left alone', ['Order', 'Why'],
+          d.amountOff, 'warn', function(r){
           return '<tr><td class="mono">' + esc(r.invoice) + '</td>' +
                  '<td class="why">sheet ' + money(r.sheetAmount) +
                  ', QuickBooks is owed ' + money(r.qbBalance) + '</td></tr>';
         }) +
-        list('Not in QuickBooks', d.notInQb, 'bad', function(r){
+        list('Not in QuickBooks', ['Order', 'Sheet amount'],
+          d.notInQb, 'bad', function(r){
           return '<tr><td class="mono">' + esc(r.invoice) + '</td>' +
                  '<td class="num">' + money(r.sheetAmount) + '</td></tr>';
         }) +
