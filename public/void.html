@@ -92,6 +92,11 @@
   .vlog .error{color:#FF9C9C}
   .vlog .t{color:#6E9C82;margin-right:8px}
 
+  .bucket .bacts{padding:8px 14px;border-top:1px solid var(--line);background:#fff}
+  .bucket .bacts button{font-size:11.5px;padding:4px 11px;border-radius:6px;
+    border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
+  .bucket .bacts button:hover{border-color:var(--qbo)}
+
   .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .acts button.mini{font-size:11.5px;padding:5px 12px;border-radius:6px;
     border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit}
@@ -787,11 +792,32 @@
         ? '<div class="inner"><table><thead><tr>' +
           '<th>Invoice</th><th>Date</th><th class="num">Amount</th>' +
           '</tr></thead><tbody>' + rows.map(render).join('') + '</tbody></table></div>'
-        : '');
+        : '') +
+      // every list downloads on its own, so one bucket can be taken away
+      // without the other three coming with it
+      '<div class="bacts"><button class="mini">Download these ' +
+        nf(rows.length) + '</button></div>';
 
     el.querySelector('h4').addEventListener('click', function(){
       S.open[key] = !S.open[key];
       showScan(S.scan);
+    });
+
+    el.querySelector('.bacts button').addEventListener('click', function(){
+      var name = key.replace(/[A-Z]/g, function(c){ return '-' + c.toLowerCase(); });
+      download(name + '-invoices.csv',
+        [['Invoice', 'Date', 'Amount', 'QB Id', 'Paid under']].concat(
+          rows.map(function(r){
+            return [
+              r.doc,
+              r.date || '',
+              r.total === undefined ? '' : r.total,
+              r.id || '',
+              (r.payments || []).map(function(p){
+                return 'CPR ' + p.cpr + ' / ' + p.date + ' / ' + p.bank + ' / ' + p.amount;
+              }).join(' ; ')
+            ];
+          })));
     });
 
     box.appendChild(el);
@@ -966,6 +992,14 @@
       if(live){ startPolling(); return; }
 
       stopPolling();
+
+      // the download buttons say how much they will hand over, so a run that
+      // left nothing behind is plain before the button is pressed
+      var nLeft = ((j.held || []).length) + ((j.failed || []).length) + ((j.left || []).length);
+      $('btnDlVoided').textContent = 'Download voided' +
+        ((j.voided || []).length ? ' (' + nf(j.voided.length) + ')' : '');
+      $('btnDlLeft').textContent = 'Download not voided' + (nLeft ? ' (' + nf(nLeft) + ')' : '');
+
       // a stopped or part-failed run is carried on from where it stands
       if(j.leftCount){
         $('btnRetry').style.display = 'inline-block';
@@ -998,13 +1032,19 @@
       [['Invoice', 'QB Id']].concat(v.map(function(r){ return [r.doc, r.id]; })));
   });
 
+  // Everything that is not voided, whatever kept it from being voided: the
+  // ones QuickBooks held back, the ones that failed outright, and - the ones
+  // this used to miss - the ones the run was stopped before it reached.
   $('btnDlLeft').addEventListener('click', function(){
     var held = (S.job && S.job.held) || [];
     var failed = (S.job && S.job.failed) || [];
-    var rows = held.map(function(r){ return [r.doc, 'held back', r.msg]; })
-      .concat(failed.map(function(r){ return [r.doc, 'failed', r.msg]; }));
-    if(!rows.length) return say('bad', '<b>Everything went through.</b>');
-    download('not-voided.csv', [['Invoice', 'What happened', 'Why']].concat(rows));
+    var left = (S.job && S.job.left) || [];
+    var rows = held.map(function(r){ return [r.doc, r.id, 'held back', r.msg || '']; })
+      .concat(failed.map(function(r){ return [r.doc, r.id, 'failed', r.msg || '']; }))
+      .concat(left.map(function(r){ return [r.doc, r.id, 'not reached', 'the run was stopped before its turn']; }));
+    if(!rows.length) return say('bad', '<b>Everything went through - nothing is left unvoided.</b>');
+    download('not-voided.csv',
+      [['Invoice', 'QB Id', 'What happened', 'Why']].concat(rows));
   });
 
   /* ================= looking the pasted numbers up in the sheet =================

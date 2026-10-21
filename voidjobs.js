@@ -490,6 +490,13 @@ export function voidSnapshot(desk, since, full) {
     out.voided = job.voided;
     out.held = job.held;
     out.failed = job.failed;
+    // the ones the run never got to - stopped before their turn came round.
+    // Without these, a stopped run has nothing to hand back but the handful
+    // that were held or failed, and the rest are simply unaccounted for.
+    const gone = new Set(job.voided.concat(job.held, job.failed).map(x => String(x.id)));
+    out.left = (job.invoices || [])
+      .filter(x => !gone.has(String(x.id)))
+      .map(x => ({ doc: x.doc, id: String(x.id) }));
   }
 
   return out;
