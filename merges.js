@@ -483,34 +483,84 @@ function pasteColumns(header) {
   };
 }
 
+// Three ways a pasted line can hold its columns apart. Out of a spreadsheet it
+// is tabs; out of anything that lines its columns up by eye it is a run of
+// spaces; and a header written ORDER_REF_NUMBER COD_AMOUNT parts on a single
+// space, because no name of a column has a space inside it.
+const byTabs = l => l.split('\t');
+const bySpaces = l => l.replace(/^ +/, '').split(/ {2,}/);
+const byAnyGap = l => l.trim().split(/[ \t]+/);
+
+// The header read the way one of those splits it, and how well that went: two
+// column names landing on the same cell means that cell still holds both words
+// - the split did not part them, and nothing is really known about which
+// column is which. That counts as knowing nothing, so another split is tried.
+function readHeader(lines, way) {
+  let hRow = -1, best = -1, cols = null, cells = null;
+
+  for (let r = 0; r < Math.min(lines.length, 5); r++) {
+    const row = way(lines[r]);
+    const c = pasteColumns(row);
+    const picked = [c.invoice, c.cpr, c.amount].filter(i => i >= 0);
+    const apart = new Set(picked).size;
+    const score = picked.length > apart ? 0 : apart;
+    if (score > best) { best = score; hRow = r; cols = c; cells = row; }
+  }
+
+  return { hRow, cols, cells, score: best };
+}
+
 // Rows copied out of a sheet arrive tab by tab. The header comes with them -
 // without it there is no telling the COD from the tracking number.
 export function parsePasted(text) {
   const lines = String(text || '').split(/\r?\n/).filter(l => l.trim().length);
   if (!lines.length) throw new Error('Nothing was pasted');
 
-  const split = l => (l.indexOf('\t') >= 0 ? l.split('\t') : l.split(/ {2,}/));
-  const grid = lines.map(split);
+  // whichever split tells the most columns apart is the one this paste wants
+  const ways = String(text).indexOf('\t') >= 0
+    ? [byTabs, bySpaces, byAnyGap]
+    : [bySpaces, byAnyGap];
 
-  // the header is whichever of the first few lines knows the most column names
-  let hRow = -1, best = -1;
-  for (let r = 0; r < Math.min(grid.length, 5); r++) {
-    const cols = pasteColumns(grid[r]);
-    const score = [cols.invoice, cols.cpr, cols.amount].filter(i => i >= 0).length;
-    if (score > best) { best = score; hRow = r; }
-  }
+  let read = null, way = ways[0];
+  ways.forEach(w => {
+    const got = readHeader(lines, w);
+    if (!read || got.score > read.score) { read = got; way = w; }
+  });
 
-  const header = grid[hRow].map(h => clean(h));
-  const cols = pasteColumns(header);
+  const hRow = read.hRow < 0 ? 0 : read.hRow;
+  const header = (read.cells || []).map(h => clean(h));
+  const cols = read.cols || pasteColumns(header);
 
   if (cols.invoice < 0 || cols.amount < 0) {
     throw new Error('Paste the header row as well - the one with ORDER_REF_NUMBER ' +
       'and COD_AMOUNT - so the columns can be told apart');
   }
 
+  // Both names on one cell: the COD would be read off the order number itself,
+  // every group would come out short by an order number and go to manual check,
+  // and the remark would carry a figure that reads like somebody else's order.
+  // Better to say so than to hand back a sheet full of that.
+  if (cols.invoice === cols.amount) {
+    throw new Error('ORDER_REF_NUMBER and COD_AMOUNT came through as one column, so ' +
+      'the COD cannot be told from the order number. Copy the rows out of the sheet ' +
+      'itself - the columns come with them - or put a tab between the two columns.');
+  }
+
+  // Each row is split by the coarsest way that still reaches the last column
+  // the header named. A cell holding two order numbers with a space between
+  // them is one cell, and must not be torn in half by the finer split that
+  // the header happened to need.
+  const need = Math.max(cols.invoice, cols.amount, cols.cpr, cols.cprDate, cols.status) + 1;
+  const cut = way === byTabs
+    ? byTabs
+    : l => {
+      const wide = bySpaces(l);
+      return wide.length >= need ? wide : byAnyGap(l);
+    };
+
   const rows = [];
-  for (let r = hRow + 1; r < grid.length; r++) {
-    const raw = grid[r];
+  for (let r = hRow + 1; r < lines.length; r++) {
+    const raw = cut(lines[r]);
     const invoice = clean(raw[cols.invoice]);
     if (!invoice) continue;
     if (/^(grand )?total/i.test(invoice)) continue;
