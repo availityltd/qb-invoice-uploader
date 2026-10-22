@@ -178,8 +178,13 @@ POST is refused to them unless it is named in `USER_MAY_POST` (the reads: scan, 
 preview, paste, find) or it is a Stop, so a route added later is closed until it is
 opened on purpose. The admin hands out whole jobs, not routes: `RIGHT_GROUPS` names
 them, `/users.html` ticks them, a button carries `data-need="<job>"` and `nav.js`
-hides the jobs that person was not given. Courier accounts and their keys are never
-in `RIGHT_GROUPS` - they stay with the admin.
+hides the jobs that person was not given. A page can be opened by any of the jobs
+on it (`PAGE_NEED` takes a list: the Products page answers to `products` or
+`newitems`), and a rail line can name several the same way. Courier accounts and
+their keys are never in `RIGHT_GROUPS` - they stay with the admin, with the audit's
+sheet links, in `ADMIN_ONLY_POST`; anything else in neither list is a route nobody
+placed, and `sayUnplaced()` names it at startup rather than letting it refuse a
+user who was given the job.
 
 **Long runs survive a deploy.** Upload (`jobstore.js`), the category change
 (`recatstore.js`) and product replacement (`replacestore.js`) are written to

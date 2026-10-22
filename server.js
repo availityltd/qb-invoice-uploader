@@ -192,7 +192,7 @@ app.get(/(^\/$)|\.html$/, async (req, res, next) => {
     // whole of the books, or the whole of them to read.
     if (who && who.role === 'custom' && !who.admin) {
       const need = PAGE_NEED.get(here);
-      if (need && who.rights.indexOf(need) < 0) return res.redirect('/');
+      if (need && !need.some(j => who.rights.indexOf(j) > -1)) return res.redirect('/');
     }
 
     return next();
@@ -744,6 +744,11 @@ const USER_MAY_POST = new Set([
   // reading the books, and narrowing what was read
   '/api/products/scan', '/api/products/paste',
   '/api/products/clear', '/api/products/clear-log',
+  // a list of products off a sheet: its columns, and what would be made from
+  // them. Both only read - the file is this person's own desk, and the plan is
+  // QuickBooks read back and compared. Making them is '/api/items/create',
+  // which is a job and is handed out as one.
+  '/api/items/read', '/api/items/plan', '/api/items/clear',
   '/api/recat/scan', '/api/recat/clear', '/api/recat/clear-log',
   '/api/desc/scan', '/api/desc/clear', '/api/desc/clear-log',
   '/api/replace/scan', '/api/replace/pairs', '/api/replace/pairs-keep',
@@ -845,6 +850,11 @@ const RIGHT_GROUPS = [
 //
 // Everything not named here is open to anybody who is let in: the dashboard, the
 // searches, the settings. Reading was never what was being handed out.
+// A page can hold more than one job - the Products page is where costs and stock
+// are put right and also where a product is made, and those are two jobs on
+// purpose. Any one of them opens the page; what each person may press there is
+// still their own, button by button. A job whose only page is shut to it is a
+// job that was never given.
 const PAGE_NEED = new Map(Object.entries({
   '/convert.html': 'upload',
   '/upload.html': 'upload',
@@ -855,7 +865,7 @@ const PAGE_NEED = new Map(Object.entries({
   '/charges.html': 'charges',
   '/void.html': 'void',
   '/purchases.html': 'purchases',
-  '/products.html': 'products',
+  '/products.html': ['products', 'newitems'],
   '/fix.html': 'products',
   '/replace.html': 'changes',
   '/swap.html': 'changes',
@@ -866,10 +876,21 @@ const PAGE_NEED = new Map(Object.entries({
   '/receipts.html': 'couriersync',
   '/cprs.html': 'couriersync'
 }));
+// one job or several, asked the same way
+PAGE_NEED.forEach((v, k) => PAGE_NEED.set(k, Array.isArray(v) ? v : [v]));
 
 // route -> the job it belongs to, worked out once
 const RIGHT_OF_PATH = new Map();
 RIGHT_GROUPS.forEach(g => g.paths.forEach(p => RIGHT_OF_PATH.set(p, g.key)));
+
+// The ones that are the admin's alone and are meant to be in no job: the courier
+// accounts and their keys, and the sheets the audit is pointed at. They are named
+// here so that everything else left out of both lists is known to be left out by
+// mistake, and says so at startup instead of in front of a person.
+const ADMIN_ONLY_POST = new Set([
+  '/api/courier/accounts', '/api/courier/accounts/test', '/api/courier/accounts/remove',
+  '/api/audit/link', '/api/audit/link-remove', '/api/audit/pick'
+]);
 
 // Stopping is always allowed, whoever started it. A run belongs to the company and
 // is watched from every computer, so anyone seeing one go wrong must be able to end
@@ -901,6 +922,45 @@ app.use(async (req, res, next) => {
            'read-only for you. Ask the admin to make it, or to give you the right to it.'
   });
 });
+
+// Nothing closed by accident.
+//
+// A POST that neither list names is closed to everybody but the admin, and the
+// person it stops is told they were not given the job - which is not true. It is
+// a route nobody placed, and the message sends them to the admin over a reading.
+// That is how the Products page came to refuse a list of products to the very
+// people it was built for.
+//
+// Closed by default is still the right way round, so this does not open anything.
+// It says at startup which routes are standing outside both lists, while they are
+// still the developer's to place and not yet a user's morning.
+function sayUnplaced() {
+  try {
+    const stack = (app._router && app._router.stack) || [];
+    const out = [];
+    stack.forEach(layer => {
+      const route = layer.route;
+      if (!route || !route.methods || !route.methods.post) return;
+      const path = route.path;
+      if (typeof path !== 'string') return;
+      if (path.indexOf('/api/') !== 0 && path.indexOf('/auth/') !== 0) return;
+      if (path.indexOf('/api/admin/') === 0) return;
+      if (USER_MAY_POST.has(path) || RIGHT_OF_PATH.has(path)) return;
+      if (ADMIN_ONLY_POST.has(path) || isStop(path)) return;
+      out.push(path);
+    });
+    if (out.length) {
+      console.warn(
+        'These POST routes are in no job and in no reading, so only the admin can ' +
+        'reach them. Put each one in RIGHT_GROUPS, in USER_MAY_POST or in ' +
+        'ADMIN_ONLY_POST:\n  ' + out.join('\n  ')
+      );
+    }
+  } catch (e) {
+    // a check that stops the app it checks is worse than the thing it checks for
+    console.warn('could not look over the POST routes:', e.message);
+  }
+}
 
 // ==================== OAuth ====================
 // The company's own door, and the only place its key comes from. There is no
@@ -10321,6 +10381,7 @@ initDb()
   .then(() => initVoidStore())
   .then(() => app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    sayUnplaced();
     startKeeper();
         resumeUnfinished().catch(e => console.error('resume failed:', e.message));
     resumeRecat().catch(e => console.error('recat resume failed:', e.message));

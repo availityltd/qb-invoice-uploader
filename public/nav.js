@@ -47,8 +47,11 @@
         need:'couriersync' }
     ]},
     { group: 'Products', items: [
-      // cost, stock, duplicates and the reports behind them are tabs of one page
-      { href:'/products.html',  label:'Product health',  icon:'tag',  need:'products' },
+      // cost, stock, duplicates and the reports behind them are tabs of one
+      // page, and making a product is a second job on it: either one of the two
+      // is a reason to have the line
+      { href:'/products.html',  label:'Product health',  icon:'tag',
+        need:'products newitems' },
       { href:'/purchases.html', label:'Purchases',       icon:'cart', need:'purchases' }
     ]},
     { group: 'Maintenance', items: [
@@ -831,7 +834,10 @@
       if(s.limited){
         var off = [];
         rail && rail.querySelectorAll('nav a[data-line]').forEach(function(a){
-          if(mine.indexOf(a.getAttribute('data-line')) < 0) off.push(a);
+          // a line can name more than one job; any one of them keeps it
+          var need = a.getAttribute('data-line').split(' ');
+          var any = need.some(function(j){ return mine.indexOf(j) > -1; });
+          if(!any) off.push(a);
         });
         off.forEach(function(a){
           var tree = a.nextElementSibling;
