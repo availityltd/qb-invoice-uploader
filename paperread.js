@@ -160,7 +160,26 @@ const ALONE = /^([\d][\d,]*)\s*(?:p\w*|nos?\b)\s*[.,]?$/i;
 // "All 1728 pieces" - the whole of it, before the shades it covers are named
 const WHOLE = /^all\s+([\d][\d,]*)\s*(?:p\w*)/i;
 
-const VARWORD = /^variants?\b\s*[:=]?\s*/i;
+// The word for a shade, however it was spelt or read. A register types
+// "Vairant M1" as readily as "Variant M1", and the reader turns one into the
+// other anyway - and a word misspelt must not end up inside the shade, where it
+// stops the shade finding its product.
+const VARWORD = /^(?:for\s+|each\s+|every\s+)?(?:v[ao]?[ai]?r[ia]?[ae]?nts?|shades?|colou?rs?)\b\s*[:=]?\s*/i;
+
+// "Product name: Setting spray", "Item: Fancy Chiffon" - the name written on
+// its own line, above the code and the rate.
+const NAMED = /^(?:product\s*name|product|item\s*name|item|name|design|article|material)\s*[:=-]\s*(.+)$/i;
+
+// "(pieces 192 each)", "192 pieces each", "(192 pcs)" - a quantity that belongs
+// to each of the shades named beside it, not to all of them together.
+const PER = [
+  /^(.*?)\s*[([]?\s*(?:pieces?|pcs?|nos?)\s*[:=]?\s*([\d][\d,]*)\s*(?:each|per|ea|every)?\s*[)\]]?\s*\.?$/i,
+  /^(.*?)\s*[([]?\s*([\d][\d,]*)\s*(?:pieces?|pcs?|nos?)\s*(?:each|per|ea|every)?\s*[)\]]?\s*\.?$/i
+];
+
+// Words that sit in front of a run of shades and are not part of any shade's
+// name: "from 629 to 663" is shades 629 to 663, and not shade "from 629".
+const LEADIN = /^(?:from|between|v[ao]?[ai]?r[ia]?[ae]?nts?|shades?|colou?rs?|no\.?|number|#)\s*/i;
 
 // "1-12", "01 - 12", "Beige 1 to 4" - a run of shades written as its two ends.
 // The quantity beside it belongs to EACH of them, not to all of them together:
@@ -361,6 +380,7 @@ export function parseSheet(text) {
 
   const out = [];
   let open = null;                 // the product being read
+  let pendingName = '';            // a name written above the code and the rate
   let pendingShade = '';           // a shade named with no quantity yet
   let pendingQty = 0;              // "All 1728 pieces", waiting to be told which shades
   let cols = null;                 // the heading row of a printed table, once seen
@@ -368,10 +388,14 @@ export function parseSheet(text) {
 
   const shut = () => {
     if (!open) return;
-    // a product whose shades never arrived is still a line - the quantity is
-    // left empty rather than the whole product being dropped
     if (!open.any) {
-      out.push({ sku: open.sku, name: open.name, variant: pendingShade, qty: pendingQty, rate: open.rate });
+      // A run of shades named here with its quantity named further down - "from
+      // 629 to 663", then "All 240 pieces" - is still a run, and it becomes a
+      // line each the same way as one written the other way round.
+      if (pendingShade && pendingQty) add(pendingShade, pendingQty);
+      // a product whose shades never arrived is still a line - the quantity is
+      // left empty rather than the whole product being dropped
+      else out.push({ sku: open.sku, name: open.name, variant: pendingShade, qty: pendingQty, rate: open.rate });
     }
     open = null;
     pendingShade = '';
@@ -391,7 +415,7 @@ export function parseSheet(text) {
     const run = tidy(variant).match(RUN);
     if (!run) return one(variant, qty);
 
-    const lead = tidy(run[1]);
+    const lead = tidy(run[1].replace(LEADIN, ''));
     const from = Number(run[2]);
     const to = Number(run[3]);
     const wide = Math.max(run[2].length, run[3].length);   // "01-12" stays 01, 02...
@@ -449,14 +473,31 @@ export function parseSheet(text) {
       // printed bill and then a photograph of a message - must not have the
       // first one's columns read into the second.
       cols = null;
-      const name = tidy(plain.slice(0, rate.index));
-      open = { name: name, rate: num(rate[1]), sku: '', any: false };
+
+      // The name on the rate line, with the code taken off it first. A line
+      // that reads "SKU : 7505-007   Rate: Rs. 390" names no product at all -
+      // it carries the code and the rate, and the name was written on the line
+      // above it. Calling the product "SKU : 7505-007" is how a line ends up
+      // matching nothing: there is no product by that name anywhere.
+      let said = tidy(plain.slice(0, rate.index).replace(SKU, ' ').replace(CODE_IN, ' '));
+      const label = said.match(NAMED);
+      if (label) said = tidy(label[1]);
+
+      open = {
+        name: /[a-z]{2}/i.test(said) ? said : pendingName,
+        rate: num(rate[1]), sku: '', any: false
+      };
+      pendingName = '';
 
       // the code is sometimes on the same line as the rate
       const sameLine = plain.match(SKU);
       if (sameLine) open.sku = sameLine[1] + '-' + sameLine[2];
       continue;
     }
+
+    // --- the name, written on its own line above the code ---
+    const named = plain.match(NAMED);
+    if (named) { pendingName = tidy(named[1]); continue; }
 
     // --- the code ---
     const sku = plain.match(SKU);
@@ -485,6 +526,21 @@ export function parseSheet(text) {
 
     // --- the word "variants", with or without a shade after it ---
     if (VARWORD.test(plain)) {
+      // "For variant 1-6 (pieces 192 each)" - the shades and how many of each,
+      // on one line, with the quantity written behind the shades instead of in
+      // front of them
+      let done = false;
+      for (const per of PER) {
+        const both = body.match(per);
+        if (both && tidy(both[1]) && num(both[2])) {
+          add(tidy(both[1]), num(both[2]));
+          pendingShade = '';
+          done = true;
+          break;
+        }
+      }
+      if (done) continue;
+
       const after = tidy(body);
       if (after) {
         // "variants= 1-12" after "All 1728 pieces" is that whole quantity
@@ -523,11 +579,16 @@ export function parseSheet(text) {
     }
 
     // --- anything else ---
-    // Before a rate has been seen this is the product's own name running onto a
-    // second line. After one, it is something the rules do not know, and saying
-    // so is better than dropping it.
-    if (!open) continue;
-    if (tidy(plain).length > 2) unsure.push('Not understood: ' + tidy(plain));
+    // Before a rate has been seen, a line of words is the product's own name,
+    // written above its code: it is kept, and used if the rate line turns out
+    // to carry nothing but a code. After a rate, it is something the rules do
+    // not know, and saying so is better than dropping it.
+    const rest = tidy(plain);
+    if (!open) {
+      if (rest.length <= 80 && /[a-z]{2}/i.test(rest)) pendingName = rest;
+      continue;
+    }
+    if (rest.length > 2) unsure.push('Not understood: ' + rest);
   }
 
   shut();
@@ -623,16 +684,32 @@ function matchLine(line, items, bySku, byStart) {
     // its shade before it is taken.
     const longer = byStart.filter(it => it.flatSku.indexOf(code) === 0);
     if (longer.length) return narrow(longer, line, 'code');
+
+    // The code is written into the item's own name as often as it is put in the
+    // code field - QuickBooks names a shade "Full Coverage Concealer
+    // 7601-001/Fair" - and a company that never filled the code field in still
+    // writes the code where a person can read it. That is the same code, so it
+    // is looked for there too rather than reporting a product that is sitting
+    // in the list as missing.
+    // A digit in front of the code means this is the tail end of a longer code
+    // and a different product. What hangs off the end of it is allowed: that is
+    // QuickBooks' own way of naming the shades under one code, and the shade is
+    // what tells those apart.
+    const inName = items.filter(it => {
+      const at = it.flatName.indexOf(code);
+      return at >= 0 && !(at > 0 && /[0-9]/.test(it.flatName[at - 1]));
+    });
+    if (inName.length) return narrow(inName, line, 'code in the name');
   }
 
   // no code on the line, or a code this company does not use - the written name
   // is all that is left, and it has to land on exactly one product to be used
   const want = flat(line.name + line.variant);
   if (want.length >= 4) {
-    const same = items.filter(it => flat(it.name) === want);
+    const same = items.filter(it => it.flatName === want);
     if (same.length === 1) return hit(same[0], 'name');
 
-    const near = items.filter(it => flat(it.name).includes(want));
+    const near = items.filter(it => it.flatName.includes(want));
     if (near.length === 1) return hit(near[0], 'name');
     if (near.length > 1) return miss(near.slice(0, 12));
   }
@@ -643,16 +720,20 @@ function matchLine(line, items, bySku, byStart) {
 // `items` is this company's own QuickBooks item list - the only list that may
 // decide what a line is.
 export function matchToItems(sheet, items) {
-  const live = (items || []).filter(it => it.active !== false);
+  // Every name and code is flattened once here, not once per line. A bill of
+  // ninety lines against a list of several thousand products is ninety
+  // thousand comparisons, and they should not each be rewriting a string.
+  const live = (items || []).filter(it => it.active !== false)
+    .map(it => Object.assign({ flatName: flat(it.name), flatSku: flat(it.sku) }, it));
 
   const bySku = new Map();
   const byStart = [];
   live.forEach(it => {
-    const k = flat(it.sku);
+    const k = it.flatSku;
     if (!k) return;
     if (!bySku.has(k)) bySku.set(k, []);
     bySku.get(k).push(it);
-    byStart.push(Object.assign({ flatSku: k }, it));
+    byStart.push(it);
   });
 
   const lines = sheet.lines.map(l => {
