@@ -177,6 +177,14 @@ const PER = [
   /^(.*?)\s*[([]?\s*([\d][\d,]*)\s*(?:pieces?|pcs?|nos?)\s*(?:each|per|ea|every)?\s*[)\]]?\s*\.?$/i
 ];
 
+// "Each variant 80 pieces", "All 240 pieces" - that many of every shade this
+// code has, with no shade named anywhere. Which shades those are is not written
+// on the paper at all: the supplier means whatever shades the code has, and the
+// only place that knows them is this company's own item list. So the quantity
+// is carried through as "every shade", and the shades are filled in at matching
+// where the list is.
+const EACH = /^(?:each|every|per)\s+(?:v[ao]?[ai]?r[ia]?[ae]?nts?|shades?|colou?rs?)\s*[:=]?\s*([\d][\d,]*)\s*(?:p\w*|nos?\b)/i;
+
 // Words that sit in front of a run of shades and are not part of any shade's
 // name: "from 629 to 663" is shades 629 to 663, and not shade "from 629".
 const LEADIN = /^(?:from|between|v[ao]?[ai]?r[ia]?[ae]?nts?|shades?|colou?rs?|no\.?|number|#)\s*/i;
@@ -383,6 +391,7 @@ export function parseSheet(text) {
   let pendingName = '';            // a name written above the code and the rate
   let pendingShade = '';           // a shade named with no quantity yet
   let pendingQty = 0;              // "All 1728 pieces", waiting to be told which shades
+  let pendingEvery = false;        // and that quantity meant every shade the code has
   let cols = null;                 // the heading row of a printed table, once seen
   const unsure = [];
 
@@ -394,12 +403,21 @@ export function parseSheet(text) {
       // line each the same way as one written the other way round.
       if (pendingShade && pendingQty) add(pendingShade, pendingQty);
       // a product whose shades never arrived is still a line - the quantity is
-      // left empty rather than the whole product being dropped
-      else out.push({ sku: open.sku, name: open.name, variant: pendingShade, qty: pendingQty, rate: open.rate });
+      // left empty rather than the whole product being dropped. Where the paper
+      // said "each" or "all" and named no shade, that is not a shade missing:
+      // it is every shade the code has, and the item list is asked for them.
+      else {
+        out.push({
+          sku: open.sku, name: open.name, variant: pendingShade,
+          qty: pendingQty, rate: open.rate,
+          every: pendingEvery && pendingQty > 0 && !pendingShade
+        });
+      }
     }
     open = null;
     pendingShade = '';
     pendingQty = 0;
+    pendingEvery = false;
   };
 
   const one = (variant, qty) => {
@@ -508,8 +526,21 @@ export function parseSheet(text) {
     }
 
     // --- the whole quantity, before the shades are named ---
+    // "All 240 pieces" with the shades named after it is that many of each of
+    // them; with no shades named anywhere, it is that many of every shade the
+    // code has, which comes to the same thing once the list is asked.
     const whole = plain.match(WHOLE);
-    if (whole) { pendingQty = num(whole[1]); continue; }
+    if (whole) { pendingQty = num(whole[1]); pendingEvery = true; continue; }
+
+    // --- "Each variant 80 pieces" ---
+    // Against a run already named, it is that many of each of those. On its
+    // own, it is that many of every shade the code has.
+    const each = plain.match(EACH);
+    if (each) {
+      if (pendingShade) { add(pendingShade, num(each[1])); pendingShade = ''; }
+      else { pendingQty = num(each[1]); pendingEvery = true; }
+      continue;
+    }
 
     // --- a shade with its own quantity ---
     const body = plain.replace(VARWORD, '');
@@ -602,7 +633,10 @@ export function parseSheet(text) {
     total: total,
     lines: out.filter(l => l.qty || l.rate).map(l => ({
       sku: l.sku, name: l.name, variant: l.variant,
-      qty: l.qty, rate: l.rate, amount: l.amount || 0
+      qty: l.qty, rate: l.rate, amount: l.amount || 0,
+      // this quantity is each, of every shade the code has - the shades
+      // themselves are filled in where the item list is
+      every: !!l.every
     })),
     unsure: unsure
   };
@@ -660,6 +694,43 @@ function shadeKeys(variant) {
   else if (/^\d+$/.test(plain)) keys.push('0' + plain);
 
   return keys;
+}
+
+// Every product under one code: the code written exactly, the code with
+// something hung off the end of it, and the code written into the item's own
+// name. The same three places a single line looks, asked to hand back all of
+// them instead of one.
+function family(code, items, bySku, byStart) {
+  const seen = new Set();
+  const all = [];
+
+  const take = it => {
+    if (seen.has(it.id)) return;
+    seen.add(it.id);
+    all.push(it);
+  };
+
+  (bySku.get(code) || []).forEach(take);
+  byStart.filter(it => it.flatSku.indexOf(code) === 0).forEach(take);
+  items.filter(it => {
+    const at = it.flatName.indexOf(code);
+    return at >= 0 && !(at > 0 && /[0-9]/.test(it.flatName[at - 1]));
+  }).forEach(take);
+
+  return all;
+}
+
+// What tells one product of a code apart from the next: whatever is written
+// after the code in its own code or its own name. "7601-019/Beige3" is Beige3.
+// It is read off the written form, not the flattened one, because this is shown
+// to a person.
+function tailOf(it, code) {
+  const spaced = code.split('').join('[^A-Za-z0-9]*') + '[^A-Za-z0-9]*(.*)$';
+  for (const where of [it.sku, it.name]) {
+    const m = String(where || '').match(new RegExp(spaced, 'i'));
+    if (m && tidy(m[1])) return tidy(m[1]);
+  }
+  return '';
 }
 
 function matchLine(line, items, bySku, byStart) {
@@ -736,16 +807,40 @@ export function matchToItems(sheet, items) {
     byStart.push(it);
   });
 
-  const lines = sheet.lines.map(l => {
+  const lines = [];
+
+  sheet.lines.forEach(l => {
+    // "Each variant 80 pieces" - eighty of every shade this code has. The paper
+    // does not say which shades those are and does not have to: the supplier
+    // means all of them, and all of them is a thing only the item list knows.
+    // So one line on the paper becomes one line per shade here.
+    const code = flat(l.sku);
+    if (l.every && code) {
+      const all = family(code, live, bySku, byStart);
+
+      // A code that answers with half the catalogue was read wrong, or it is
+      // the start of several families. Hundreds of lines nobody asked for are
+      // worse than one line to be picked by hand, so that is left as it was.
+      if (all.length > 1 && all.length <= MOST_SHADES) {
+        all.forEach(it => lines.push(Object.assign({}, l, {
+          variant: tailOf(it, code) || l.variant,
+          every: false,
+          itemId: it.id, itemName: it.name, how: 'every shade under the code',
+          desc: it.desc || '', choices: []
+        })));
+        return;
+      }
+    }
+
     const m = matchLine(l, live, bySku, byStart);
-    return Object.assign({}, l, {
+    lines.push(Object.assign({}, l, {
       itemId: m.itemId, itemName: m.itemName, how: m.how,
       // QuickBooks' own wording for this product. Nothing about the description
       // should come off the photograph: the product already carries one, and
       // that is the one the bill ought to say.
       desc: m.desc || '',
       choices: m.choices.map(c => ({ id: c.id, name: c.name, sku: c.sku }))
-    });
+    }));
   });
 
   return Object.assign({}, sheet, {

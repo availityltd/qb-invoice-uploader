@@ -1018,6 +1018,17 @@
     // is which is the difference between checking a line and trusting it.
     if((d.how || []).length) out += esc(d.how.join('; ')) + '<br>';
 
+    // Where the paper said "each" or "all" and never listed the shades, the
+    // shades came off the item list, not off the paper. That is worth saying
+    // plainly: it is the one place the lines say more than the paper did.
+    var spread = (d.lines || []).filter(function(l){
+      return l.how === 'every shade under the code';
+    }).length;
+    if(spread){
+      out += '<span class="em">' + spread + '</span> of those are every shade of a code ' +
+             'the paper did not list &mdash; it said each, or all<br>';
+    }
+
     if(d.doc) out += 'Their number on it: <span class="em">' + esc(d.doc) + '</span><br>';
     if(d.date) out += 'The date on it: <span class="em">' + esc(d.date) + '</span><br>';
 
