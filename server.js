@@ -46,7 +46,7 @@ import {
   listVendors, listPayables, readDocs, readOne, createDoc,
   attachFile, listAttachments
 } from './purchases.js';
-import { readPictures, parseSheet, matchToItems } from './paperread.js';
+import { readPapers, parseSheet, matchToItems } from './paperread.js';
 import {
   TYPES as ITEM_TYPES, readAccounts, itemAccountLists, readExisting,
   parseList, guessColumns, planRows, createItem, readType
@@ -9391,9 +9391,14 @@ app.get('/api/purchases/one', async (req, res) => {
 
 // Reading the supplier's own paper so the lines do not have to be typed.
 //
-// All of it happens here: the reading, the rules that turn what was read into
-// lines, and the matching to this company's own items. Nothing is sent
-// anywhere, and nothing about it costs anything to run.
+// Whatever they sent: a photograph of a message, a PDF out of their software, a
+// scan, a Word file, a sheet. Each is opened by what it is, and only a picture
+// is read letter by letter - a PDF carries its own text, and text taken out of
+// one cannot be misread.
+//
+// All of it happens here: the opening, the reading, the rules that turn what
+// was read into lines, and the matching to this company's own items. Nothing is
+// sent anywhere, and nothing about it costs anything to run.
 //
 // This only fills the form in - a person still presses the button that makes
 // the order or the bill.
@@ -9405,9 +9410,9 @@ app.post('/api/purchases/read', upload.array('files', 10), async (req, res) => {
   req.on('close', () => { if (!res.writableEnded) gone = true; });
 
   try {
-    if (!(req.files || []).length) throw new Error('No photo came through');
+    if (!(req.files || []).length) throw new Error('No file came through');
 
-    const got = await readPictures(req.files);
+    const got = await readPapers(req.files);
     if (gone) return;                         // Stop was pressed while it read
 
     const sheet = parseSheet(got.text);
@@ -9440,6 +9445,10 @@ app.post('/api/purchases/read', upload.array('files', 10), async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json(Object.assign(out, {
       read: got.read, skipped: got.skipped, sure: got.sure,
+      // what each file was opened as, and whether anything had to be read
+      // letter by letter at all - a rate taken off a PDF's own text is not open
+      // to the doubt a rate read off a photograph is
+      how: got.how, looked: got.looked,
       // how many products there were to match against, and how many of them
       // carry a code at all - without this, "nothing matched" reads the same
       // whether the codes are missing or the reading was wrong

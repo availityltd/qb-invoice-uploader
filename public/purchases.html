@@ -271,7 +271,7 @@
                 <span class="pick">Browse</span>
               </div>
               <input type="file" id="fileIn" multiple
-                accept=".pdf,.png,.jpg,.jpeg,.gif,.xlsx,.xls,.csv,.doc,.docx">
+                accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.xlsx,.xlsm,.xls,.csv,.txt,.doc,.docx">
               <div id="fileList"></div>
 
               <div class="acts" style="margin-top:14px">
@@ -279,9 +279,9 @@
                 <button class="mini hide" id="btnStopRead">Stop</button>
                 <button class="mini hide" id="btnClearRead">Clear what was read</button>
               </div>
-              <p class="hint" id="readHint" style="margin:8px 0 0">A photo of the
-                supplier's bill or the message they sent &mdash; it is read here and the
-                lines above are filled in.</p>
+              <p class="hint" id="readHint" style="margin:8px 0 0">The supplier's bill
+                as they sent it &mdash; a photo, a PDF, a scan, a Word file or a sheet.
+                It is read here and the lines above are filled in.</p>
               <div class="stat" id="readBox"></div>
               <button type="button" class="mini hide" id="btnSaw"
                 style="margin-top:6px">Show what it read</button>
@@ -928,12 +928,15 @@
 
   /* ---------- reading the paper instead of typing it ---------- */
 
-  // Only a photograph can be read. A PDF or a spreadsheet dropped here is still
-  // a perfectly good attachment, there is just nothing in it to look at.
-  var READABLE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+  // Whatever the supplier sent can be read: a photograph, a PDF, a scan, a Word
+  // file, a sheet. The one that cannot is the Word format from before 2007 -
+  // a .doc is not text in a zip but a database of records - and it still goes
+  // onto the transaction, it just cannot be read on the way.
+  var READABLE = /\.(png|jpe?g|gif|webp|bmp|pdf|docx|xlsx|xlsm|xls|csv|txt)$/i;
+  var MAX_READ = 20 * 1024 * 1024;
 
   function readable(){
-    return S.files.filter(function(f){ return READABLE.test(f.name) && f.size <= 12 * 1024 * 1024; });
+    return S.files.filter(function(f){ return READABLE.test(f.name) && f.size <= MAX_READ; });
   }
 
   function drawReadBtn(){
@@ -945,9 +948,9 @@
     $('btnStopRead').classList.toggle('hide', !busy);
 
     $('readHint').textContent = busy
-      ? 'Reading. A few seconds for each photo — Stop leaves everything above untouched.'
-      : !S.files.length ? 'Drop the photo the supplier sent above, and it can be read instead of typed.'
-      : !n ? 'None of those is a photograph, so there is nothing to read — they still go onto the transaction.'
+      ? 'Reading. A PDF or a sheet is quick; a photograph or a scan takes a few seconds a page — Stop leaves everything above untouched.'
+      : !S.files.length ? 'Drop what the supplier sent above — a photo, a PDF, a scan, a Word file or a sheet — and it can be read instead of typed.'
+      : !n ? 'None of those can be read — an old .doc or a file over 20 MB — but they still go onto the transaction.'
       : 'It is read here on this server and the lines above are filled in. Typed text only: handwriting cannot be read.';
   }
 
@@ -1004,24 +1007,41 @@
     // `.stat b` is a block in this app, so a bold word in the middle of a
     // sentence breaks the sentence in two. One bold headline, then plain lines.
     var head = all + (all === 1 ? ' line' : ' lines') + ' read off ' +
-      d.read.length + (d.read.length === 1 ? ' picture' : ' pictures') +
+      d.read.length + (d.read.length === 1 ? ' file' : ' files') +
       ' — ' + got + ' matched to a product' +
       (lost ? ', ' + lost + ' still to pick by hand' : '');
 
     var out = '<b>' + esc(head) + '</b>';
 
+    // What each file was opened as. A rate taken off a PDF's own text is the
+    // rate; a rate read off a photograph is a reading of one, and knowing which
+    // is which is the difference between checking a line and trusting it.
+    if((d.how || []).length) out += esc(d.how.join('; ')) + '<br>';
+
     if(d.doc) out += 'Their number on it: <span class="em">' + esc(d.doc) + '</span><br>';
+    if(d.date) out += 'The date on it: <span class="em">' + esc(d.date) + '</span><br>';
 
     var sum = (d.lines || []).reduce(function(t, l){
       return t + (l.qty || 0) * (l.rate || 0);
     }, 0);
     out += 'These lines come to <span class="em">' + money(sum) + '</span><br>';
 
+    // The total the paper wrote at its own foot. Where it disagrees with what
+    // the lines come to, a line was missed or misread - and that is worth
+    // saying before anything is made, not after it.
+    var off = !!d.total && Math.abs(d.total - sum) > Math.max(1, d.total * 0.005);
+    if(d.total){
+      out += off
+        ? 'The paper says it comes to <span class="off">' + money(d.total) +
+          '</span> &mdash; a line was missed or misread<br>'
+        : 'The paper says the same: <span class="em">' + money(d.total) + '</span><br>';
+    }
+
     // How sure the reader was of its own characters. A clear screenshot reads
     // in the nineties; a photograph taken at an angle, or of a screen, drops -
     // and that is exactly when a rate comes out with a digit missing.
-    if(d.sure < 70){
-      out += 'The photo was not very clear (<span class="off">' + d.sure +
+    if(d.looked && d.sure < 70){
+      out += 'What was photographed was not very clear (<span class="off">' + d.sure +
              '% sure of the letters</span>) \u2014 check the rates and quantities one by one<br>';
     }
     // When lines did not find a product, say what there was to find them in.
@@ -1039,9 +1059,10 @@
     if((d.skipped || []).length){
       out += 'Not read: ' + d.skipped.map(esc).join('; ') + '<br>';
     }
-    out += 'Check every line against the photo before making anything.';
+    out += 'Check every line against the paper before making anything.';
 
-    say('readBox', lost || d.sure < 70 || (d.unsure || []).length ? 'warn' : 'ok', out);
+    say('readBox', lost || off || (d.looked && d.sure < 70) || (d.unsure || []).length
+                   ? 'warn' : 'ok', out);
 
     // the reading itself, kept to hand but out of the way
     $('sawBox').textContent = d.saw || '';
@@ -1059,7 +1080,7 @@
     drawReadBtn();
     $('btnClearRead').classList.add('hide');
     say('readBox', 'busy', 'Reading ' + files.length +
-        (files.length === 1 ? ' picture' : ' pictures') + '…');
+        (files.length === 1 ? ' file' : ' files') + '…');
 
     var fd = new FormData();
     files.forEach(function(f){ fd.append('files', f, f.name); });

@@ -1,19 +1,25 @@
 // Reading the supplier's own paper, so an order or a bill does not have to be
 // typed out line by line.
 //
-// What arrives is a photograph of a message the supplier sent - a product, a
-// rate, a code, and then the pieces broken down by shade. It is typed text, and
-// typed text can be read by a reader that lives inside this app and costs
-// nothing to run, every day, for ever. Nothing is sent anywhere. There is no
-// account, no key, and no meter.
+// What arrives is whatever the supplier happened to send. A photograph of a
+// message - a product, a rate, a code, and the pieces broken down by shade. A
+// PDF out of their own software. A scan of a printed bill. A Word file, or a
+// sheet. Every one of them is read here, and nothing is sent anywhere: there is
+// no account, no key, and no meter.
 //
-// Three steps, and they are deliberately separate:
+// Four steps, and they are deliberately separate:
 //
-//   1. OCR. Dots to letters. Tesseract, running here on this server.
-//   2. PARSING. Letters to lines, by rule. "Rate Rs. 195" is 195 because the
+//   1. OPENING. The file turned into text, by what kind of file it is. That is
+//      paperfile.js, and for everything except a photograph it is exact - a PDF
+//      carries its own text, and text taken out of it cannot be misread.
+//   2. OCR. Dots to letters, for the pictures: a photograph, or the pictures
+//      inside a PDF that is really a scan. Tesseract, running on this server.
+//   3. PARSING. Letters to lines, by rule. "Rate Rs. 195" is 195 because the
 //      rule says so, not because something judged it - so the same picture
-//      gives the same answer today and next year.
-//   3. MATCHING. Which QuickBooks item that is, decided against this company's
+//      gives the same answer today and next year. Two shapes of paper are
+//      known: a message typed out shade by shade, and a printed table with a
+//      heading row over its columns.
+//   4. MATCHING. Which QuickBooks item that is, decided against this company's
 //      own item list.
 //
 // The reader will get some characters wrong - it read "Beige 3= 72" as
@@ -24,6 +30,7 @@
 import { createWorker } from 'tesseract.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { kindOf, openPaper, MAX_BYTES } from './paperfile.js';
 
 // The language data sits in this repository, not on somebody's CDN: a server
 // that has just restarted should be able to read a picture without first being
@@ -32,9 +39,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TESSDATA = path.join(HERE, 'tessdata');
 
 const MAX_FILES = 10;
-const MAX_BYTES = 12 * 1024 * 1024;
-
-const PICTURES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
 
 /* ==================== dots to letters ==================== */
 
@@ -55,45 +59,82 @@ function worker() {
   return workerOnce;
 }
 
-export async function readPictures(files) {
+// Every file that came through, in the order they were dropped, each one opened
+// according to what it is and only read letter by letter where there was no
+// text to take. A file that cannot be opened is said so by name and the rest
+// still go through: one locked PDF should not take a whole bill down with it.
+export async function readPapers(files) {
   const taken = [];
   const left = [];
 
   for (const f of (files || [])) {
-    const mime = String(f.mimetype || '').toLowerCase();
-    if (mime === 'application/pdf') {
-      left.push(f.originalname + ' — a PDF cannot be read, only a photo');
+    const kind = kindOf(f);
+    if (!kind) { left.push(f.originalname + ' — this kind of file cannot be read'); continue; }
+    if (f.size > MAX_BYTES) {
+      left.push(f.originalname + ' — over ' + Math.round(MAX_BYTES / 1024 / 1024) + ' MB');
       continue;
     }
-    if (!PICTURES.includes(mime)) {
-      left.push(f.originalname + ' — only photos can be read');
+    if (taken.length >= MAX_FILES) {
+      left.push(f.originalname + ' — more than ' + MAX_FILES + ' at once');
       continue;
     }
-    if (f.size > MAX_BYTES) { left.push(f.originalname + ' — over 12 MB'); continue; }
-    if (taken.length >= MAX_FILES) { left.push(f.originalname + ' — more than ' + MAX_FILES + ' at once'); continue; }
-    taken.push(f);
+    taken.push({ file: f, kind: kind });
   }
 
-  if (!taken.length) throw new Error(left.length ? left[0] : 'No photo came through');
+  if (!taken.length) throw new Error(left.length ? left[0] : 'No file came through');
 
-  const w = await worker();
   const parts = [];
+  const read = [];
+  const how = [];
   let worst = 100;
+  let looked = false;          // whether anything had to be read letter by letter
 
-  for (const f of taken) {
-    const { data } = await w.recognize(f.buffer);
-    parts.push(data.text || '');
-    worst = Math.min(worst, Number(data.confidence || 0));
+  for (const t of taken) {
+    let opened;
+    try {
+      opened = await openPaper(t.file, t.kind);
+    } catch (e) {
+      left.push(t.file.originalname + ' — ' + e.message);
+      continue;
+    }
+
+    const bits = [];
+    for (const piece of opened.parts) {
+      if (piece.text != null) { bits.push(piece.text); continue; }
+      looked = true;
+      const w = await worker();
+      const { data } = await w.recognize(piece.picture);
+      const said = data.text || '';
+      bits.push(said);
+
+      // Only a picture that gave up some words has an opinion worth having
+      // about how clear it was. A logo on a cover page reads as two letters the
+      // reader is rightly unsure of, and that is no reason to doubt the bill.
+      if (said.replace(/[^A-Za-z0-9]/g, '').length >= 10) {
+        worst = Math.min(worst, Number(data.confidence || 0));
+      }
+    }
+
+    parts.push(bits.join('\n'));
+    read.push(t.file.originalname);
+    how.push(t.file.originalname + ' — ' + opened.how);
   }
+
+  if (!read.length) throw new Error(left[0] || 'Nothing could be read');
 
   return {
     text: parts.join('\n\n'),
-    read: taken.map(f => f.originalname),
+    read: read,
     skipped: left,
+    // what each file was read as, so "nothing matched" can be told apart from
+    // "that PDF was a scan and the scan was crooked"
+    how: how,
     // how sure the reader was of its own characters - low means the photo was
     // blurred or at an angle, and that is worth saying before the numbers are
-    // trusted
-    sure: Math.round(worst)
+    // trusted. Text taken out of a PDF or a sheet was not read, it was taken,
+    // so there is nothing to be unsure about.
+    sure: looked ? Math.round(worst) : 100,
+    looked: looked
   };
 }
 
@@ -136,20 +177,193 @@ function tidy(s) {
   return String(s).replace(/\s+/g, ' ').replace(/^[^\w\d]+|[^\w\d)\]]+$/g, '').trim();
 }
 
+/* ---------- a printed table ---------- */
+
+// A bill out of a supplier's own software is a table, and its heading row is
+// what says which column is which. Nothing is assumed about the order of them:
+// a bill with AMOUNT before QTY is as common as the other way round, and a
+// quantity read as a rate is a cost booked at a hundred times what it was.
+//
+// Columns reach here as tabs, put in by whatever opened the file. Where there
+// are none - a reader looking at a photograph of a table has only the white
+// space to go on, and puts no tabs anywhere - two spaces or more stand in for
+// one. Runs of tabs are not run together: an empty box between two columns is
+// the thing that says which column the next number is in, and a row that loses
+// its empty boxes is a row whose quantity is read as a rate.
+const cut = s => s.indexOf('\t') >= 0 ? s.split('\t') : s.split(/ {2,}/);
+
+const HEADINGS = [
+  ['sku', /^(?:sku|code|item\s*(?:code|no\.?|#)|art(?:icle)?(?:\s*(?:no\.?|code|#))?|design(?:\s*no\.?)?|cat(?:alogue)?\s*(?:no\.?|#))\b/i],
+  ['name', /^(?:description|particulars?|items?|products?|goods|details?|narration|material)\b/i],
+  ['variant', /^(?:shade|colou?rs?|variants?|sizes?)\b/i],
+  ['qty', /^(?:qty|quantity|pcs|pieces|nos\.?|units?|packs?|bales?|meters?|mtrs?)\b/i],
+  ['rate', /^(?:rate|price|unit\s*(?:rate|price|cost)|cost|per)\b/i],
+  ['amount', /^(?:amount|amt|total|value|net)\b/i]
+];
+
+// "Rs 1,234", "1234.50", "1,368/-", "288 pcs" - a number as a bill writes one.
+const MONEY = /^(?:rs\.?|pkr|₨)?\s*-?\s*([\d][\d,]*(?:\.\d+)?)\s*(?:\/-|rs\.?|pcs?\.?|pieces?|nos?\.?|mtrs?\.?)?$/i;
+
+// the foot of the table: their own totals, taxes and carriage, which are not
+// lines on an order and must never become products
+const FOOT = /^(?:sub\s*total|total|grand\s*total|net\s*(?:total|amount|payable)|tax|gst|sales\s*tax|s\.?tax|discount|freight|carriage|shipping|packing|labour|advance|balance|paid|less|add|round(?:ing)?|in\s*words|amount\s*in\s*words)\b/i;
+
+// a code as a cell of its own, and a code sitting inside the description
+const CODE_CELL = /^([0-9]{3,6})\s*[-–—]\s*([0-9]{2,5})$/;
+const CODE_IN = /\b([0-9]{3,6})\s*[-–—]\s*([0-9]{2,5})\b/;
+
+const looksNum = c => MONEY.test(tidy(c));
+const cellNum = c => { const m = tidy(c).match(MONEY); return m ? num(m[1]) : 0; };
+
+// Is this the heading row? It has to name something to call the line by and
+// something to count or price it with. One word on its own line is a sentence.
+function heading(cells) {
+  const at = {};
+  let hits = 0;
+
+  cells.forEach((c, i) => {
+    const t = tidy(c);
+    if (!t || t.length > 24) return;
+    for (const [field, re] of HEADINGS) {
+      if (!re.test(t)) continue;
+      if (at[field] == null) { at[field] = i; hits++; }
+      break;
+    }
+  });
+
+  if (hits < 2) return null;
+  if (at.qty == null && at.rate == null && at.amount == null) return null;
+  if (at.name == null && at.sku == null) return null;
+
+  at.width = cells.length;
+  return at;
+}
+
+// One row of the table, read against that heading row.
+//
+// A row with exactly as many cells as the heading is read column by column. A
+// short row - a description that spilled over, a cell left empty, a merged box
+// - is read from the right instead, because a table loses cells on its left far
+// more often than it loses the amount off its end.
+function tableLine(cells, cols) {
+  const at = i => (i == null || i >= cells.length) ? '' : tidy(cells[i]);
+  let qty = 0, rate = 0, amount = 0, name = '', variant = '', sku = '';
+
+  if (cells.length === cols.width) {
+    qty = cellNum(at(cols.qty));
+    rate = cellNum(at(cols.rate));
+    amount = cellNum(at(cols.amount));
+    name = at(cols.name);
+    variant = at(cols.variant);
+    sku = at(cols.sku);
+  } else {
+    const body = cells.slice();
+
+    // the serial number down the left of a printed bill counts the lines, it
+    // does not count the pieces on one
+    if (body.length > 2 && /^[0-9]{1,4}[.)]?$/.test(tidy(body[0])) &&
+        cols.qty !== 0 && cols.rate !== 0 && cols.amount !== 0) body.shift();
+
+    const words = [];
+    const numbers = [];
+    body.forEach(c => {
+      const t = tidy(c);
+      if (!t) return;
+      (looksNum(t) ? numbers : words).push(t);
+    });
+
+    const order = [['qty', cols.qty], ['rate', cols.rate], ['amount', cols.amount]]
+      .filter(o => o[1] != null)
+      .sort((a, b) => a[1] - b[1])
+      .map(o => o[0]);
+
+    const keep = Math.min(order.length, numbers.length);
+    const fields = order.slice(order.length - keep);
+    const values = numbers.slice(numbers.length - keep);
+    const got = {};
+    fields.forEach((f, i) => { got[f] = cellNum(values[i]); });
+
+    qty = got.qty || 0;
+    rate = got.rate || 0;
+    amount = got.amount || 0;
+
+    // A line with no quantity is not a line. An empty box in the middle of a
+    // printed row leaves no mark on the page - a PDF shows one wide gap where
+    // there were two - so a row that came up short and lost its quantity is
+    // read by shape instead: the first number on it is the quantity, which is
+    // the one thing a line cannot do without, and the last is what the line
+    // came to.
+    if (!qty && numbers.length) {
+      qty = cellNum(numbers[0]);
+      amount = numbers.length > 1 ? cellNum(numbers[numbers.length - 1]) : 0;
+      rate = numbers.length > 2 ? cellNum(numbers[numbers.length - 2]) : 0;
+    }
+
+    sku = words.filter(w => CODE_CELL.test(w))[0] || '';
+    name = words.filter(w => !CODE_CELL.test(w)).join(' ');
+  }
+
+  const code = (sku.match(CODE_CELL) || sku.match(CODE_IN) ||
+                (name + ' ' + at(cols.sku)).match(CODE_IN));
+  sku = code ? code[1] + '-' + code[2] : tidy(sku);
+
+  // where the paper priced the line but never said the rate, the rate is what
+  // its own two numbers come to - and it is shown, so it can be checked
+  if (!rate && amount && qty) rate = Math.round(amount / qty * 100) / 100;
+
+  if (!(qty || rate)) return null;
+  if (!name && !sku) return null;
+
+  return { sku: sku, name: name, variant: variant, qty: qty, rate: rate, amount: amount };
+}
+
+/* ---------- the date on it ---------- */
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+const DATED = /\b(?:date|dated|bill\s*date|invoice\s*date|order\s*date)\b\s*[:.]?\s*([0-9]{1,2})\s*[-\/.\s]\s*([0-9]{1,2}|[a-z]{3,9})\s*[-\/.\s]\s*([0-9]{2,4})\b/i;
+
+// Day first, which is how a date is written here. A date is only taken when a
+// paper actually called it one - a number that merely looks like a date, picked
+// off a line that never said so, would be a bill dated by accident.
+function whichDay(m) {
+  const day = Number(m[1]);
+  const mon = /^[0-9]+$/.test(m[2]) ? Number(m[2]) : MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()) + 1;
+  let year = Number(m[3]);
+  if (year < 100) year += 2000;
+
+  if (!(day >= 1 && day <= 31) || !(mon >= 1 && mon <= 12)) return '';
+  if (!(year >= 2000 && year <= 2099)) return '';
+
+  const two = n => (n < 10 ? '0' : '') + n;
+  return year + '-' + two(mon) + '-' + two(day);
+}
+
 // A product stays open until the next rate line starts another one. That is the
 // only thing that reliably marks a new product: blank lines fall wherever the
 // photograph happened to break, and the reader puts them in the middle of a
 // product as readily as between two.
 export function parseSheet(text) {
-  const lines = String(text || '').split(/\r?\n/).map(l => l.trim());
+  // Trailing white space goes, and so do spaces down the left of a line - but
+  // not a tab down the left of one, which is an empty first column and not
+  // nothing at all.
+  const lines = String(text || '').split(/\r?\n/).map(l => l.replace(/^ +|\s+$/g, ''));
+
+  // The date the paper gave itself is looked for over the whole of it, once,
+  // rather than line by line: it sits beside the bill number as often as it
+  // sits on a line of its own, and either way it is the same date.
+  const when = String(text || '').match(DATED);
 
   let doc = '';
   let billWanted = false;
+  const date = when ? whichDay(when) : '';
+  let total = 0;                   // the total it wrote at its own foot
 
   const out = [];
   let open = null;                 // the product being read
   let pendingShade = '';           // a shade named with no quantity yet
   let pendingQty = 0;              // "All 1728 pieces", waiting to be told which shades
+  let cols = null;                 // the heading row of a printed table, once seen
   const unsure = [];
 
   const shut = () => {
@@ -196,34 +410,56 @@ export function parseSheet(text) {
   for (const raw of lines) {
     if (!raw || NOISE.test(raw)) continue;
 
+    // A line of a printed table, kept as its columns; and the same line with
+    // the columns flattened back to spaces, which is what the rules for a
+    // typed-out message expect to be given.
+    const cells = cut(raw);
+    const plain = raw.replace(/\t+/g, ' ').replace(/\s+/g, ' ').trim();
+
     // --- their number for the whole paper ---
-    const billHere = raw.match(/\bbill\s*(?:no|number|#)\b\s*[:.#]?\s*([0-9]{3,})?/i);
+    const billHere = plain.match(/\b(?:bill|invoice|inv|challan|chalan|order)\s*(?:no|number|#)\b\s*[:.#]?\s*([A-Za-z0-9][A-Za-z0-9\/-]{2,20})?/i);
     if (billHere) {
       if (billHere[1]) doc = billHere[1];
       else billWanted = true;          // it was written on the line below
       continue;
     }
     if (billWanted) {
-      const n = raw.match(/^[^\d]{0,3}([0-9]{3,})\b/);
+      const n = plain.match(/^[^\d]{0,3}([0-9]{3,})\b/);
       billWanted = false;
       if (n) { doc = n[1]; continue; }
     }
 
+    // --- a line that is nothing but the date, which has been read already ---
+    if (plain.length <= 40 && DATED.test(plain)) continue;
+
+    // --- the heading row of a printed table ---
+    // This comes before everything else: a heading row is not a product, and a
+    // table whose heading was missed is a table read by the wrong rules.
+    if (cells.length >= 3) {
+      const head = heading(cells);
+      if (head) { shut(); cols = head; continue; }
+    }
+
     // --- a rate starts a new product ---
-    const rate = raw.match(RATE);
+    const rate = plain.match(RATE);
     if (rate) {
       shut();
-      const name = tidy(raw.slice(0, rate.index));
+      // A rate written into the line is how a message names a product, and a
+      // message is not a table. Two papers read one after the other - a
+      // printed bill and then a photograph of a message - must not have the
+      // first one's columns read into the second.
+      cols = null;
+      const name = tidy(plain.slice(0, rate.index));
       open = { name: name, rate: num(rate[1]), sku: '', any: false };
 
       // the code is sometimes on the same line as the rate
-      const sameLine = raw.match(SKU);
+      const sameLine = plain.match(SKU);
       if (sameLine) open.sku = sameLine[1] + '-' + sameLine[2];
       continue;
     }
 
     // --- the code ---
-    const sku = raw.match(SKU);
+    const sku = plain.match(SKU);
     if (sku) {
       if (open) open.sku = sku[1] + '-' + sku[2];
       else unsure.push('A code was read with no product above it: ' + sku[1] + '-' + sku[2]);
@@ -231,11 +467,11 @@ export function parseSheet(text) {
     }
 
     // --- the whole quantity, before the shades are named ---
-    const whole = raw.match(WHOLE);
+    const whole = plain.match(WHOLE);
     if (whole) { pendingQty = num(whole[1]); continue; }
 
     // --- a shade with its own quantity ---
-    const body = raw.replace(VARWORD, '');
+    const body = plain.replace(VARWORD, '');
     const shade = body.match(SHADE);
     if (shade) { add(shade[1], num(shade[2])); pendingShade = ''; continue; }
 
@@ -248,7 +484,7 @@ export function parseSheet(text) {
     }
 
     // --- the word "variants", with or without a shade after it ---
-    if (VARWORD.test(raw)) {
+    if (VARWORD.test(plain)) {
       const after = tidy(body);
       if (after) {
         // "variants= 1-12" after "All 1728 pieces" is that whole quantity
@@ -258,21 +494,54 @@ export function parseSheet(text) {
       continue;
     }
 
+    // --- a row of a printed table ---
+    // Only a line that actually has columns in it. A message typed shade by
+    // shade has none, and it has already been given to the rules above.
+    if (cols && cells.length >= 2) {
+      // What the row calls itself: the first thing written on it that is not a
+      // number. A total is written against the money it belongs to as often as
+      // it is written down the left of the page, and either way that word is
+      // the first word on the row.
+      const label = cells.map(tidy).filter(c => c && !looksNum(c))[0] || '';
+
+      if (FOOT.test(label)) {
+        // their own total, kept to check the lines against, not made a line
+        const numbers = cells.map(tidy).filter(looksNum).map(cellNum);
+        if (/^(?:grand\s*total|total|net\s*(?:total|amount|payable))\b/i.test(label) && numbers.length) {
+          total = Math.max(total, numbers[numbers.length - 1]);
+        }
+        continue;
+      }
+
+      const row = tableLine(cells, cols);
+      if (row) { out.push(row); continue; }
+
+      // a row of a table that is not a line of it - a column of headings
+      // continued, a note written across the box - is left alone rather than
+      // reported, because a printed bill is full of them
+      continue;
+    }
+
     // --- anything else ---
     // Before a rate has been seen this is the product's own name running onto a
     // second line. After one, it is something the rules do not know, and saying
     // so is better than dropping it.
     if (!open) continue;
-    if (tidy(raw).length > 2) unsure.push('Not understood: ' + tidy(raw));
+    if (tidy(plain).length > 2) unsure.push('Not understood: ' + tidy(plain));
   }
 
   shut();
 
   return {
     doc: doc,
+    date: date,
+    // what the paper said it came to. The lines are what they are either way -
+    // this is only ever shown next to them, so a bill whose lines do not add up
+    // to its own total is seen before it is made.
+    total: total,
     lines: out.filter(l => l.qty || l.rate).map(l => ({
       sku: l.sku, name: l.name, variant: l.variant,
-      qty: l.qty, rate: l.rate, amount: 0
+      qty: l.qty, rate: l.rate, amount: l.amount || 0
     })),
     unsure: unsure
   };
